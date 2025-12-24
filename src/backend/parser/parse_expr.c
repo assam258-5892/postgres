@@ -1458,6 +1458,12 @@ transformFuncCall(ParseState *pstate, FuncCall *fn)
 	Node	   *last_srf = pstate->p_last_srf;
 	List	   *targs;
 	ListCell   *args;
+	Node	   *result;
+
+	/* Check for graph functions like LABELS() in GRAPH_TABLE context */
+	result = transformGraphTableFuncCall(pstate, fn);
+	if (result != NULL)
+		return result;
 
 	/* Transform the list of arguments ... */
 	targs = NIL;

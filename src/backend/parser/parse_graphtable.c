@@ -137,6 +137,70 @@ transformGraphTablePropertyRef(ParseState *pstate, ColumnRef *cref)
 }
 
 /*
+ * Transform a graph function call like LABELS(v) inside GRAPH_TABLE.
+ * Returns NULL if this is not a recognized graph function.
+ */
+Node *
+transformGraphTableFuncCall(ParseState *pstate, FuncCall *fn)
+{
+	GraphTableParseState *gpstate = pstate->p_graph_table_pstate;
+	char	   *funcname;
+
+	if (!gpstate)
+		return NULL;
+
+	if (list_length(fn->funcname) != 1)
+		return NULL;
+
+	funcname = strVal(linitial(fn->funcname));
+
+	if (pg_strcasecmp(funcname, "labels") == 0)
+	{
+		Node	   *arg;
+		ColumnRef  *cref;
+		char	   *elvarname;
+		GraphLabelsRef *glr;
+
+		if (list_length(fn->args) != 1)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("LABELS() requires exactly one argument"),
+					parser_errposition(pstate, fn->location));
+
+		arg = linitial(fn->args);
+
+		if (!IsA(arg, ColumnRef))
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("LABELS() argument must be an element variable"),
+					parser_errposition(pstate, fn->location));
+
+		cref = (ColumnRef *) arg;
+		if (list_length(cref->fields) != 1)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("LABELS() argument must be an element variable"),
+					parser_errposition(pstate, cref->location));
+
+		elvarname = strVal(linitial(cref->fields));
+
+		if (!list_member(gpstate->variables, linitial(cref->fields)))
+			ereport(ERROR,
+					errcode(ERRCODE_UNDEFINED_COLUMN),
+					errmsg("element variable \"%s\" does not exist", elvarname),
+					parser_errposition(pstate, cref->location));
+
+		glr = makeNode(GraphLabelsRef);
+		glr->elvarname = pstrdup(elvarname);
+		glr->location = fn->location;
+
+		return (Node *) glr;
+	}
+
+	return NULL;
+}
+
+/*
  * Transform a label expression.
  *
  * A label expression is parsed as either a ColumnRef with a single field or a

@@ -17,6 +17,7 @@
 #include "access/sysattr.h"
 #include "access/table.h"
 #include "access/htup_details.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_propgraph_element.h"
 #include "catalog/pg_propgraph_element_label.h"
@@ -40,8 +41,10 @@
 #include "rewrite/rewriteManip.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/rel.h"
 #include "utils/ruleutils.h"
 #include "utils/syscache.h"
 
@@ -88,12 +91,16 @@ struct path_element
 	/* Source and destination conditions for an edge element. */
 	List	   *src_quals;
 	List	   *dest_quals;
+	/* Attribute number of __labels__ column in subquery RTE */
+	AttrNumber	labels_attnum;
 };
 
 static Node *replace_property_refs(Oid propgraphid, Node *node, const List *mappings);
 static List *build_edge_vertex_link_quals(HeapTuple edgetup, int edgerti, int refrti, Oid refid, AttrNumber catalog_key_attnum, AttrNumber catalog_ref_attnum, AttrNumber catalog_eqop_attnum);
 static List *generate_queries_for_path_pattern(RangeTblEntry *rte, List *element_patterns);
 static Query *generate_query_for_graph_path(RangeTblEntry *rte, List *path);
+static Const *build_labels_const(Oid elemoid);
+static RangeTblEntry *create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *labels_attnum);
 static Node *generate_setop_from_pathqueries(List *pathqueries, List **rtable, List **targetlist);
 static List *generate_queries_for_path_pattern_recurse(RangeTblEntry *rte, List *pathqueries, List *cur_path, List *path_pattern_lists, int elempos);
 static Query *generate_query_for_empty_path_pattern(RangeTblEntry *rte);
@@ -428,7 +435,6 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 	Query	   *path_query = makeNode(Query);
 	List	   *fromlist = NIL;
 	List	   *qual_exprs = NIL;
-	List	   *vars;
 
 	path_query->commandType = CMD_SELECT;
 
@@ -436,8 +442,8 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 	{
 		struct path_factor *pf = pe->path_factor;
 		RangeTblRef *rtr;
-		Relation	rel;
-		ParseNamespaceItem *pni;
+		RangeTblEntry *subrte;
+		AttrNumber	labels_attnum;
 
 		Assert(pf->kind == VERTEX_PATTERN || IS_EDGE_PATTERN(pf->kind));
 
@@ -505,22 +511,20 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 			Assert(!pe->src_quals && !pe->dest_quals);
 
 		/*
-		 * Create RangeTblEntry for this element table.
+		 * Create RangeTblEntry for this element table wrapped in a subquery.
+		 * The subquery adds a __labels__ column for LABELS() support.
 		 *
 		 * SQL/PGQ standard (Ref. Section 11.19, Access rule 2 and General
 		 * rule 4) does not specify whose access privileges to use when
 		 * accessing the element tables: property graph owner's or current
 		 * user's. It is safer to use current user's privileges so as not to
-		 * make property graphs as a hole for unpriviledged data access. This
+		 * make property graphs as a hole for unprivileged data access. This
 		 * is inline with the views being security_invoker by default.
 		 */
-		rel = table_open(pe->reloid, AccessShareLock);
-		pni = addRangeTableEntryForRelation(make_parsestate(NULL), rel, AccessShareLock,
-											NULL, true, false);
-		table_close(rel, NoLock);
-		path_query->rtable = lappend(path_query->rtable, pni->p_rte);
-		path_query->rteperminfos = lappend(path_query->rteperminfos, pni->p_perminfo);
-		pni->p_rte->perminfoindex = list_length(path_query->rteperminfos);
+		subrte = create_element_subquery_rte(pe, pe->reloid, &labels_attnum);
+		pe->labels_attnum = labels_attnum;
+		path_query->rtable = lappend(path_query->rtable, subrte);
+
 		rtr = makeNode(RangeTblRef);
 		rtr->rtindex = list_length(path_query->rtable);
 		fromlist = lappend(fromlist, rtr);
@@ -560,22 +564,6 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 									  replace_property_refs(rte->relid,
 															(Node *) rte->graph_table_columns,
 															graph_path));
-
-	/*
-	 * Mark the columns being accessed in the path query as requiring SELECT
-	 * privilege. Any lateral columns should have been handled when the
-	 * corresponding ColumnRefs were transformed. Ignore those here.
-	 */
-	vars = pull_vars_of_level((Node *) list_make2(qual_exprs, path_query->targetList), 0);
-	foreach_node(Var, var, vars)
-	{
-		RTEPermissionInfo *perminfo = getRTEPermissionInfo(path_query->rteperminfos,
-														   rt_fetch(var->varno, path_query->rtable));
-
-		/* Must offset the attnum to fit in a bitmapset */
-		perminfo->selectedCols = bms_add_member(perminfo->selectedCols,
-												var->varattno - FirstLowInvalidHeapAttributeNumber);
-	}
 
 	return path_query;
 }
@@ -1143,6 +1131,35 @@ replace_property_refs_mutator(Node *node, struct replace_property_refs_context *
 
 		return n;
 	}
+	else if (IsA(node, GraphLabelsRef))
+	{
+		GraphLabelsRef *glr = (GraphLabelsRef *) node;
+		struct path_element *found_mapping = NULL;
+		Var		   *var;
+
+		/* Find the element mapping for this variable */
+		foreach_ptr(struct path_element, m, context->mappings)
+		{
+			if (m->path_factor->variable &&
+				strcmp(glr->elvarname, m->path_factor->variable) == 0)
+			{
+				found_mapping = m;
+				break;
+			}
+		}
+		if (!found_mapping)
+			elog(ERROR, "undefined element variable \"%s\"", glr->elvarname);
+
+		/*
+		 * Return a Var referencing the __labels__ column in the subquery RTE.
+		 * This allows the optimizer to push down predicates involving LABELS().
+		 */
+		var = makeVar(found_mapping->path_factor->factorpos + 1,
+					  found_mapping->labels_attnum,
+					  TEXTARRAYOID, -1, InvalidOid, 0);
+
+		return (Node *) var;
+	}
 
 	return expression_tree_mutator(node, replace_property_refs_mutator, context);
 }
@@ -1293,6 +1310,148 @@ is_property_associated_with_label(Oid labeloid, Oid propoid)
 }
 
 /*
+ * Helper to collect Var attnum from expression tree.
+ * Used to determine which columns an element actually accesses.
+ */
+static bool
+collect_var_attnums_walker(Node *node, Bitmapset **attnums)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Var))
+	{
+		Var *var = (Var *) node;
+		/* Only collect columns from varno 1 (the element table) */
+		if (var->varno == 1 && var->varattno > 0)
+			*attnums = bms_add_member(*attnums,
+									  var->varattno - FirstLowInvalidHeapAttributeNumber);
+		return false;
+	}
+	return expression_tree_walker(node, collect_var_attnums_walker, attnums);
+}
+
+/*
+ * Helper to add column attnums from an int16 array to the bitmapset.
+ */
+static void
+add_columns_from_array(Bitmapset **attnums, Datum arrayDatum)
+{
+	Datum	   *elems;
+	int			nelems;
+
+	deconstruct_array_builtin(DatumGetArrayTypeP(arrayDatum), INT2OID,
+							  &elems, NULL, &nelems);
+	for (int i = 0; i < nelems; i++)
+	{
+		AttrNumber	attnum = DatumGetInt16(elems[i]);
+
+		*attnums = bms_add_member(*attnums,
+								  attnum - FirstLowInvalidHeapAttributeNumber);
+	}
+}
+
+/*
+ * Collect all column attribute numbers used by an element for the given labels.
+ * This includes columns from:
+ * - Property definitions (plpexpr expressions) for the specified labels
+ * - Element key columns
+ * - Edge source/destination key columns (for edges)
+ *
+ * The labeloids parameter filters which label's properties are collected.
+ * Only properties from labels in this list are included.
+ *
+ * Returns a bitmapset suitable for use as RTEPermissionInfo.selectedCols.
+ */
+static Bitmapset *
+get_element_used_columns(Oid elemoid, List *labeloids)
+{
+	Bitmapset  *attnums = NULL;
+	Relation	rel;
+	SysScanDesc scan;
+	ScanKeyData key[1];
+	HeapTuple	labeltup;
+	HeapTuple	elemtup;
+	Form_pg_propgraph_element pgeform;
+	Datum		datum;
+	bool		isnull;
+
+	/* First, collect key columns from the element definition */
+	elemtup = SearchSysCache1(PROPGRAPHELOID, ObjectIdGetDatum(elemoid));
+	if (!HeapTupleIsValid(elemtup))
+		elog(ERROR, "cache lookup failed for property graph element %u", elemoid);
+
+	pgeform = (Form_pg_propgraph_element) GETSTRUCT(elemtup);
+
+	/* Add element key columns */
+	datum = SysCacheGetAttr(PROPGRAPHELOID, elemtup,
+							Anum_pg_propgraph_element_pgekey, &isnull);
+	if (!isnull)
+		add_columns_from_array(&attnums, datum);
+
+	/* For edges, also add source and destination key columns */
+	if (pgeform->pgekind == PGEKIND_EDGE)
+	{
+		datum = SysCacheGetAttr(PROPGRAPHELOID, elemtup,
+								Anum_pg_propgraph_element_pgesrckey, &isnull);
+		if (!isnull)
+			add_columns_from_array(&attnums, datum);
+
+		datum = SysCacheGetAttr(PROPGRAPHELOID, elemtup,
+								Anum_pg_propgraph_element_pgedestkey, &isnull);
+		if (!isnull)
+			add_columns_from_array(&attnums, datum);
+	}
+
+	ReleaseSysCache(elemtup);
+
+	/* Now scan labels associated with this element for property columns */
+	rel = table_open(PropgraphElementLabelRelationId, RowShareLock);
+	ScanKeyInit(&key[0],
+				Anum_pg_propgraph_element_label_pgelelid,
+				BTEqualStrategyNumber,
+				F_OIDEQ, ObjectIdGetDatum(elemoid));
+	scan = systable_beginscan(rel, PropgraphElementLabelElementLabelIndexId,
+							  true, NULL, 1, key);
+
+	while (HeapTupleIsValid(labeltup = systable_getnext(scan)))
+	{
+		Form_pg_propgraph_element_label ele_label =
+			(Form_pg_propgraph_element_label) GETSTRUCT(labeltup);
+		CatCList   *proplist;
+
+		/*
+		 * Only include properties from labels that match the query pattern.
+		 * This ensures column-level privileges are checked only for the
+		 * columns actually used by the matched labels.
+		 */
+		if (!list_member_oid(labeloids, ele_label->pgellabelid))
+			continue;
+
+		/* Get all properties for this label */
+		proplist = SearchSysCacheList1(PROPGRAPHLABELPROP,
+									   ObjectIdGetDatum(ele_label->oid));
+
+		for (int i = 0; i < proplist->n_members; i++)
+		{
+			HeapTuple	proptup = &proplist->members[i]->tuple;
+			Node	   *expr;
+
+			expr = stringToNode(TextDatumGetCString(
+				SysCacheGetAttrNotNull(PROPGRAPHLABELPROP, proptup,
+									   Anum_pg_propgraph_label_property_plpexpr)));
+			collect_var_attnums_walker(expr, &attnums);
+		}
+
+		ReleaseSysCacheList(proplist);
+	}
+
+	systable_endscan(scan);
+	table_close(rel, RowShareLock);
+
+	return attnums;
+}
+
+/*
  * If given element has the given property associated with it, through any of
  * the associated labels, return value expression of the property. Otherwise
  * NULL.
@@ -1334,4 +1493,153 @@ get_element_property_expr(Oid elemoid, Oid propoid, int rtindex)
 	table_close(rel, RowShareLock);
 
 	return n;
+}
+
+/*
+ * Build a Const node containing an array of label names for the given element.
+ * Returns text[] constant like ARRAY['Person', 'Employee']::text[].
+ */
+static Const *
+build_labels_const(Oid elemoid)
+{
+	List	   *label_names = NIL;
+	ArrayType  *arr;
+	Datum	   *elems;
+	int			nelems;
+	int			i;
+	CatCList   *catlist;
+
+	/* Get all labels for this element using syscache */
+	catlist = SearchSysCacheList1(PROPGRAPHELEMENTLABELELEMENTLABEL,
+								  ObjectIdGetDatum(elemoid));
+
+	for (i = 0; i < catlist->n_members; i++)
+	{
+		HeapTuple	labeltup = &catlist->members[i]->tuple;
+		Form_pg_propgraph_element_label form =
+			(Form_pg_propgraph_element_label) GETSTRUCT(labeltup);
+		char	   *labelname = get_propgraph_label_name(form->pgellabelid);
+
+		label_names = lappend(label_names, makeString(labelname));
+	}
+
+	ReleaseSysCacheList(catlist);
+
+	/* Build ARRAY['label1', 'label2', ...]::text[] */
+	nelems = list_length(label_names);
+	elems = (Datum *) palloc(nelems * sizeof(Datum));
+	i = 0;
+	foreach_ptr(String, s, label_names)
+	{
+		elems[i++] = CStringGetTextDatum(strVal(s));
+	}
+
+	arr = construct_array(elems, nelems, TEXTOID, -1, false, TYPALIGN_INT);
+
+	return makeConst(TEXTARRAYOID, -1, InvalidOid,
+					 -1, PointerGetDatum(arr), false, false);
+}
+
+/*
+ * Create a subquery RTE that wraps the element table and adds a __labels__
+ * column.  The subquery structure is:
+ *
+ *     SELECT *, ARRAY['Label1', 'Label2']::text[] AS __labels__
+ *     FROM element_table
+ *
+ * This allows LABELS(v) to reference a Var instead of a constant, enabling
+ * the planner to push down predicates involving LABELS().
+ *
+ * The returned subquery RTE does NOT have relid/relkind/perminfoindex set,
+ * matching how regular SQL subqueries work.  Permission checking (including
+ * column-level privileges via selectedCols) happens inside the subquery
+ * where the actual RTE_RELATION lives.
+ */
+static RangeTblEntry *
+create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *labels_attnum)
+{
+	Query	   *subquery;
+	RangeTblEntry *subrte;
+	RangeTblEntry *relrte;
+	RangeTblRef *rtr;
+	Relation	rel;
+	TupleDesc	tupdesc;
+	int			attno;
+	ParseNamespaceItem *pni;
+	Const	   *labels_const;
+	TargetEntry *labels_te;
+
+	subquery = makeNode(Query);
+	subquery->commandType = CMD_SELECT;
+
+	/* Create RTE for the actual table */
+	rel = table_open(reloid, AccessShareLock);
+	pni = addRangeTableEntryForRelation(make_parsestate(NULL), rel,
+										AccessShareLock, NULL, true, false);
+	relrte = pni->p_rte;
+	tupdesc = RelationGetDescr(rel);
+	table_close(rel, NoLock);
+
+	subquery->rtable = list_make1(relrte);
+	subquery->rteperminfos = list_make1(pni->p_perminfo);
+	relrte->perminfoindex = 1;
+
+	/*
+	 * Set selectedCols to include only columns used by the element's
+	 * property definitions for the matched labels.  This enables proper
+	 * column-level privilege checking - the user only needs SELECT on
+	 * columns that are actually referenced by the matched label's properties,
+	 * not all columns of the table or all labels of the element.
+	 */
+	pni->p_perminfo->selectedCols = get_element_used_columns(pe->elemoid,
+															 pe->path_factor->labeloids);
+
+	/* Create FromExpr */
+	rtr = makeNode(RangeTblRef);
+	rtr->rtindex = 1;
+	subquery->jointree = makeFromExpr(list_make1(rtr), NULL);
+
+	/* Build targetlist: all columns from the table + __labels__ */
+	subquery->targetList = NIL;
+	attno = 1;
+	for (int i = 0; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+		Var		   *var;
+		TargetEntry *te;
+
+		if (attr->attisdropped)
+			continue;
+
+		var = makeVar(1, attr->attnum, attr->atttypid,
+					  attr->atttypmod, attr->attcollation, 0);
+		te = makeTargetEntry((Expr *) var, attno++,
+							 pstrdup(NameStr(attr->attname)), false);
+		subquery->targetList = lappend(subquery->targetList, te);
+	}
+
+	/* Add __labels__ column */
+	labels_const = build_labels_const(pe->elemoid);
+	labels_te = makeTargetEntry((Expr *) labels_const, attno,
+								pstrdup("__labels__"), false);
+	subquery->targetList = lappend(subquery->targetList, labels_te);
+	*labels_attnum = attno;
+
+	/* Create the wrapper subquery RTE */
+	subrte = makeNode(RangeTblEntry);
+	subrte->rtekind = RTE_SUBQUERY;
+	subrte->subquery = subquery;
+	subrte->lateral = false;
+	subrte->inh = false;
+	subrte->inFromCl = true;
+
+	/* Build column name list for the subquery RTE */
+	subrte->eref = makeAlias("__element__", NIL);
+	foreach_node(TargetEntry, te, subquery->targetList)
+	{
+		subrte->eref->colnames = lappend(subrte->eref->colnames,
+										 makeString(pstrdup(te->resname)));
+	}
+
+	return subrte;
 }

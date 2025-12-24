@@ -19,6 +19,8 @@
 
 extern Node *transformGraphTablePropertyRef(ParseState *pstate, ColumnRef *cref);
 
+extern Node *transformGraphTableFuncCall(ParseState *pstate, FuncCall *fn);
+
 extern Node *transformGraphPattern(ParseState *pstate, GraphPattern *graph_pattern);
 
 #endif							/* PARSE_GRAPHTABLE_H */
