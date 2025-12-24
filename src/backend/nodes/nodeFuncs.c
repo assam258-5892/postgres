@@ -287,6 +287,9 @@ exprType(const Node *expr)
 		case T_GraphPropertyRef:
 			type = ((const GraphPropertyRef *) expr)->typeId;
 			break;
+		case T_GraphLabelsRef:
+			type = TEXTARRAYOID;
+			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(expr));
 			type = InvalidOid;	/* keep compiler quiet */
@@ -541,6 +544,8 @@ exprTypmod(const Node *expr)
 			return exprTypmod((Node *) ((const PlaceHolderVar *) expr)->phexpr);
 		case T_GraphPropertyRef:
 			return ((const GraphPropertyRef *) expr)->typmod;
+		case T_GraphLabelsRef:
+			return -1;
 		default:
 			break;
 	}
@@ -1073,6 +1078,9 @@ exprCollation(const Node *expr)
 			break;
 		case T_GraphPropertyRef:
 			coll = ((const GraphPropertyRef *) expr)->collation;
+			break;
+		case T_GraphLabelsRef:
+			coll = DEFAULT_COLLATION_OID;
 			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(expr));
@@ -2148,6 +2156,7 @@ expression_tree_walker_impl(Node *node,
 		case T_CTESearchClause:
 		case T_GraphLabelRef:
 		case T_GraphPropertyRef:
+		case T_GraphLabelsRef:
 		case T_MergeSupportFunc:
 			/* primitive node types with no expression subnodes */
 			break;

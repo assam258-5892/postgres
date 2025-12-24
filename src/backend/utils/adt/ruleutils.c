@@ -11202,6 +11202,14 @@ get_rule_expr(Node *node, deparse_context *context,
 				break;
 			}
 
+		case T_GraphLabelsRef:
+			{
+				GraphLabelsRef *glr = (GraphLabelsRef *) node;
+
+				appendStringInfo(buf, "LABELS(%s)", quote_identifier(glr->elvarname));
+				break;
+			}
+
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
 			break;
