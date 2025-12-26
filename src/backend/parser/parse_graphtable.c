@@ -197,6 +197,49 @@ transformGraphTableFuncCall(ParseState *pstate, FuncCall *fn)
 		return (Node *) glr;
 	}
 
+	if (pg_strcasecmp(funcname, "property_names") == 0)
+	{
+		Node	   *arg;
+		ColumnRef  *cref;
+		char	   *elvarname;
+		GraphPropertyNamesRef *gpnr;
+
+		if (list_length(fn->args) != 1)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("PROPERTY_NAMES() requires exactly one argument"),
+					parser_errposition(pstate, fn->location));
+
+		arg = linitial(fn->args);
+
+		if (!IsA(arg, ColumnRef))
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("PROPERTY_NAMES() argument must be an element variable"),
+					parser_errposition(pstate, fn->location));
+
+		cref = (ColumnRef *) arg;
+		if (list_length(cref->fields) != 1)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("PROPERTY_NAMES() argument must be an element variable"),
+					parser_errposition(pstate, cref->location));
+
+		elvarname = strVal(linitial(cref->fields));
+
+		if (!list_member(gpstate->variables, linitial(cref->fields)))
+			ereport(ERROR,
+					errcode(ERRCODE_UNDEFINED_COLUMN),
+					errmsg("element variable \"%s\" does not exist", elvarname),
+					parser_errposition(pstate, cref->location));
+
+		gpnr = makeNode(GraphPropertyNamesRef);
+		gpnr->elvarname = pstrdup(elvarname);
+		gpnr->location = fn->location;
+
+		return (Node *) gpnr;
+	}
+
 	return NULL;
 }
 

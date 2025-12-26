@@ -93,6 +93,8 @@ struct path_element
 	List	   *dest_quals;
 	/* Attribute number of __labels__ column in subquery RTE */
 	AttrNumber	labels_attnum;
+	/* Attribute number of __property_names__ column in subquery RTE */
+	AttrNumber	property_names_attnum;
 };
 
 static Node *replace_property_refs(Oid propgraphid, Node *node, const List *mappings);
@@ -100,7 +102,8 @@ static List *build_edge_vertex_link_quals(HeapTuple edgetup, int edgerti, int re
 static List *generate_queries_for_path_pattern(RangeTblEntry *rte, List *element_patterns);
 static Query *generate_query_for_graph_path(RangeTblEntry *rte, List *path);
 static Const *build_labels_const(Oid elemoid);
-static RangeTblEntry *create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *labels_attnum);
+static Const *build_property_names_const(Oid elemoid);
+static RangeTblEntry *create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *labels_attnum, AttrNumber *property_names_attnum);
 static Node *generate_setop_from_pathqueries(List *pathqueries, List **rtable, List **targetlist);
 static List *generate_queries_for_path_pattern_recurse(RangeTblEntry *rte, List *pathqueries, List *cur_path, List *path_pattern_lists, int elempos);
 static Query *generate_query_for_empty_path_pattern(RangeTblEntry *rte);
@@ -444,6 +447,7 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 		RangeTblRef *rtr;
 		RangeTblEntry *subrte;
 		AttrNumber	labels_attnum;
+		AttrNumber	property_names_attnum;
 
 		Assert(pf->kind == VERTEX_PATTERN || IS_EDGE_PATTERN(pf->kind));
 
@@ -521,8 +525,9 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 		 * make property graphs as a hole for unprivileged data access. This
 		 * is inline with the views being security_invoker by default.
 		 */
-		subrte = create_element_subquery_rte(pe, pe->reloid, &labels_attnum);
+		subrte = create_element_subquery_rte(pe, pe->reloid, &labels_attnum, &property_names_attnum);
 		pe->labels_attnum = labels_attnum;
+		pe->property_names_attnum = property_names_attnum;
 		path_query->rtable = lappend(path_query->rtable, subrte);
 
 		rtr = makeNode(RangeTblRef);
@@ -1160,6 +1165,36 @@ replace_property_refs_mutator(Node *node, struct replace_property_refs_context *
 
 		return (Node *) var;
 	}
+	else if (IsA(node, GraphPropertyNamesRef))
+	{
+		GraphPropertyNamesRef *gpnr = (GraphPropertyNamesRef *) node;
+		struct path_element *found_mapping = NULL;
+		Var		   *var;
+
+		/* Find the element mapping for this variable */
+		foreach_ptr(struct path_element, m, context->mappings)
+		{
+			if (m->path_factor->variable &&
+				strcmp(gpnr->elvarname, m->path_factor->variable) == 0)
+			{
+				found_mapping = m;
+				break;
+			}
+		}
+		if (!found_mapping)
+			elog(ERROR, "undefined element variable \"%s\"", gpnr->elvarname);
+
+		/*
+		 * Return a Var referencing the __property_names__ column in the
+		 * subquery RTE. This allows the optimizer to push down predicates
+		 * involving PROPERTY_NAMES().
+		 */
+		var = makeVar(found_mapping->path_factor->factorpos + 1,
+					  found_mapping->property_names_attnum,
+					  TEXTARRAYOID, -1, InvalidOid, 0);
+
+		return (Node *) var;
+	}
 
 	return expression_tree_mutator(node, replace_property_refs_mutator, context);
 }
@@ -1541,14 +1576,109 @@ build_labels_const(Oid elemoid)
 }
 
 /*
- * Create a subquery RTE that wraps the element table and adds a __labels__
- * column.  The subquery structure is:
+ * Build a Const node containing an array of property names for the given element.
+ * Returns text[] constant like ARRAY['name', 'age', 'email']::text[].
  *
- *     SELECT *, ARRAY['Label1', 'Label2']::text[] AS __labels__
+ * Property names are collected from all labels associated with the element,
+ * with duplicates removed (since multiple labels can define the same property).
+ */
+static Const *
+build_property_names_const(Oid elemoid)
+{
+	List	   *prop_names = NIL;
+	ArrayType  *arr;
+	Datum	   *elems;
+	int			nelems;
+	int			i;
+	Relation	elem_label_rel;
+	SysScanDesc elem_label_scan;
+	ScanKeyData elem_label_key[1];
+	HeapTuple	elem_label_tup;
+
+	/* Get all element-label associations for this element */
+	elem_label_rel = table_open(PropgraphElementLabelRelationId, AccessShareLock);
+	ScanKeyInit(&elem_label_key[0],
+				Anum_pg_propgraph_element_label_pgelelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(elemoid));
+	elem_label_scan = systable_beginscan(elem_label_rel,
+										 PropgraphElementLabelElementLabelIndexId,
+										 true, NULL, 1, elem_label_key);
+
+	while (HeapTupleIsValid(elem_label_tup = systable_getnext(elem_label_scan)))
+	{
+		Form_pg_propgraph_element_label elem_label_form =
+			(Form_pg_propgraph_element_label) GETSTRUCT(elem_label_tup);
+		Oid			element_label_oid = elem_label_form->oid;
+		Relation	label_prop_rel;
+		SysScanDesc label_prop_scan;
+		ScanKeyData label_prop_key[1];
+		HeapTuple	label_prop_tup;
+
+		/* Get all properties for this element-label association */
+		label_prop_rel = table_open(PropgraphLabelPropertyRelationId, AccessShareLock);
+		ScanKeyInit(&label_prop_key[0],
+					Anum_pg_propgraph_label_property_plpellabelid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(element_label_oid));
+		label_prop_scan = systable_beginscan(label_prop_rel,
+											 PropgraphLabelPropertyLabelPropIndexId,
+											 true, NULL, 1, label_prop_key);
+
+		while (HeapTupleIsValid(label_prop_tup = systable_getnext(label_prop_scan)))
+		{
+			Form_pg_propgraph_label_property label_prop_form =
+				(Form_pg_propgraph_label_property) GETSTRUCT(label_prop_tup);
+			char	   *propname = get_propgraph_property_name(label_prop_form->plppropid);
+			bool		found = false;
+
+			/* Deduplicate: check if this property name is already in the list */
+			foreach_ptr(String, existing, prop_names)
+			{
+				if (strcmp(strVal(existing), propname) == 0)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+				prop_names = lappend(prop_names, makeString(propname));
+		}
+
+		systable_endscan(label_prop_scan);
+		table_close(label_prop_rel, AccessShareLock);
+	}
+
+	systable_endscan(elem_label_scan);
+	table_close(elem_label_rel, AccessShareLock);
+
+	/* Build ARRAY['prop1', 'prop2', ...]::text[] */
+	nelems = list_length(prop_names);
+	elems = (Datum *) palloc(nelems * sizeof(Datum));
+	i = 0;
+	foreach_ptr(String, s, prop_names)
+	{
+		elems[i++] = CStringGetTextDatum(strVal(s));
+	}
+
+	arr = construct_array(elems, nelems, TEXTOID, -1, false, TYPALIGN_INT);
+
+	return makeConst(TEXTARRAYOID, -1, InvalidOid,
+					 -1, PointerGetDatum(arr), false, false);
+}
+
+/*
+ * Create a subquery RTE that wraps the element table and adds virtual columns
+ * for graph element functions.  The subquery structure is:
+ *
+ *     SELECT *, ARRAY['Label1', 'Label2']::text[] AS __labels__,
+ *               ARRAY['prop1', 'prop2']::text[] AS __property_names__
  *     FROM element_table
  *
- * This allows LABELS(v) to reference a Var instead of a constant, enabling
- * the planner to push down predicates involving LABELS().
+ * This allows LABELS(v) and PROPERTY_NAMES(v) to reference Vars instead of
+ * constants, enabling the planner to push down predicates and prune branches
+ * in UNION queries when filtering by specific labels or properties.
  *
  * The returned subquery RTE does NOT have relid/relkind/perminfoindex set,
  * matching how regular SQL subqueries work.  Permission checking (including
@@ -1556,7 +1686,8 @@ build_labels_const(Oid elemoid)
  * where the actual RTE_RELATION lives.
  */
 static RangeTblEntry *
-create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *labels_attnum)
+create_element_subquery_rte(struct path_element *pe, Oid reloid,
+							AttrNumber *labels_attnum, AttrNumber *property_names_attnum)
 {
 	Query	   *subquery;
 	RangeTblEntry *subrte;
@@ -1567,7 +1698,9 @@ create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *lab
 	int			attno;
 	ParseNamespaceItem *pni;
 	Const	   *labels_const;
+	Const	   *property_names_const;
 	TargetEntry *labels_te;
+	TargetEntry *property_names_te;
 
 	subquery = makeNode(Query);
 	subquery->commandType = CMD_SELECT;
@@ -1599,7 +1732,7 @@ create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *lab
 	rtr->rtindex = 1;
 	subquery->jointree = makeFromExpr(list_make1(rtr), NULL);
 
-	/* Build targetlist: all columns from the table + __labels__ */
+	/* Build targetlist: all columns from the table + virtual columns */
 	subquery->targetList = NIL;
 	attno = 1;
 	for (int i = 0; i < tupdesc->natts; i++)
@@ -1623,7 +1756,14 @@ create_element_subquery_rte(struct path_element *pe, Oid reloid, AttrNumber *lab
 	labels_te = makeTargetEntry((Expr *) labels_const, attno,
 								pstrdup("__labels__"), false);
 	subquery->targetList = lappend(subquery->targetList, labels_te);
-	*labels_attnum = attno;
+	*labels_attnum = attno++;
+
+	/* Add __property_names__ column */
+	property_names_const = build_property_names_const(pe->elemoid);
+	property_names_te = makeTargetEntry((Expr *) property_names_const, attno,
+										pstrdup("__property_names__"), false);
+	subquery->targetList = lappend(subquery->targetList, property_names_te);
+	*property_names_attnum = attno;
 
 	/* Create the wrapper subquery RTE */
 	subrte = makeNode(RangeTblEntry);

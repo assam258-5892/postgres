@@ -2213,6 +2213,16 @@ typedef struct GraphLabelsRef
 	ParseLoc	location;
 } GraphLabelsRef;
 
+/*
+ * GraphPropertyNamesRef - PROPERTY_NAMES(element_variable) inside GRAPH_TABLE clause
+ */
+typedef struct GraphPropertyNamesRef
+{
+	Expr		xpr;
+	const char *elvarname;		/* element variable name */
+	ParseLoc	location;
+} GraphPropertyNamesRef;
+
 /*--------------------
  * TargetEntry -
  *	   a target entry (used in query target lists)

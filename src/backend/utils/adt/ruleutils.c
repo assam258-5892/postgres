@@ -11202,6 +11202,14 @@ get_rule_expr(Node *node, deparse_context *context,
 				break;
 			}
 
+		case T_GraphPropertyNamesRef:
+			{
+				GraphPropertyNamesRef *gpnr = (GraphPropertyNamesRef *) node;
+
+				appendStringInfo(buf, "PROPERTY_NAMES(%s)", quote_identifier(gpnr->elvarname));
+				break;
+			}
+
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
 			break;

@@ -288,6 +288,7 @@ exprType(const Node *expr)
 			type = ((const GraphPropertyRef *) expr)->typeId;
 			break;
 		case T_GraphLabelsRef:
+		case T_GraphPropertyNamesRef:
 			type = TEXTARRAYOID;
 			break;
 		default:
@@ -545,6 +546,7 @@ exprTypmod(const Node *expr)
 		case T_GraphPropertyRef:
 			return ((const GraphPropertyRef *) expr)->typmod;
 		case T_GraphLabelsRef:
+		case T_GraphPropertyNamesRef:
 			return -1;
 		default:
 			break;
@@ -1072,6 +1074,7 @@ exprCollation(const Node *expr)
 			coll = ((const GraphPropertyRef *) expr)->collation;
 			break;
 		case T_GraphLabelsRef:
+		case T_GraphPropertyNamesRef:
 			coll = DEFAULT_COLLATION_OID;
 			break;
 		default:
@@ -2145,6 +2148,7 @@ expression_tree_walker_impl(Node *node,
 		case T_CTESearchClause:
 		case T_GraphPropertyRef:
 		case T_GraphLabelsRef:
+		case T_GraphPropertyNamesRef:
 		case T_MergeSupportFunc:
 			/* primitive node types with no expression subnodes */
 			break;
