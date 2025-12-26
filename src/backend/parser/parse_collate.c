@@ -549,6 +549,7 @@ assign_collations_walker(Node *node, assign_collations_context *context)
 		case T_CurrentOfExpr:
 		case T_GraphPropertyRef:
 		case T_GraphLabelsRef:
+		case T_GraphPropertyNamesRef:
 
 			/*
 			 * General case for childless expression nodes.  These should
