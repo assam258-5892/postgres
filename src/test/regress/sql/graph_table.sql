@@ -89,7 +89,6 @@ SELECT customer_name FROM GRAPH_TABLE (myshop MATCH (c IS customers WHERE c.addr
 SELECT customer_name FROM GRAPH_TABLE (myshop MATCH (c IS customers WHERE c.address = 'US')-[IS customer_orders]->(o IS orders) COLUMNS (c.namex AS customer_name));  -- error
 SELECT customer_name FROM GRAPH_TABLE (myshop MATCH (c IS customers|employees WHERE c.address = 'US')-[IS customer_orders]->(o IS orders) COLUMNS (c.name AS customer_name));  -- error
 SELECT customer_name FROM GRAPH_TABLE (myshop MATCH (c IS customers WHERE c.address = 'US')-[IS customer_orders] COLUMNS (c.name AS customer_name));  -- error
-SELECT * FROM GRAPH_TABLE (myshop MATCH (c IS customers), (o IS orders) COLUMNS (c.name AS customer_name));  -- error
 SELECT * FROM GRAPH_TABLE (myshop MATCH COLUMNS (1 AS col));  -- error, empty match clause
 SELECT customer_name FROM GRAPH_TABLE (myshop MATCH (c IS customers)->{1,2}(o IS orders) COLUMNS (c.name AS customer_name));  -- error
 SELECT * FROM GRAPH_TABLE (myshop MATCH ((c IS customers)->(o IS orders)) COLUMNS (c.name));
@@ -611,5 +610,118 @@ SELECT src.vname, count(*) FROM v1 AS src
   GROUP BY src.vname
   HAVING count(*) >= (SELECT count(*) FROM GRAPH_TABLE (g1 MATCH (a IS vl1 | vl2) COLUMNS (a.vname AS n)) WHERE n = src.vname)
   ORDER BY vname;
+
+-- Multi-pattern path tests (comma-separated path patterns in MATCH)
+-- disconnected patterns: cross product of customers and orders
+-- (3 customers x 3 orders = 9 rows, projecting c.name only)
+SELECT * FROM GRAPH_TABLE (myshop MATCH (c IS customers), (o IS orders) COLUMNS (c.name AS customer_name));
+
+-- disconnected patterns: one side yields no match -> empty result
+SELECT * FROM GRAPH_TABLE (myshop
+    MATCH (c IS customers WHERE c.address = 'NONEXISTENT'), (o IS orders)
+    COLUMNS (c.name AS customer_name));
+
+-- Basic multi-pattern: (a)->(b), (b)->(c) where b is shared
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[e1 IS el1]->(b IS vl2),
+          (b)-[e2 IS el2]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY a_name, b_name, c_name;
+
+-- Multi-pattern with same start vertex reaching different destinations
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (a)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY a_name, b_name, c_name;
+
+-- Multi-pattern with three patterns sharing one variable
+SELECT a_name, b2_name, b3_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b2 IS vl2),
+          (a)-[]->(b3 IS vl3)
+    COLUMNS (a.vname AS a_name, b2.vname AS b2_name, b3.vname AS b3_name)
+) ORDER BY a_name, b2_name, b3_name;
+
+-- Same variable with same label (should work)
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (b IS vl2)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+
+-- Same variable with different labels (conflict - what happens?)
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (b IS vl3)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+
+-- Same variable with label OR expression (b IS vl2|vl3)
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2|vl3),
+          (b)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+
+-- Disconnected patterns (no shared variables) - should produce cross product
+-- (a)->(b) and (c)->(d) are independent, result is Cartesian product
+-- vl1->vl2 has 3 paths, vl1->vl3 has 3 paths, so cross product = 3 x 3 = 9 rows
+SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (c IS vl1)-[]->(d IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+) ORDER BY 1, 2, 3, 4;
+
+-- Disconnected patterns: EXPLAIN should show cross join (Nested Loop without join condition)
+EXPLAIN (COSTS OFF) SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (c IS vl1)-[]->(d IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+);
+
+-- Disconnected patterns: single vertex patterns (no edges)
+-- vl1 has 3 rows (v1), vl3 has 6 rows (v2+v3), cross product = 18 rows
+SELECT a_name, b_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1), (b IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name)
+) ORDER BY 1, 2;
+
+-- Disconnected patterns: three independent patterns (3-way cross product)
+-- vl1 has 3 rows, vl2 has 3 rows, vl3 has 6 rows = 54 rows
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1), (b IS vl2), (c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+
+-- Mixed: partially connected + disconnected patterns
+-- (a)->(b), (b)->(c) are connected via 'b', but (d) is disconnected
+-- vl1->vl2->vl3 chain + independent vl1 vertex
+SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (b)-[]->(c IS vl3),
+          (d IS vl1)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+) ORDER BY 1, 2, 3, 4;
+
+-- Disconnected patterns: verify row count with different sizes
+-- Using WHERE to filter one side: (a IS vl1 WHERE vprop1 = 10) has 1 row
+-- Cross with (b IS vl3) which has 6 rows = 6 rows
+SELECT a_name, b_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1 WHERE a.vprop1 = 10), (b IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name)
+) ORDER BY 1, 2;
+
+-- Star pattern: three patterns with shared hub 'a' (A->B, A->C, D->A)
+-- All joined via 'a', NOT a cross product
+SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (a)-[]->(c IS vl3),
+          (d IS vl2)-[]->(a)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+) ORDER BY 1, 2, 3, 4;
 
 -- leave the objects behind for pg_upgrade/pg_dump tests
