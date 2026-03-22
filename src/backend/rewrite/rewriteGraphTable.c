@@ -116,9 +116,27 @@ rewriteGraphTable(Query *parsetree, int rt_index)
 
 	rte = rt_fetch(rt_index, parsetree->rtable);
 
-	Assert(list_length(rte->graph_pattern->path_pattern_list) == 1);
+	if (list_length(rte->graph_pattern->path_pattern_list) == 1)
+	{
+		path_pattern = linitial(rte->graph_pattern->path_pattern_list);
+	}
+	else
+	{
+		/*
+		 * Multiple path patterns - merge all element patterns into a single
+		 * combined path pattern.  Variables with the same name will be merged
+		 * by generate_queries_for_path_pattern().
+		 */
+		ListCell   *lc;
 
-	path_pattern = linitial(rte->graph_pattern->path_pattern_list);
+		path_pattern = NIL;
+		foreach(lc, rte->graph_pattern->path_pattern_list)
+		{
+			path_pattern = list_concat(path_pattern,
+									   list_copy((List *) lfirst(lc)));
+		}
+	}
+
 	pathqueries = generate_queries_for_path_pattern(rte, path_pattern);
 	graph_table_query = generate_union_from_pathqueries(&pathqueries);
 

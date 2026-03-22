@@ -93,8 +93,6 @@ SELECT customer_name FROM GRAPH_TABLE (myshop MATCH (c IS customers WHERE c.addr
 ERROR:  syntax error at or near "COLUMNS"
 LINE 1: ...mers WHERE c.address = 'US')-[IS customer_orders] COLUMNS (c...
                                                              ^
-SELECT * FROM GRAPH_TABLE (myshop MATCH (c IS customers), (o IS orders) COLUMNS (c.name AS customer_name));  -- error
-ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
 SELECT * FROM GRAPH_TABLE (myshop MATCH COLUMNS (1 AS col));  -- error, empty match clause
 ERROR:  syntax error at or near "COLUMNS"
 LINE 1: SELECT * FROM GRAPH_TABLE (myshop MATCH COLUMNS (1 AS col));
@@ -973,4 +971,143 @@ SELECT sname, dname FROM GRAPH_TABLE (g1 MATCH (src)->(dest) WHERE src.vprop1 > 
 ERROR:  subqueries within GRAPH_TABLE reference are not supported
 SELECT sname, dname FROM GRAPH_TABLE (g1 MATCH (src)->(dest) WHERE out_degree(src.vname) > (SELECT max(out_degree(nname)) FROM GRAPH_TABLE (g1 MATCH (node) COLUMNS (node.vname AS nname))) COLUMNS(src.vname AS sname, dest.vname AS dname));
 ERROR:  subqueries within GRAPH_TABLE reference are not supported
+-- Multi-pattern path tests (comma-separated path patterns with shared variables)
+-- disconnected patterns: cross product with empty orders table
+SELECT * FROM GRAPH_TABLE (myshop MATCH (c IS customers), (o IS orders) COLUMNS (c.name AS customer_name));
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Basic multi-pattern: (a)->(b), (b)->(c) where b is shared
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[e1 IS el1]->(b IS vl2),
+          (b)-[e2 IS el2]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY a_name, b_name, c_name;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Multi-pattern with same start vertex reaching different destinations
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (a)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY a_name, b_name, c_name;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Multi-pattern with three patterns sharing one variable
+SELECT a_name, b2_name, b3_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b2 IS vl2),
+          (a)-[]->(b3 IS vl3)
+    COLUMNS (a.vname AS a_name, b2.vname AS b2_name, b3.vname AS b3_name)
+) ORDER BY a_name, b2_name, b3_name;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Same variable with same label (should work)
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (b IS vl2)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Same variable with different labels (conflict - what happens?)
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (b IS vl3)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Same variable with label OR expression (b IS vl2|vl3)
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2|vl3),
+          (b)-[]->(c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Multi-pattern with LABELS() filtering in WHERE clause
+-- Filter shared variable b by label using LABELS() function
+EXPLAIN (COSTS OFF) SELECT a_name, b_name, b_labels, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2|vl3),
+          (b)-[]->(c IS vl3)
+    WHERE 'vl2' = ANY(LABELS(b))
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, LABELS(b) AS b_labels, c.vname AS c_name)
+);
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+SELECT a_name, b_name, b_labels, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2|vl3),
+          (b)-[]->(c IS vl3)
+    WHERE 'vl2' = ANY(LABELS(b))
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, LABELS(b) AS b_labels, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Multi-pattern with LABELS() filtering - no common labels (should prune all)
+-- b IS vl2|vl3 but WHERE filters by 'vl1' which has no overlap
+EXPLAIN (COSTS OFF) SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2|vl3),
+          (b)-[]->(c IS vl3)
+    WHERE 'vl1' = ANY(LABELS(b))
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+);
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2|vl3),
+          (b)-[]->(c IS vl3)
+    WHERE 'vl1' = ANY(LABELS(b))
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Disconnected patterns (no shared variables) - should produce cross product
+-- (a)->(b) and (c)->(d) are independent, result is Cartesian product
+-- vl1->vl2 has 3 paths, vl1->vl3 has 3 paths, so cross product = 3 x 3 = 9 rows
+SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (c IS vl1)-[]->(d IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+) ORDER BY 1, 2, 3, 4;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Disconnected patterns: EXPLAIN should show cross join (Nested Loop without join condition)
+EXPLAIN (COSTS OFF) SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (c IS vl1)-[]->(d IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+);
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Disconnected patterns: single vertex patterns (no edges)
+-- vl1 has 3 rows (v1), vl3 has 6 rows (v2+v3), cross product = 18 rows
+SELECT a_name, b_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1), (b IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name)
+) ORDER BY 1, 2;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Disconnected patterns: three independent patterns (3-way cross product)
+-- vl1 has 3 rows, vl2 has 3 rows, vl3 has 6 rows = 54 rows
+SELECT a_name, b_name, c_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1), (b IS vl2), (c IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name, c.vname AS c_name)
+) ORDER BY 1, 2, 3;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Mixed: partially connected + disconnected patterns
+-- (a)->(b), (b)->(c) are connected via 'b', but (d) is disconnected
+-- vl1->vl2->vl3 chain + independent vl1 vertex
+SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (b)-[]->(c IS vl3),
+          (d IS vl1)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+) ORDER BY 1, 2, 3, 4;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Disconnected patterns: verify row count with different sizes
+-- Using WHERE to filter one side: (a IS vl1 WHERE vprop1 = 10) has 1 row
+-- Cross with (b IS vl3) which has 6 rows = 6 rows
+SELECT a_name, b_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1 WHERE a.vprop1 = 10), (b IS vl3)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name)
+) ORDER BY 1, 2;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
+-- Star pattern: three patterns with shared hub 'a' (A->B, A->C, D->A)
+-- All joined via 'a', NOT a cross product
+SELECT a_name, b_name, c_name, d_name FROM GRAPH_TABLE (g1
+    MATCH (a IS vl1)-[]->(b IS vl2),
+          (a)-[]->(c IS vl3),
+          (d IS vl2)-[]->(a)
+    COLUMNS (a.vname AS a_name, b.vname AS b_name,
+             c.vname AS c_name, d.vname AS d_name)
+) ORDER BY 1, 2, 3, 4;
+ERROR:  multiple path patterns in one GRAPH_TABLE clause not supported
 -- leave the objects behind for pg_upgrade/pg_dump tests
