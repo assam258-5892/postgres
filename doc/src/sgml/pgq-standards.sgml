@@ -1,0 +1,435 @@
+<!-- doc/src/sgml/pgq-standards.sgml -->
+
+<appendix id="pgq-standards">
+ <title>SQL/PGQ Standards Conformance</title>
+
+ <indexterm zone="pgq-standards">
+  <primary>SQL/PGQ</primary>
+  <secondary>conformance</secondary>
+ </indexterm>
+
+ <para>
+  This appendix documents the conformance of <productname>PostgreSQL</productname>'s
+  SQL/PGQ (Property Graph Queries) implementation to the SQL standard
+  (ISO/IEC 9075-16).  It describes which features are implemented, which are
+  not yet implemented, and documents known limitations.
+ </para>
+
+ <sect1 id="pgq-standards-overview">
+  <title>Overview</title>
+
+  <para>
+   <productname>PostgreSQL</productname> implements SQL/PGQ as defined in the
+   SQL standard, where property graphs are defined as read-only views over
+   relational tables.  The implementation covers property graph definition
+   (<command>CREATE PROPERTY GRAPH</command>,
+   <command>ALTER PROPERTY GRAPH</command>,
+   <command>DROP PROPERTY GRAPH</command>) and graph pattern matching queries
+   via the <literal>GRAPH_TABLE</literal> clause.
+  </para>
+ </sect1>
+
+ <sect1 id="pgq-standards-implemented">
+  <title>Implemented Features</title>
+
+  <sect2 id="pgq-standards-ddl">
+   <title>Property Graph DDL</title>
+
+   <para>
+    The following DDL features are fully implemented:
+   </para>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      <command>CREATE PROPERTY GRAPH</command> with
+      <literal>VERTEX TABLES</literal> (synonym: <literal>NODE TABLES</literal>)
+      and <literal>EDGE TABLES</literal> (synonym: <literal>RELATIONSHIP TABLES</literal>).
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Explicit <literal>KEY</literal> clause for element tables, or automatic
+      inference from a primary key.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>SOURCE KEY ... REFERENCES</literal> and
+      <literal>DESTINATION KEY ... REFERENCES</literal> for edge tables,
+      or automatic inference from foreign keys.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Multiple labels per element table, with
+      <literal>DEFAULT LABEL</literal>,
+      <literal>LABEL <replaceable>name</replaceable></literal>, and
+      label-specific property definitions.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Property specifications: <literal>NO PROPERTIES</literal>,
+      <literal>PROPERTIES ALL COLUMNS</literal>, and
+      <literal>PROPERTIES (<replaceable>expression</replaceable> [AS <replaceable>name</replaceable>], ...)</literal>
+      including computed property expressions.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Table aliasing in element table definitions.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <command>ALTER PROPERTY GRAPH</command>: add/drop vertex and edge tables,
+      add/drop labels, add/drop properties, rename, change owner, change schema.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <command>DROP PROPERTY GRAPH</command> with <literal>IF EXISTS</literal>,
+      <literal>CASCADE</literal>, and <literal>RESTRICT</literal>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Temporary property graphs via
+      <command>CREATE TEMPORARY PROPERTY GRAPH</command>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Underlying table types: regular tables, inherited tables, partitioned
+      tables, foreign tables, and views.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>GRANT</literal>/<literal>REVOKE</literal> of
+      <literal>SELECT</literal> privilege on property graphs.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 id="pgq-standards-graph-table">
+   <title>GRAPH_TABLE Queries</title>
+
+   <para>
+    The following query features are implemented:
+   </para>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      <literal>GRAPH_TABLE</literal> clause in <literal>FROM</literal>, producing
+      a computed table that can be aliased, joined, filtered, and ordered like any
+      other table source.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Single path pattern in <literal>MATCH</literal>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Vertex patterns: <literal>()</literal>,
+      <literal>(<replaceable>var</replaceable>)</literal>,
+      <literal>(<replaceable>var</replaceable> IS <replaceable>label</replaceable>)</literal>,
+      with optional <literal>WHERE</literal> clause.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Edge patterns: directed (<literal>-[]-></literal>,
+      <literal>&lt;-[]-</literal>) and undirected (<literal>-[]-</literal>),
+      with optional variable, label, and <literal>WHERE</literal> clause.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Abbreviated edge patterns without brackets:
+      <literal>-></literal>, <literal>&lt;-</literal>, <literal>-</literal>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Label disjunction: <literal>IS label1 | label2</literal>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>WHERE</literal> clause inside element patterns and at the
+      graph pattern level.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>COLUMNS</literal> clause with expressions, aliases, and property
+      references via graph pattern variables.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Cyclic path patterns using repeated variable names, e.g.,
+      <literal>(a)->(b)->(a)</literal>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Lateral references: correlated subqueries where
+      <literal>GRAPH_TABLE</literal> references columns from preceding
+      <literal>FROM</literal> items.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Row-level security (RLS) enforcement on the underlying tables.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 id="pgq-standards-information-schema">
+   <title>Information Schema</title>
+
+   <para>
+    The following SQL/PGQ information schema views are implemented:
+   </para>
+
+   <itemizedlist>
+    <listitem><para><literal>information_schema.property_graphs</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_element_tables</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_element_table_key_columns</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_edge_table_components</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_element_table_labels</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_element_table_properties</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_label_properties</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_labels</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_property_data_types</literal></para></listitem>
+    <listitem><para><literal>information_schema.pg_property_graph_privileges</literal></para></listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 id="pgq-standards-psql">
+   <title>psql Support</title>
+
+   <para>
+    The <application>psql</application> command <literal>\dG</literal> lists
+    property graphs.  <literal>\dG+</literal> shows additional detail.
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 id="pgq-standards-limitations">
+  <title>Known Limitations</title>
+
+  <para>
+   The following SQL/PGQ features are not yet implemented or have restrictions
+   in this release:
+  </para>
+
+  <sect2 id="pgq-standards-limitations-query">
+   <title>Query Limitations</title>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      <emphasis>Multiple path patterns</emphasis>:
+      Only a single path pattern per <literal>GRAPH_TABLE</literal>
+      <literal>MATCH</literal> clause is supported.  Comma-separated path
+      patterns (e.g., <literal>MATCH (a)->(b), (c)->(d)</literal>) are parsed
+      but will raise an error at execution time.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Path pattern quantifiers</emphasis>:
+      Quantifiers on element patterns (e.g., <literal>{1,5}</literal>,
+      <literal>+</literal>, <literal>*</literal>) are not supported.
+      Variable-length path traversal is not available.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Subqueries within GRAPH_TABLE</emphasis>:
+      Subqueries in <literal>WHERE</literal> clauses or
+      <literal>COLUMNS</literal> expressions inside a
+      <literal>GRAPH_TABLE</literal> reference are not supported.  Lateral
+      references to outer query columns <emphasis>are</emphasis> supported.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Same variable, different labels</emphasis>:
+      When the same variable name is used in multiple element patterns (cyclic
+      paths), all occurrences must use the same label expression.  For example,
+      <literal>(a IS label1)->(b)->(a IS label2)</literal> is not supported,
+      but <literal>(a IS label1)->(b)->(a)</literal> or
+      <literal>(a IS label1)->(b)->(a IS label1)</literal> works.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Wildcard in COLUMNS</emphasis>:
+      <literal>*</literal> is not supported in the <literal>COLUMNS</literal>
+      clause.  Use explicit property references like
+      <literal>v.prop1, v.prop2</literal> or
+      <literal>v.*</literal> (which expands all properties of a specific
+      element variable).
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 id="pgq-standards-limitations-ddl">
+   <title>DDL Limitations</title>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      <emphasis>Element key requirement</emphasis>:
+      Every element table (both vertex and edge) must have a <emphasis>unique
+      identifier key</emphasis>.  This is either specified via the
+      <literal>KEY</literal> clause or inferred from the table's primary key.
+      This key identifies the element itself and is
+      <emphasis>separate</emphasis> from the
+      <literal>SOURCE KEY</literal> and <literal>DESTINATION KEY</literal> on
+      edge tables, which identify relationships to adjacent vertices.
+     </para>
+     <para>
+      A common pitfall: specifying <literal>SOURCE KEY</literal> and
+      <literal>DESTINATION KEY</literal> on an edge table does
+      <emphasis>not</emphasis> satisfy the element key requirement.  If the
+      edge table has no primary key, an explicit <literal>KEY</literal> clause
+      must also be provided. For example:
+<programlisting>
+-- This will FAIL if person_knows_person has no primary key:
+CREATE PROPERTY GRAPH snb
+    VERTEX TABLES (person)
+    EDGE TABLES (
+        person_knows_person
+            SOURCE KEY (person1id) REFERENCES person (id)
+            DESTINATION KEY (person2id) REFERENCES person (id)
+    );
+
+-- Solution 1: Add an explicit KEY clause
+CREATE PROPERTY GRAPH snb
+    VERTEX TABLES (person)
+    EDGE TABLES (
+        person_knows_person
+            KEY (person1id, person2id)
+            SOURCE KEY (person1id) REFERENCES person (id)
+            DESTINATION KEY (person2id) REFERENCES person (id)
+    );
+
+-- Solution 2: Add a primary key to the underlying table
+ALTER TABLE person_knows_person
+    ADD PRIMARY KEY (person1id, person2id);
+</programlisting>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Source/destination key inference</emphasis>:
+      When <literal>SOURCE</literal> or <literal>DESTINATION</literal> is
+      specified without an explicit <literal>KEY</literal>, the system looks for
+      a matching foreign key constraint on the edge table pointing to the
+      referenced vertex table.  If no foreign key exists or multiple matching
+      foreign keys exist, an error is raised.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Label property consistency</emphasis>:
+      When multiple element tables share the same label name, the properties
+      under that label must match in number, names, types, and collation across
+      all element tables.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 id="pgq-standards-limitations-other">
+   <title>Standard Features Not Yet Implemented</title>
+
+   <para>
+    The following SQL/PGQ standard features are not yet available:
+   </para>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      <emphasis>SHORTEST, ANY, ALL path semantics</emphasis>:
+      Path mode qualifiers for controlling which paths are returned are not
+      implemented.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Path variables and path functions</emphasis>:
+      Binding a variable to an entire path (rather than individual elements)
+      and using functions like <function>path_length</function> or
+      <function>vertices</function>/<function>edges</function> are not
+      available.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Label expression negation and conjunction</emphasis>:
+      Label expressions support disjunction (<literal>|</literal>) but
+      not negation (<literal>!</literal>) or conjunction
+      (<literal>&amp;</literal>).
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Graph types</emphasis>:
+      The <literal>CREATE GRAPH TYPE</literal> statement for defining reusable
+      graph schemas is not implemented.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+
+ <sect1 id="pgq-standards-sql-features">
+  <title>SQL Feature Codes</title>
+
+  <para>
+   The following SQL/PGQ feature codes from the SQL standard are claimed as
+   supported:
+  </para>
+
+  <informaltable>
+   <tgroup cols="2">
+    <thead>
+     <row>
+      <entry>Feature Code</entry>
+      <entry>Description</entry>
+     </row>
+    </thead>
+    <tbody>
+     <row><entry>G000</entry><entry>Graph pattern</entry></row>
+     <row><entry>G001</entry><entry>Repeatable-elements match mode</entry></row>
+     <row><entry>G008</entry><entry>Graph pattern WHERE clause</entry></row>
+     <row><entry>G034</entry><entry>Path concatenation</entry></row>
+     <row><entry>G040</entry><entry>Vertex pattern</entry></row>
+     <row><entry>G042</entry><entry>Basic full edge patterns</entry></row>
+     <row><entry>G070</entry><entry>Label expression: label disjunction</entry></row>
+     <row><entry>G073</entry><entry>Label expression: individual label name</entry></row>
+     <row><entry>G090</entry><entry>Property reference</entry></row>
+     <row><entry>G850</entry><entry>SQL/PGQ Information Schema views</entry></row>
+     <row><entry>G900</entry><entry>GRAPH_TABLE</entry></row>
+     <row><entry>G920</entry><entry>DDL-based SQL-property graphs</entry></row>
+     <row><entry>G924</entry><entry>Explicit key clause for element tables</entry></row>
+     <row><entry>G925</entry><entry>Explicit label and properties clause for element tables</entry></row>
+    </tbody>
+   </tgroup>
+  </informaltable>
+ </sect1>
+
+</appendix>
