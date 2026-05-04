@@ -884,6 +884,19 @@ DROP INDEX rpr_integ_id_idx;
 -- this test must be replaced with an error-case test that expects
 -- random() in DEFINE to be rejected.
 
+-- Baseline: STABLE (to_char) and IMMUTABLE (length) callees are accepted.
+-- This locks the boundary of the volatile-only prohibition.
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_integ
+WINDOW w AS (ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE B AS val > PREV(val)
+                AND length('x') = 1
+                AND to_char(date '2026-01-01', 'YYYY') = '2026')
+ORDER BY id;
+
+-- Volatile (random) is the prohibition target; today still accepted.
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_integ
 WINDOW w AS (ORDER BY id
