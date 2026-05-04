@@ -662,7 +662,10 @@ DecodingWorkerShared
 DefElem
 DefElemAction
 DefaultACLInfo
+DefineMetadataContext
+DefinePhase
 DefineStmt
+DefineWalkCtx
 DefnDumperPtr
 DeleteStmt
 DependenciesParseState
@@ -761,8 +764,7 @@ ErrorData
 ErrorSaveContext
 EstimateDSMForeignScan_function
 EstimationInfo
-EvalNavFirstContext
-EvalNavMaxContext
+EvalDefineOffsetsContext
 EventTriggerCacheEntry
 EventTriggerCacheItem
 EventTriggerCacheStateType
@@ -1833,8 +1835,8 @@ NamedLWLockTrancheRequest
 NamedTuplestoreScan
 NamedTuplestoreScanState
 NamespaceInfo
-NavCheckResult
-NavOffsetContext
+NavTraversal
+NavVisitFn
 NestLoop
 NestLoopParam
 NestLoopState

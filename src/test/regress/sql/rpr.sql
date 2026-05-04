@@ -541,6 +541,26 @@ WINDOW w AS (
     DEFINE A AS PREV(price, price) > 0
 );
 
+-- Non-constant offset: column reference in compound inner offset
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(LAST(price, price), 2) > 0
+);
+
+-- Non-constant offset: column reference in compound outer offset
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(LAST(price, 1), price) > 0
+);
+
 -- Non-constant offset: volatile function as offset
 SELECT price FROM stock
 WINDOW w AS (
@@ -571,7 +591,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price + (SELECT 1)) > 0
 );
 
--- First arg: volatile function is allowed (evaluated on target row)
+-- Volatile function inside nav.arg is rejected at parse time
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM stock
@@ -581,6 +601,19 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS PREV(price + random() * 0) >= 0
 );
+
+-- nextval is volatile (per pg_proc), so it is rejected via the FuncExpr
+-- path with the "volatile functions" message
+CREATE SEQUENCE rpr_seq;
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS price > nextval('rpr_seq')
+);
+DROP SEQUENCE rpr_seq;
 
 --
 -- 2-arg PREV/NEXT: functional tests

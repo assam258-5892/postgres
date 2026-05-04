@@ -3312,8 +3312,12 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 											es);
 						break;
 					case RPR_NAV_OFFSET_FIXED:
-						ExplainPropertyInteger("Nav Mark Lookahead", NULL,
-											   firstOffset, es);
+						if (firstOffset == INT64_MAX)
+							ExplainPropertyText("Nav Mark Lookahead", "infinite",
+												es);
+						else
+							ExplainPropertyInteger("Nav Mark Lookahead", NULL,
+												   firstOffset, es);
 						break;
 					default:
 						elog(ERROR, "unrecognized RPR nav offset kind: %d",

@@ -868,24 +868,13 @@ DROP INDEX rpr_integ_id_idx;
 -- ============================================================
 -- B9. RPR + Volatile function in DEFINE
 -- ============================================================
--- Records the current behaviour: DEFINE today accepts volatile
--- functions such as random() and the query runs to completion.
--- To keep the expected output deterministic the predicate uses
--- "random() >= 0.0", which is structurally equivalent to TRUE and
--- therefore does not perturb the match result.  The interesting
--- property is that volatile invocation does not crash or short-
--- circuit pattern matching.
---
--- XXX: volatile functions in DEFINE are slated to be rejected at
--- parse time.  Under RPR's NFA engine the same row's DEFINE
--- predicate may be evaluated multiple times (backtracking,
--- PREV/NEXT navigation), so a truly volatile result would make
--- pattern matching non-deterministic.  When the prohibition lands,
--- this test must be replaced with an error-case test that expects
--- random() in DEFINE to be rejected.
+-- Volatile functions in DEFINE are rejected at parse time.  Under
+-- RPR's NFA engine the same row's DEFINE predicate may be evaluated
+-- multiple times (backtracking, PREV/NEXT navigation), so a volatile
+-- result would make pattern matching non-deterministic.  STABLE and
+-- IMMUTABLE callees are accepted.
 
 -- Baseline: STABLE (to_char) and IMMUTABLE (length) callees are accepted.
--- This locks the boundary of the volatile-only prohibition.
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_integ
 WINDOW w AS (ORDER BY id
@@ -896,7 +885,7 @@ WINDOW w AS (ORDER BY id
                 AND to_char(date '2026-01-01', 'YYYY') = '2026')
 ORDER BY id;
 
--- Volatile (random) is the prohibition target; today still accepted.
+-- Volatile (random) is rejected.
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_integ
 WINDOW w AS (ORDER BY id

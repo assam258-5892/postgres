@@ -247,8 +247,7 @@ static void update_reduced_frame(WindowObject winobj, int64 pos);
 static bool nfa_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched);
 
 /* Forward declarations - navigation offset evaluation */
-static void eval_nav_max_offset(WindowAggState *winstate, List *defineClause);
-static void eval_nav_first_offset(WindowAggState *winstate, List *defineClause);
+static void eval_define_offsets(WindowAggState *winstate, List *defineClause);
 
 /*
  * Not null info bit array consists of 2-bit items
@@ -2580,12 +2579,10 @@ ExecWindowAgg(PlanState *pstate)
 			{
 				int64		firstreach;
 
-				if (winstate->navFirstOffset > -winstate->nfaContext->matchStartRow)
-					firstreach = winstate->nfaContext->matchStartRow
-						+ winstate->navFirstOffset;
-				else
-					firstreach = 0;
-				navmarkpos = Min(navmarkpos, firstreach);
+				if (!pg_add_s64_overflow(winstate->nfaContext->matchStartRow,
+										 winstate->navFirstOffset,
+										 &firstreach))
+					navmarkpos = Min(navmarkpos, Max(firstreach, 0));
 			}
 
 			if (navmarkpos > winstate->nav_winobj->markpos)
@@ -3038,17 +3035,13 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->rpSkipTo = node->rpSkipTo;
 	/* Set up row pattern recognition PATTERN clause (compiled NFA) */
 	winstate->rpPattern = node->rpPattern;
-	/* Set up nav offsets for tuplestore trim */
+	/* Set up nav offsets for tuplestore trim; resolve any NEEDS_EVAL kinds */
 	winstate->navMaxOffsetKind = node->navMaxOffsetKind;
 	winstate->navMaxOffset = node->navMaxOffset;
-	if (winstate->navMaxOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL)
-		eval_nav_max_offset(winstate, node->defineClause);
 	winstate->hasFirstNav = node->hasFirstNav;
 	winstate->navFirstOffsetKind = node->navFirstOffsetKind;
 	winstate->navFirstOffset = node->navFirstOffset;
-	if (winstate->hasFirstNav &&
-		winstate->navFirstOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL)
-		eval_nav_first_offset(winstate, node->defineClause);
+	eval_define_offsets(winstate, node->defineClause);
 
 	/* Copy match_start dependency bitmapset for per-context evaluation */
 	winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
@@ -4020,42 +4013,64 @@ eval_nav_offset_helper(WindowAggState *winstate, Expr *offset_expr,
 typedef struct
 {
 	WindowAggState *winstate;
-	int64		maxOffset;
-	bool		overflow;		/* true if overflow detected */
-} EvalNavMaxContext;
+	int64		maxOffset;		/* max backward-reach offset across all nav
+								 * exprs */
+	bool		maxOverflow;	/* true if backward-reach overflow detected */
+	int64		minFirstOffset; /* min forward-from-match_start offset; may be
+								 * negative (PREV_FIRST: inner - outer < 0) */
+} EvalDefineOffsetsContext;
 
 /*
- * eval_nav_max_offset_walker
- *		Walk expression tree evaluating backward-reach offsets at runtime.
+ * visit_nav_exec
+ *		nav_traversal_walker callback (NavVisitFn) for the executor side.
+ *		At each RPRNavExpr, evaluates the nav's offset expression(s) at
+ *		runtime via eval_nav_offset_helper and accumulates:
  *
- * Handles simple PREV, LAST-with-offset, and compound PREV_LAST/NEXT_LAST.
+ *		  - maxOffset (backward reach): PREV, LAST-with-offset, compound
+ *			PREV_LAST (sets maxOverflow on int64 overflow), compound
+ *			NEXT_LAST (= max(inner - outer, 0))
+ *		  - minFirstOffset (forward reach from match_start): FIRST,
+ *			compound PREV_FIRST (= inner - outer, may be negative),
+ *			compound NEXT_FIRST (= inner + outer, clamped to INT64_MAX on
+ *			overflow; always >= 0 so never updates minFirstOffset in practice)
+ *
+ * Counterpart of visit_nav_plan but using runtime evaluation instead of
+ * Const folding; runs only for offsets the planner marked NEEDS_EVAL.
+ * Match-start dependency is not recomputed here -- the planner's bitmapset
+ * is reused via winstate->defineMatchStartDependent.
  */
-static bool
-eval_nav_max_offset_walker(Node *node, void *ctx)
+static void
+visit_nav_exec(NavTraversal *t, RPRNavExpr *nav)
 {
-	EvalNavMaxContext *context = (EvalNavMaxContext *) ctx;
+	EvalDefineOffsetsContext *context = (EvalDefineOffsetsContext *) t->data;
 
-	if (node == NULL)
-		return false;
+	/*
+	 * Parser guarantee (mirrors visit_nav_plan): nav's direct children are
+	 * never RPRNavExpr -- compound nesting is flattened in place and any
+	 * other nesting is rejected.  Outer-kind dispatch is sufficient.
+	 */
+	Assert(nav->arg == NULL || !IsA(nav->arg, RPRNavExpr));
+	Assert(nav->offset_arg == NULL || !IsA(nav->offset_arg, RPRNavExpr));
+	Assert(nav->compound_offset_arg == NULL ||
+		   !IsA(nav->compound_offset_arg, RPRNavExpr));
 
-	/* Short-circuit if overflow already detected */
-	if (context->overflow)
-		return false;
-
-	if (IsA(node, RPRNavExpr))
+	/* Backward reach: PREV, LAST-with-offset */
+	if (!context->maxOverflow)
 	{
-		RPRNavExpr *nav = (RPRNavExpr *) node;
 		int64		reach = 0;
+		bool		gotReach = false;
 
 		if (nav->kind == RPR_NAV_PREV)
 		{
 			reach = eval_nav_offset_helper(context->winstate,
 										   nav->offset_arg, 1);
+			gotReach = true;
 		}
 		else if (nav->kind == RPR_NAV_LAST && nav->offset_arg != NULL)
 		{
 			reach = eval_nav_offset_helper(context->winstate,
 										   nav->offset_arg, 0);
+			gotReach = true;
 		}
 		else if (nav->kind == RPR_NAV_PREV_LAST ||
 				 nav->kind == RPR_NAV_NEXT_LAST)
@@ -4068,168 +4083,123 @@ eval_nav_max_offset_walker(Node *node, void *ctx)
 			if (nav->kind == RPR_NAV_PREV_LAST)
 			{
 				if (pg_add_s64_overflow(inner, outer, &reach))
-				{
-					context->overflow = true;
-					return false;
-				}
+					context->maxOverflow = true;
+				else
+					gotReach = true;
 			}
 			else
-				reach = (inner > outer) ? inner - outer : 0;
+			{
+				reach = Max(inner - outer, 0);
+				gotReach = true;
+			}
 		}
 
-		context->maxOffset = Max(context->maxOffset, reach);
-
-		return false;			/* don't walk into children */
+		if (gotReach)
+			context->maxOffset = Max(context->maxOffset, reach);
 	}
 
-	return expression_tree_walker(node, eval_nav_max_offset_walker, ctx);
+	/* Forward reach from match_start: FIRST, compound PREV_FIRST/NEXT_FIRST */
+	if (nav->kind == RPR_NAV_FIRST)
+	{
+		int64		reach;
+
+		reach = eval_nav_offset_helper(context->winstate,
+									   nav->offset_arg, 0);
+		context->minFirstOffset = Min(context->minFirstOffset, reach);
+	}
+	else if (nav->kind == RPR_NAV_PREV_FIRST ||
+			 nav->kind == RPR_NAV_NEXT_FIRST)
+	{
+		int64		inner = eval_nav_offset_helper(context->winstate,
+												   nav->offset_arg, 0);
+		int64		outer = eval_nav_offset_helper(context->winstate,
+												   nav->compound_offset_arg, 1);
+		int64		reach;
+
+		if (nav->kind == RPR_NAV_PREV_FIRST)
+		{
+			/*
+			 * reach = inner - outer.  Both are non-negative, so the result >=
+			 * -INT64_MAX, which cannot underflow int64.
+			 */
+			reach = inner - outer;
+		}
+		else
+		{
+			/*
+			 * NEXT_FIRST: reach = inner + outer.  This can overflow, but the
+			 * result is always >= 0, so it never updates minFirstOffset
+			 * (which tracks the minimum).  Clamp to INT64_MAX on overflow.
+			 */
+			if (pg_add_s64_overflow(inner, outer, &reach))
+				reach = INT64_MAX;
+		}
+		context->minFirstOffset = Min(context->minFirstOffset, reach);
+	}
 }
 
 /*
- * eval_nav_max_offset
- *		Evaluate non-constant backward-reach offsets at executor init time.
+ * eval_define_offsets
+ *		Evaluate non-constant nav offsets at executor init time.
  *
- * Called when the planner set navMaxOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL
- * because some offset in PREV, LAST-with-offset, or compound PREV_LAST/
- * NEXT_LAST contains a parameter or non-foldable expression.
+ * Called when the planner set navMaxOffsetKind and/or navFirstOffsetKind
+ * to RPR_NAV_OFFSET_NEEDS_EVAL because some offset contains a parameter
+ * or non-foldable expression.  Updates only the fields whose kind was
+ * NEEDS_EVAL; FIXED kinds are left unchanged.
  *
- * On overflow, sets navMaxOffsetKind to RPR_NAV_OFFSET_RETAIN_ALL so that
- * tuplestore trim is disabled for backward navigation.
+ * On backward-reach overflow, sets navMaxOffsetKind to
+ * RPR_NAV_OFFSET_RETAIN_ALL so that tuplestore trim is disabled for
+ * backward navigation.
  */
 static void
-eval_nav_max_offset(WindowAggState *winstate, List *defineClause)
+eval_define_offsets(WindowAggState *winstate, List *defineClause)
 {
-	EvalNavMaxContext ctx;
+	EvalDefineOffsetsContext ctx;
+	NavTraversal trav;
 	ListCell   *lc;
+	bool		needsMax = (winstate->navMaxOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL);
+	bool		needsFirst = (winstate->hasFirstNav &&
+							  winstate->navFirstOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL);
+
+	if (!needsMax && !needsFirst)
+		return;
 
 	ctx.winstate = winstate;
 	ctx.maxOffset = 0;
-	ctx.overflow = false;
+	ctx.maxOverflow = false;
+	ctx.minFirstOffset = INT64_MAX;
+
+	trav.visit = visit_nav_exec;
+	trav.data = &ctx;
 
 	foreach(lc, defineClause)
 	{
 		TargetEntry *te = (TargetEntry *) lfirst(lc);
 
-		eval_nav_max_offset_walker((Node *) te->expr, &ctx);
+		nav_traversal_walker((Node *) te->expr, &trav);
 	}
 
-	if (ctx.overflow)
+	if (needsMax)
 	{
-		winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
-		winstate->navMaxOffset = 0;
-	}
-	else
-	{
-		winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
-		winstate->navMaxOffset = ctx.maxOffset;
-	}
-}
-
-typedef struct
-{
-	WindowAggState *winstate;
-	int64		minOffset;
-	bool		found;
-} EvalNavFirstContext;
-
-/*
- * eval_nav_first_offset_walker
- *		Walk expression tree evaluating forward-from-match_start offsets.
- *
- * Handles simple FIRST and compound PREV_FIRST/NEXT_FIRST.
- */
-static bool
-eval_nav_first_offset_walker(Node *node, void *ctx)
-{
-	EvalNavFirstContext *context = (EvalNavFirstContext *) ctx;
-
-	if (node == NULL)
-		return false;
-
-	if (IsA(node, RPRNavExpr))
-	{
-		RPRNavExpr *nav = (RPRNavExpr *) node;
-		int64		combined = INT64_MAX;
-
-		if (nav->kind == RPR_NAV_FIRST)
+		if (ctx.maxOverflow)
 		{
-			context->found = true;
-			combined = eval_nav_offset_helper(context->winstate,
-											  nav->offset_arg, 0);
+			winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
+			winstate->navMaxOffset = 0;
 		}
-		else if (nav->kind == RPR_NAV_PREV_FIRST ||
-				 nav->kind == RPR_NAV_NEXT_FIRST)
+		else
 		{
-			int64		inner = eval_nav_offset_helper(context->winstate,
-													   nav->offset_arg, 0);
-			int64		outer = eval_nav_offset_helper(context->winstate,
-													   nav->compound_offset_arg, 1);
-
-			context->found = true;
-			if (nav->kind == RPR_NAV_PREV_FIRST)
-			{
-				/*
-				 * combined = inner - outer.  Both are non-negative, so the
-				 * result >= -INT64_MAX, which cannot underflow int64.
-				 */
-				combined = inner - outer;
-			}
-			else
-			{
-				/*
-				 * NEXT_FIRST: combined = inner + outer.  This can overflow,
-				 * but the result is always >= 0, so it never updates
-				 * minOffset (which tracks the minimum).  Clamp to INT64_MAX
-				 * on overflow.
-				 */
-				if (pg_add_s64_overflow(inner, outer, &combined))
-					combined = INT64_MAX;
-			}
+			winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
+			winstate->navMaxOffset = ctx.maxOffset;
 		}
-
-		context->minOffset = Min(context->minOffset, combined);
-
-		return false;
 	}
 
-	return expression_tree_walker(node, eval_nav_first_offset_walker, ctx);
-}
-
-/*
- * eval_nav_first_offset
- *		Evaluate non-constant forward-from-match_start offsets at executor
- *		init time.
- *
- * Called when the planner set navFirstOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL
- * because some offset in FIRST or compound PREV_FIRST/NEXT_FIRST contains
- * a parameter or non-foldable expression.
- */
-static void
-eval_nav_first_offset(WindowAggState *winstate, List *defineClause)
-{
-	EvalNavFirstContext ctx;
-	ListCell   *lc;
-
-	ctx.winstate = winstate;
-	ctx.minOffset = INT64_MAX;
-	ctx.found = false;
-
-	foreach(lc, defineClause)
-	{
-		TargetEntry *te = (TargetEntry *) lfirst(lc);
-
-		eval_nav_first_offset_walker((Node *) te->expr, &ctx);
-	}
-
-	if (ctx.found && ctx.minOffset < INT64_MAX)
+	if (needsFirst)
 	{
 		winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
-		winstate->navFirstOffset = ctx.minOffset;
-	}
-	else
-	{
-		winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
-		winstate->navFirstOffset = 0;
+		if (ctx.minFirstOffset < INT64_MAX)
+			winstate->navFirstOffset = ctx.minFirstOffset;
+		else
+			winstate->navFirstOffset = INT64_MAX;
 	}
 }
 

@@ -25,6 +25,7 @@
 
 #include "postgres.h"
 
+#include "catalog/pg_proc.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -35,14 +36,33 @@
 #include "parser/parse_expr.h"
 #include "parser/parse_rpr.h"
 #include "parser/parse_target.h"
+#include "utils/lsyscache.h"
+
+/* DEFINE clause walker context -- see define_walker for usage. */
+typedef enum
+{
+	DEFINE_PHASE_BODY,			/* top-level DEFINE expression */
+	DEFINE_PHASE_NAV_ARG,		/* inside an outer nav's arg subtree */
+	DEFINE_PHASE_NAV_OFFSET,	/* inside an outer nav's offset_arg /
+								 * compound_offset_arg */
+} DefinePhase;
+
+typedef struct
+{
+	ParseState *pstate;
+	DefinePhase phase;
+	int			nav_count;		/* RPRNavExpr nodes seen in current nav.arg */
+	bool		has_column_ref; /* Var seen in current nav scope */
+	RPRNavKind	inner_kind;		/* kind of first nested nav in current arg */
+} DefineWalkCtx;
 
 /* Forward declarations */
 static void validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 									   List *rpDefs, List **varNames);
 static List *transformDefineClause(ParseState *pstate, WindowClause *wc,
 								   WindowDef *windef, List **targetlist);
-static void check_rpr_nav_expr(RPRNavExpr *nav, ParseState *pstate);
-static bool check_rpr_nav_nesting_walker(Node *node, void *context);
+static bool define_walker(Node *node, void *context);
+static bool nav_volatile_func_checker(Oid funcid, void *context);
 
 /*
  * transformRPR
@@ -412,9 +432,22 @@ transformDefineClause(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	foreach_ptr(TargetEntry, te, defineClause)
 		te->expr = (Expr *) coerce_to_boolean(pstate, (Node *) te->expr, "DEFINE");
 
-	/* check for nested PREV/NEXT and missing column references */
+	/*
+	 * Validate DEFINE expressions: nested PREV/NEXT, column references,
+	 * compound flatten, volatile callees -- all in a single walk per
+	 * variable.
+	 */
 	foreach_ptr(TargetEntry, te, defineClause)
-		(void) check_rpr_nav_nesting_walker((Node *) te->expr, pstate);
+	{
+		DefineWalkCtx ctx;
+
+		ctx.pstate = pstate;
+		ctx.phase = DEFINE_PHASE_BODY;
+		ctx.nav_count = 0;
+		ctx.has_column_ref = false;
+		ctx.inner_kind = 0;
+		(void) define_walker((Node *) te->expr, &ctx);
+	}
 
 	/* mark column origins */
 	markTargetListOrigins(pstate, defineClause);
@@ -426,169 +459,239 @@ transformDefineClause(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 }
 
 /*
- * check_rpr_nav_expr
- *		Validate a single RPRNavExpr node by walking its arg and offset_arg
- *		subtrees in a single pass each.  Check for illegal nesting, missing
- *		column references, and non-constant offset expressions.
+ * Single-pass DEFINE clause validator.
  *
- * Nesting rules (SQL standard 5.6.4):
- *   - PREV/NEXT wrapping FIRST/LAST: allowed (compound navigation)
- *   - FIRST/LAST wrapping PREV/NEXT: prohibited
- *   - Same-category nesting (PREV inside PREV, FIRST inside FIRST, etc.):
- *     prohibited
+ * One walker function (define_walker) visits every node in a DEFINE
+ * expression exactly once and enforces every rule:
+ *   - Volatile callees and NextValueExpr are rejected at parse time
+ *     (RPR's NFA may evaluate the same row's predicate multiple times
+ *     during backtracking, so a volatile result would make matching
+ *     non-deterministic).
+ *   - For each outer RPRNavExpr (per SQL 5.6.4 nesting rules):
+ *     * arg must contain at least one column reference
+ *     * PREV/NEXT wrapping FIRST/LAST flattens to a compound kind
+ *     * Other nestings are rejected (FIRST(PREV()), PREV(PREV()), ...)
+ *     * offset_arg / compound_offset_arg must not contain column refs
+ *
+ * The walker uses a phase tag to know which subtree it is in: DEFINE
+ * body (top-level), inside a nav.arg, or inside a nav.offset_arg /
+ * compound_offset_arg.  When entering an outer nav (PHASE_BODY), it
+ * walks nav.arg in PHASE_NAV_ARG to collect nesting/column-ref state,
+ * applies compound flatten or raises a nesting error, then walks the
+ * (post-flatten) offset(s) in PHASE_NAV_OFFSET to enforce the
+ * constant-offset rule.  No subtree is walked twice.
  */
-typedef struct
-{
-	int			nav_count;		/* number of RPRNavExpr nodes found */
-	bool		has_column_ref; /* Var found */
-	RPRNavKind	inner_kind;		/* kind of first (outermost) nested RPRNavExpr */
-} NavCheckResult;
 
+/*
+ * nav_volatile_func_checker
+ *		check_functions_in_node callback: true if funcid is VOLATILE.
+ */
 static bool
-nav_check_walker(Node *node, void *context)
+nav_volatile_func_checker(Oid funcid, void *context)
 {
-	NavCheckResult *result = (NavCheckResult *) context;
-
-	if (node == NULL)
-		return false;
-	if (IsA(node, RPRNavExpr))
-	{
-		if (result->nav_count == 0)
-			result->inner_kind = ((RPRNavExpr *) node)->kind;
-		result->nav_count++;
-	}
-	if (IsA(node, Var))
-		result->has_column_ref = true;
-
-	return expression_tree_walker(node, nav_check_walker, context);
-}
-
-static void
-check_rpr_nav_expr(RPRNavExpr *nav, ParseState *pstate)
-{
-	NavCheckResult result;
-	bool		outer_is_physical = (nav->kind == RPR_NAV_PREV ||
-									 nav->kind == RPR_NAV_NEXT);
-
-	/* Check arg subtree: nesting + column reference in one walk */
-	memset(&result, 0, sizeof(result));
-	(void) nav_check_walker((Node *) nav->arg, &result);
-
-	if (result.nav_count > 0)
-	{
-		bool		inner_is_physical = (result.inner_kind == RPR_NAV_PREV ||
-										 result.inner_kind == RPR_NAV_NEXT);
-
-		if (outer_is_physical && !inner_is_physical)
-		{
-			/*
-			 * PREV/NEXT wrapping FIRST/LAST: compound navigation per SQL
-			 * standard 5.6.4.  Flatten the nested RPRNavExpr into a single
-			 * compound node.  The inner RPRNavExpr must be the direct arg of
-			 * the outer; expressions like PREV(val + FIRST(v)) are not valid
-			 * compound navigation.
-			 */
-			RPRNavExpr *inner;
-
-			/* Reject triple-or-deeper nesting (e.g. PREV(FIRST(PREV(x)))) */
-			if (result.nav_count > 1)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("cannot nest row pattern navigation more than two levels deep"),
-						 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-						 parser_errposition(pstate, nav->location)));
-
-			if (!IsA(nav->arg, RPRNavExpr))
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("row pattern navigation operation must be a direct argument of the outer navigation"),
-						 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-						 parser_errposition(pstate, nav->location)));
-			inner = (RPRNavExpr *) nav->arg;
-
-			/* Determine compound kind */
-			if (nav->kind == RPR_NAV_PREV && inner->kind == RPR_NAV_FIRST)
-				nav->kind = RPR_NAV_PREV_FIRST;
-			else if (nav->kind == RPR_NAV_PREV && inner->kind == RPR_NAV_LAST)
-				nav->kind = RPR_NAV_PREV_LAST;
-			else if (nav->kind == RPR_NAV_NEXT && inner->kind == RPR_NAV_FIRST)
-				nav->kind = RPR_NAV_NEXT_FIRST;
-			else if (nav->kind == RPR_NAV_NEXT && inner->kind == RPR_NAV_LAST)
-				nav->kind = RPR_NAV_NEXT_LAST;
-
-			/* Move outer offset to compound_offset_arg */
-			nav->compound_offset_arg = nav->offset_arg;
-
-			/* Move inner offset and arg up */
-			nav->offset_arg = inner->offset_arg;
-			nav->arg = inner->arg;
-
-			/* No further nesting check needed - already validated */
-			return;
-		}
-		else if (!outer_is_physical && inner_is_physical)
-		{
-			/* FIRST/LAST wrapping PREV/NEXT: prohibited by standard */
-			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("FIRST and LAST cannot contain PREV or NEXT"),
-					 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-					 parser_errposition(pstate, nav->location)));
-		}
-		else if (outer_is_physical && inner_is_physical)
-		{
-			/* PREV/NEXT wrapping PREV/NEXT: prohibited */
-			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("PREV and NEXT cannot contain PREV or NEXT"),
-					 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-					 parser_errposition(pstate, nav->location)));
-		}
-		else
-		{
-			/* FIRST/LAST wrapping FIRST/LAST: prohibited */
-			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("FIRST and LAST cannot contain FIRST or LAST"),
-					 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-					 parser_errposition(pstate, nav->location)));
-		}
-	}
-	if (!result.has_column_ref)
-		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("argument of row pattern navigation operation must include at least one column reference"),
-				 parser_errposition(pstate, nav->location)));
-
-	/* Check offset_arg: column ref + volatile in one walk */
-	if (nav->offset_arg != NULL)
-	{
-		memset(&result, 0, sizeof(result));
-		(void) nav_check_walker((Node *) nav->offset_arg, &result);
-
-		if (result.has_column_ref ||
-			contain_volatile_functions((Node *) nav->offset_arg))
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("row pattern navigation offset must be a run-time constant"),
-					 parser_errposition(pstate, nav->location)));
-	}
+	return (func_volatile(funcid) == PROVOLATILE_VOLATILE);
 }
 
 /*
- * check_rpr_nav_nesting_walker
- *		Walk the DEFINE clause expression tree and validate each RPRNavExpr.
+ * define_walker
+ *		Single-pass DEFINE clause validator.  At each node, enforces:
+ *
+ *		  [1] no volatile callees (and no NextValueExpr) -- anywhere in
+ *			  the tree, regardless of phase
+ *		  [2] for each outer RPRNavExpr (PHASE_BODY -> PHASE_NAV_ARG):
+ *			  - nav.arg must contain at least one column reference
+ *			  - PREV/NEXT wrapping FIRST/LAST is flattened in place
+ *				to a compound kind (PREV_FIRST, PREV_LAST, NEXT_FIRST,
+ *				NEXT_LAST)
+ *			  - any other nesting is rejected (FIRST(PREV()),
+ *				PREV(PREV()), FIRST(FIRST()), three-or-more deep)
+ *		  [3] for each nav offset (PHASE_NAV_OFFSET):
+ *			  - must be a run-time constant (no column references)
+ *
+ * Var sightings feed the column-ref rule for the enclosing nav scope;
+ * RPRNavExpr sightings inside PHASE_NAV_ARG feed the nesting decision.
+ * See the comment block above DefinePhase for the overall design and
+ * how each subtree is walked exactly once.
  */
 static bool
-check_rpr_nav_nesting_walker(Node *node, void *context)
+define_walker(Node *node, void *context)
 {
+	DefineWalkCtx *ctx = (DefineWalkCtx *) context;
+
 	if (node == NULL)
 		return false;
+
+	/*
+	 * Reject volatile callees and sequence operations anywhere in the DEFINE
+	 * clause: they are non-deterministic across the multiple predicate
+	 * evaluations that NFA backtracking and PREV/NEXT navigation may trigger
+	 * for a single row.
+	 */
+	if (check_functions_in_node(node, nav_volatile_func_checker, NULL))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("volatile functions are not allowed in DEFINE clause"),
+				 parser_errposition(ctx->pstate, exprLocation(node))));
+	if (IsA(node, NextValueExpr))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("sequence operations are not allowed in DEFINE clause"),
+				 parser_errposition(ctx->pstate, exprLocation(node))));
+
+	/* Var sighting feeds the column-ref rule for the enclosing nav scope. */
+	if (IsA(node, Var) &&
+		(ctx->phase == DEFINE_PHASE_NAV_ARG ||
+		 ctx->phase == DEFINE_PHASE_NAV_OFFSET))
+		ctx->has_column_ref = true;
+
 	if (IsA(node, RPRNavExpr))
 	{
-		check_rpr_nav_expr((RPRNavExpr *) node, (ParseState *) context);
-		/* don't recurse into arg; nesting already checked above */
-		return false;
+		RPRNavExpr *nav = (RPRNavExpr *) node;
+
+		if (ctx->phase == DEFINE_PHASE_NAV_ARG)
+		{
+			/*
+			 * Nested nav inside an outer nav.arg: record for the outer's
+			 * compound / nesting decision, then keep recursing so deeper Vars
+			 * and volatile callees are still observed.
+			 */
+			if (ctx->nav_count == 0)
+				ctx->inner_kind = nav->kind;
+			ctx->nav_count++;
+			return expression_tree_walker(node, define_walker, ctx);
+		}
+
+		if (ctx->phase == DEFINE_PHASE_NAV_OFFSET)
+		{
+			/*
+			 * Navs inside offset_arg are unusual but not directly banned; the
+			 * constant-offset rule will catch any Var or volatile they
+			 * contain.
+			 */
+			return expression_tree_walker(node, define_walker, ctx);
+		}
+
+		/*
+		 * PHASE_BODY: this is an outer nav at top level.  Walk arg first to
+		 * collect nesting / column-ref state, then validate and (for compound
+		 * forms) flatten, then walk offset(s).
+		 */
+		{
+			DefineWalkCtx saved = *ctx;
+			bool		outer_phys = (nav->kind == RPR_NAV_PREV ||
+									  nav->kind == RPR_NAV_NEXT);
+			bool		flattened = false;
+
+			ctx->phase = DEFINE_PHASE_NAV_ARG;
+			ctx->nav_count = 0;
+			ctx->has_column_ref = false;
+			ctx->inner_kind = 0;
+			(void) define_walker((Node *) nav->arg, ctx);
+
+			if (ctx->nav_count > 0)
+			{
+				bool		inner_phys = (ctx->inner_kind == RPR_NAV_PREV ||
+										  ctx->inner_kind == RPR_NAV_NEXT);
+
+				if (outer_phys && !inner_phys)
+				{
+					RPRNavExpr *inner;
+
+					/* Reject triple-or-deeper nesting */
+					if (ctx->nav_count > 1)
+						ereport(ERROR,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("cannot nest row pattern navigation more than two levels deep"),
+								 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+								 parser_errposition(ctx->pstate, nav->location)));
+
+					if (!IsA(nav->arg, RPRNavExpr))
+						ereport(ERROR,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("row pattern navigation operation must be a direct argument of the outer navigation"),
+								 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+								 parser_errposition(ctx->pstate, nav->location)));
+
+					inner = (RPRNavExpr *) nav->arg;
+
+					if (nav->kind == RPR_NAV_PREV && inner->kind == RPR_NAV_FIRST)
+						nav->kind = RPR_NAV_PREV_FIRST;
+					else if (nav->kind == RPR_NAV_PREV && inner->kind == RPR_NAV_LAST)
+						nav->kind = RPR_NAV_PREV_LAST;
+					else if (nav->kind == RPR_NAV_NEXT && inner->kind == RPR_NAV_FIRST)
+						nav->kind = RPR_NAV_NEXT_FIRST;
+					else if (nav->kind == RPR_NAV_NEXT && inner->kind == RPR_NAV_LAST)
+						nav->kind = RPR_NAV_NEXT_LAST;
+
+					nav->compound_offset_arg = nav->offset_arg;
+					nav->offset_arg = inner->offset_arg;
+					nav->arg = inner->arg;
+					flattened = true;
+				}
+				else if (!outer_phys && inner_phys)
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("FIRST and LAST cannot contain PREV or NEXT"),
+							 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+							 parser_errposition(ctx->pstate, nav->location)));
+				else if (outer_phys && inner_phys)
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("PREV and NEXT cannot contain PREV or NEXT"),
+							 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+							 parser_errposition(ctx->pstate, nav->location)));
+				else
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("FIRST and LAST cannot contain FIRST or LAST"),
+							 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+							 parser_errposition(ctx->pstate, nav->location)));
+			}
+			else if (!ctx->has_column_ref)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("argument of row pattern navigation operation must include at least one column reference"),
+						 parser_errposition(ctx->pstate, nav->location)));
+			}
+
+			/*
+			 * Walk offset arg(s) in PHASE_NAV_OFFSET to enforce the
+			 * constant-offset rule.  For compound forms, both the inner
+			 * (post-flatten nav->offset_arg) and outer (compound_offset_arg)
+			 * offsets must be constants; the inner's column-ref status was
+			 * not separately tracked during the PHASE_NAV_ARG walk (which
+			 * only checks that nav.arg as a whole has at least one Var), so
+			 * it is re-walked here to catch column references the inner
+			 * offset would have leaked.
+			 */
+			ctx->phase = DEFINE_PHASE_NAV_OFFSET;
+
+			if (nav->offset_arg != NULL)
+			{
+				ctx->has_column_ref = false;
+				(void) define_walker((Node *) nav->offset_arg, ctx);
+				if (ctx->has_column_ref)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("row pattern navigation offset must be a run-time constant"),
+							 parser_errposition(ctx->pstate, exprLocation((Node *) nav->offset_arg))));
+			}
+			if (flattened && nav->compound_offset_arg != NULL)
+			{
+				ctx->has_column_ref = false;
+				(void) define_walker((Node *) nav->compound_offset_arg, ctx);
+				if (ctx->has_column_ref)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("row pattern navigation offset must be a run-time constant"),
+							 parser_errposition(ctx->pstate, exprLocation((Node *) nav->compound_offset_arg))));
+			}
+
+			*ctx = saved;
+			return false;
+		}
 	}
-	return expression_tree_walker(node, check_rpr_nav_nesting_walker, context);
+
+	return expression_tree_walker(node, define_walker, ctx);
 }

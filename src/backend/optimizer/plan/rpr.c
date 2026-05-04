@@ -41,6 +41,7 @@
 
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
+#include "nodes/nodeFuncs.h"
 #include "optimizer/rpr.h"
 
 /* Forward declarations - pattern comparison */
@@ -1990,4 +1991,37 @@ buildRPRPattern(RPRPatternNode *pattern, List *defineVariableList,
 	}
 
 	return result;
+}
+
+/*
+ * nav_traversal_walker
+ *		Shared expression-tree walker that locates RPRNavExpr nodes in a
+ *		DEFINE expression and dispatches each one to a caller-supplied
+ *		visitor.  Used by:
+ *		  - planner (visit_nav_plan in createplan.c) to collect tuplestore
+ *		    trim offsets and per-variable match_start dependency
+ *		  - executor (visit_nav_exec in nodeWindowAgg.c) to evaluate
+ *		    non-constant nav offsets at WindowAggState init time
+ *
+ * The driver wraps a mode-specific context in a NavTraversal and passes
+ * it as ctx; the visitor casts t->data to its own context type.  Children
+ * of an RPRNavExpr are not walked: the parser's nesting restrictions
+ * ensure offsets and dependencies are fully captured by the outer nav
+ * kind, so the visitor only needs to inspect the RPRNavExpr itself.
+ */
+bool
+nav_traversal_walker(Node *node, void *ctx)
+{
+	if (node == NULL)
+		return false;
+
+	if (IsA(node, RPRNavExpr))
+	{
+		NavTraversal *t = (NavTraversal *) ctx;
+
+		t->visit(t, (RPRNavExpr *) node);
+		return false;
+	}
+
+	return expression_tree_walker(node, nav_traversal_walker, ctx);
 }

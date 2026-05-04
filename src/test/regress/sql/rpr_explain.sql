@@ -2699,9 +2699,8 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
 );
 
--- Compound NEXT(FIRST(val, N), M): constant lookahead overflow -> no trim impact
--- N + M overflows int64, but target is forward from match_start so it never
--- constrains trim.  Lookahead remains at default (0).
+-- Compound NEXT(FIRST(val, N), M): constant lookahead overflow -> infinite
+-- N + M overflows int64; forward reach is unbounded, displayed as infinite.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -2728,7 +2727,7 @@ EXPLAIN (COSTS OFF, ANALYZE, TIMING OFF, SUMMARY OFF)
 RESET plan_cache_mode;
 DEALLOCATE test_overflow_lookback;
 
--- Compound NEXT(FIRST(val, $1), $2): parameter lookahead overflow -> no trim impact
+-- Compound NEXT(FIRST(val, $1), $2): parameter lookahead overflow -> infinite
 PREPARE test_overflow_lookahead(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)

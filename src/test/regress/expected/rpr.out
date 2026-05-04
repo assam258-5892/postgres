@@ -1144,7 +1144,31 @@ WINDOW w AS (
 );
 ERROR:  row pattern navigation offset must be a run-time constant
 LINE 7:     DEFINE A AS PREV(price, price) > 0
-                        ^
+                                    ^
+-- Non-constant offset: column reference in compound inner offset
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(LAST(price, price), 2) > 0
+);
+ERROR:  row pattern navigation offset must be a run-time constant
+LINE 7:     DEFINE A AS PREV(LAST(price, price), 2) > 0
+                                         ^
+-- Non-constant offset: column reference in compound outer offset
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(LAST(price, 1), price) > 0
+);
+ERROR:  row pattern navigation offset must be a run-time constant
+LINE 7:     DEFINE A AS PREV(LAST(price, 1), price) > 0
+                                             ^
 -- Non-constant offset: volatile function as offset
 SELECT price FROM stock
 WINDOW w AS (
@@ -1154,9 +1178,9 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS PREV(price, random()::int) > 0
 );
-ERROR:  row pattern navigation offset must be a run-time constant
+ERROR:  volatile functions are not allowed in DEFINE clause
 LINE 7:     DEFINE A AS PREV(price, random()::int) > 0
-                        ^
+                                    ^
 -- Non-constant offset: subquery as offset
 SELECT price FROM stock
 WINDOW w AS (
@@ -1181,7 +1205,7 @@ WINDOW w AS (
 ERROR:  cannot use subquery in DEFINE expression
 LINE 7:     DEFINE A AS PREV(price + (SELECT 1)) > 0
                                      ^
--- First arg: volatile function is allowed (evaluated on target row)
+-- Volatile function inside nav.arg is rejected at parse time
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM stock
@@ -1191,30 +1215,24 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS PREV(price + random() * 0) >= 0
 );
- company  |   tdate    | price | first_value | last_value | count 
-----------+------------+-------+-------------+------------+-------
- company1 | 07-01-2023 |   100 |             |            |     0
- company1 | 07-02-2023 |   200 |         200 |        130 |     9
- company1 | 07-03-2023 |   150 |             |            |     0
- company1 | 07-04-2023 |   140 |             |            |     0
- company1 | 07-05-2023 |   150 |             |            |     0
- company1 | 07-06-2023 |    90 |             |            |     0
- company1 | 07-07-2023 |   110 |             |            |     0
- company1 | 07-08-2023 |   130 |             |            |     0
- company1 | 07-09-2023 |   120 |             |            |     0
- company1 | 07-10-2023 |   130 |             |            |     0
- company2 | 07-01-2023 |    50 |             |            |     0
- company2 | 07-02-2023 |  2000 |        2000 |       1300 |     9
- company2 | 07-03-2023 |  1500 |             |            |     0
- company2 | 07-04-2023 |  1400 |             |            |     0
- company2 | 07-05-2023 |  1500 |             |            |     0
- company2 | 07-06-2023 |    60 |             |            |     0
- company2 | 07-07-2023 |  1100 |             |            |     0
- company2 | 07-08-2023 |  1300 |             |            |     0
- company2 | 07-09-2023 |  1200 |             |            |     0
- company2 | 07-10-2023 |  1300 |             |            |     0
-(20 rows)
-
+ERROR:  volatile functions are not allowed in DEFINE clause
+LINE 8:     DEFINE A AS PREV(price + random() * 0) >= 0
+                                     ^
+-- nextval is volatile (per pg_proc), so it is rejected via the FuncExpr
+-- path with the "volatile functions" message
+CREATE SEQUENCE rpr_seq;
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS price > nextval('rpr_seq')
+);
+ERROR:  volatile functions are not allowed in DEFINE clause
+LINE 7:     DEFINE A AS price > nextval('rpr_seq')
+                                ^
+DROP SEQUENCE rpr_seq;
 --
 -- 2-arg PREV/NEXT: functional tests
 --
