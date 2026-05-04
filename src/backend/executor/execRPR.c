@@ -38,6 +38,21 @@
 #define WORDNUM(x)	((x) / BITS_PER_BITMAPWORD)
 #define BITNUM(x)	((x) % BITS_PER_BITMAPWORD)
 
+/*
+ * Set the visited bit for elemIdx and update the high-water marks
+ * (nfaVisitedMin/MaxWord) so that the next reset only has to clear
+ * the touched range instead of the full nfaVisitedNWords array.
+ */
+static inline void
+nfa_mark_visited(WindowAggState *winstate, int16 elemIdx)
+{
+	int16		w = WORDNUM(elemIdx);
+
+	winstate->nfaVisitedElems[w] |= ((bitmapword) 1 << BITNUM(elemIdx));
+	winstate->nfaVisitedMinWord = Min(winstate->nfaVisitedMinWord, w);
+	winstate->nfaVisitedMaxWord = Max(winstate->nfaVisitedMaxWord, w);
+}
+
 /* Forward declarations - NFA state management */
 static RPRNFAState *nfa_state_alloc(WindowAggState *winstate);
 static void nfa_state_free(WindowAggState *winstate, RPRNFAState *state);
@@ -320,8 +335,7 @@ nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx, RPRNFAState *
 	RPRNFAState *tail = NULL;
 
 	/* Mark VAR in visited before duplicate check to prevent DFS loops */
-	winstate->nfaVisitedElems[WORDNUM(state->elemIdx)] |=
-		((bitmapword) 1 << BITNUM(state->elemIdx));
+	nfa_mark_visited(winstate, state->elemIdx);
 
 	/* Check for duplicate and find tail */
 	for (s = ctx->states; s != NULL; s = s->next)
@@ -1341,8 +1355,7 @@ nfa_advance_state(WindowAggState *winstate, RPRNFAContext *ctx,
 	 * the same VAR in a new iteration.
 	 */
 	if (!RPRElemIsVar(elem))
-		winstate->nfaVisitedElems[WORDNUM(state->elemIdx)] |=
-			((bitmapword) 1 << BITNUM(state->elemIdx));
+		nfa_mark_visited(winstate, state->elemIdx);
 
 	switch (elem->varId)
 	{
@@ -1394,9 +1407,23 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 		CHECK_FOR_INTERRUPTS();
 		savedMatchedState = ctx->matchedState;
 
-		/* Clear visited bitmap before each state's DFS expansion */
-		memset(winstate->nfaVisitedElems, 0,
-			   sizeof(bitmapword) * winstate->nfaVisitedNWords);
+		/*
+		 * Clear visited bitmap before each state's DFS expansion.  Only the
+		 * range touched since the previous reset (tracked via the high-water
+		 * marks updated in nfa_mark_visited) needs to be cleared; for small
+		 * NFAs this is the whole array, but for large NFAs whose DFS only
+		 * reaches a few elements per advance it avoids walking the full
+		 * bitmap.
+		 */
+		if (winstate->nfaVisitedMaxWord >= winstate->nfaVisitedMinWord)
+		{
+			memset(&winstate->nfaVisitedElems[winstate->nfaVisitedMinWord], 0,
+				   sizeof(bitmapword) *
+				   (winstate->nfaVisitedMaxWord -
+					winstate->nfaVisitedMinWord + 1));
+			winstate->nfaVisitedMinWord = INT16_MAX;
+			winstate->nfaVisitedMaxWord = -1;
+		}
 
 		state = states;
 		states = states->next;

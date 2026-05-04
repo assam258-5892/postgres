@@ -2673,6 +2673,10 @@ typedef struct WindowAggState
 									 * detection */
 	int			nfaVisitedNWords;	/* number of bitmapwords in
 									 * nfaVisitedElems */
+	int16		nfaVisitedMinWord;	/* lowest bitmapword index touched since
+									 * last reset (INT16_MAX = none) */
+	int16		nfaVisitedMaxWord;	/* highest bitmapword index touched since
+									 * last reset (-1 = none) */
 	int64		nfaLastProcessedRow;	/* last row processed by NFA (-1 =
 										 * none) */
 
