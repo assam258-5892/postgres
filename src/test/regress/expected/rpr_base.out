@@ -3074,10 +3074,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS A.val > 0
 );
-ERROR:  pattern variable qualified column reference "a.val" is not supported in DEFINE clause
+ERROR:  pattern variable qualified expression "a.val" is not supported in DEFINE clause
 LINE 7:     DEFINE A AS A.val > 0
                         ^
--- Expected: ERROR: pattern variable qualified column reference "a.val" is not supported
+-- Expected: ERROR: pattern variable qualified expression "a.val" is not supported
 -- PATTERN-only variable qualified name: not supported even without DEFINE entry
 SELECT COUNT(*) OVER w
 FROM rpr_err
@@ -3087,10 +3087,10 @@ WINDOW w AS (
     PATTERN (A+ B+)
     DEFINE A AS B.val > 0
 );
-ERROR:  pattern variable qualified column reference "b.val" is not supported in DEFINE clause
+ERROR:  pattern variable qualified expression "b.val" is not supported in DEFINE clause
 LINE 7:     DEFINE A AS B.val > 0
                         ^
--- Expected: ERROR: pattern variable qualified column reference "b.val" is not supported
+-- Expected: ERROR: pattern variable qualified expression "b.val" is not supported
 -- DEFINE-only variable qualified name: still a pattern variable, not a range variable
 SELECT COUNT(*) OVER w
 FROM rpr_err
@@ -3103,7 +3103,7 @@ WINDOW w AS (
 ERROR:  DEFINE variable "b" is not used in PATTERN
 LINE 7:     DEFINE A AS val > 0, B AS B.val > 0
                                  ^
--- Expected: ERROR: pattern variable qualified column reference "b.val" is not supported
+-- Expected: ERROR: pattern variable qualified expression "b.val" is not supported
 -- FROM-clause range variable qualified name: not allowed (prohibited by SQL standard 6.5)
 SELECT COUNT(*) OVER w
 FROM rpr_err
@@ -3113,10 +3113,76 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS rpr_err.val > 0
 );
-ERROR:  range variable qualified column reference "rpr_err.val" is not allowed in DEFINE clause
+ERROR:  range variable qualified expression "rpr_err.val" is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS rpr_err.val > 0
                         ^
--- Expected: ERROR: range variable qualified column reference "rpr_err.val" is not allowed
+-- Expected: ERROR: range variable qualified expression "rpr_err.val" is not allowed
+-- Unknown qualifier (neither pattern var nor range var): the DEFINE pre-check
+-- must fall through so that normal column resolution produces a sensible error.
+SELECT COUNT(*) OVER w
+FROM rpr_err
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS nosuch.val > 0
+);
+ERROR:  missing FROM-clause entry for table "nosuch"
+LINE 7:     DEFINE A AS nosuch.val > 0
+                        ^
+-- Expected: ERROR: missing FROM-clause entry for table "nosuch"
+-- Unqualified composite field access in DEFINE works: no qualifier means no
+-- pattern/range-var navigation, so the pre-check skips and normal resolution
+-- handles "(items).amount" via A_Indirection on the current row.
+CREATE TYPE rpr_item AS (name TEXT, amount INT);
+CREATE TEMP TABLE rpr_composite (id int, items rpr_item);
+INSERT INTO rpr_composite VALUES (1, ROW('a',5)), (2, ROW('b',15)), (3, ROW('c',25));
+SELECT id, (items).amount, COUNT(*) OVER w AS cnt
+FROM rpr_composite
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (A+)
+    DEFINE A AS (items).amount > 10
+);
+ id | amount | cnt 
+----+--------+-----
+  1 |      5 |   0
+  2 |     15 |   2
+  3 |     25 |   1
+(3 rows)
+
+-- Expected: rows where (items).amount > 10 form matches; counts reflect frame size
+-- Composite type field selection (qualified forms): the ColumnRef portion ("A.items" or
+-- "rpr_composite.items") is what gets quoted; the trailing ".amount" lives in
+-- the surrounding A_Indirection node and is not visible to the pre-check.
+SELECT COUNT(*) OVER w
+FROM rpr_composite
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS (A.items).amount > 10
+);
+ERROR:  pattern variable qualified expression "a.items" is not supported in DEFINE clause
+LINE 7:     DEFINE A AS (A.items).amount > 10
+                         ^
+-- Expected: ERROR: pattern variable qualified expression "a.items" is not supported
+SELECT COUNT(*) OVER w
+FROM rpr_composite
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS (rpr_composite.items).amount > 10
+);
+ERROR:  range variable qualified expression "rpr_composite.items" is not allowed in DEFINE clause
+LINE 7:     DEFINE A AS (rpr_composite.items).amount > 10
+                         ^
+-- Expected: ERROR: range variable qualified expression "rpr_composite.items" is not allowed
+DROP TABLE rpr_composite;
+DROP TYPE rpr_item;
 -- Semantic errors
 -- Undefined column in DEFINE
 SELECT COUNT(*) OVER w

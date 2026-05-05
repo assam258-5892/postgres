@@ -628,11 +628,24 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	if (node != NULL)
 		return node;
 
-	/*
-	 * Qualified column references in DEFINE are not supported.  This covers
-	 * both FROM-clause range variables (prohibited by §6.5) and pattern
-	 * variable qualified names (e.g. UP.price), which are valid per §4.16
-	 * but not yet implemented.
+	/*----------
+	 * Qualified references in DEFINE need a tri-classification:
+	 *
+	 *	  pattern variable qualifier (e.g. UP.price): valid per 19075-5 4.16
+	 *	  but not yet implemented -- raise FEATURE_NOT_SUPPORTED.
+	 *
+	 *	  FROM-clause range variable qualifier: prohibited by 19075-5 6.5
+	 *	  -- raise SYNTAX_ERROR.
+	 *
+	 *	  any other qualifier (typo, undefined name): fall through and let
+	 *	  normal column resolution produce a sensible error.
+	 *
+	 * The quoted text reflects only the ColumnRef portion; a trailing field
+	 * selection on a composite type (e.g. ".amount" in "(A.items).amount")
+	 * lives in the surrounding A_Indirection node and is not included here.
+	 * That can be revisited when MEASURES support adds indirection-aware
+	 * traversal.
+	 *----------
 	 */
 	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE &&
 		list_length(cref->fields) != 1)
@@ -653,15 +666,17 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 		if (is_pattern_var)
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("pattern variable qualified column reference \"%s\" is not supported in DEFINE clause",
+					 errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
 							NameListToString(cref->fields)),
 					 parser_errposition(pstate, cref->location)));
-		else
+		else if (refnameNamespaceItem(pstate, NULL, qualifier,
+									  cref->location, NULL) != NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("range variable qualified column reference \"%s\" is not allowed in DEFINE clause",
+					 errmsg("range variable qualified expression \"%s\" is not allowed in DEFINE clause",
 							NameListToString(cref->fields)),
 					 parser_errposition(pstate, cref->location)));
+		/* else: unknown qualifier -- fall through to normal resolution */
 	}
 
 	/*----------
