@@ -1192,8 +1192,8 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
 </synopsis>
 
     Conversely, variables defined in the <literal>DEFINE</literal> clause
-    but not used in the <literal>PATTERN</literal> clause are filtered out
-    during query planning.
+    but not used in the <literal>PATTERN</literal> clause are rejected
+    with an error.
    </para>
 
    <para>

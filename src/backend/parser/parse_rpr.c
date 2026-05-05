@@ -183,11 +183,11 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
  * Recursively traverses the pattern tree, collecting unique variable names.
  * Throws an error if the number of unique variables exceeds RPR_VARID_MAX.
  *
- * If rpDefs is non-NULL, DEFINE variable names are also collected into
- * varNames so that transformColumnRef can distinguish pattern variable
- * qualifiers from FROM-clause range variables.
- *
- * varNames is both input and output: existing names are preserved, new ones added.
+ * If rpDefs is non-NULL, each DEFINE variable name is also validated against
+ * varNames; any DEFINE name not present in PATTERN is rejected with an error.
+ * varNames itself is not extended by this step -- it carries only PATTERN
+ * variable names, which is what transformColumnRef checks via
+ * p_rpr_pattern_vars to identify pattern variable qualifiers.
  */
 static void
 validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
@@ -244,10 +244,10 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 	}
 
 	/*
-	 * After the top-level call, also collect DEFINE variable names that are
-	 * not already in the list.  This is only done once at the outermost
-	 * recursion level, detected by rpDefs being non-NULL (recursive calls
-	 * pass NULL).
+	 * After the top-level call, validate that every DEFINE variable name is
+	 * present in the PATTERN variable list; reject names not used in PATTERN.
+	 * This is only done once at the outermost recursion level, detected by
+	 * rpDefs being non-NULL (recursive calls pass NULL).
 	 */
 	if (rpDefs)
 	{
@@ -293,9 +293,9 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
  * Note: Variables not in DEFINE are evaluated as TRUE by the executor.
  * Variables in DEFINE but not in PATTERN are rejected as an error.
  *
- * XXX Pattern variable qualified column references in DEFINE (e.g.
- * "A.price") are not yet supported.  Currently rejected by
- * transformColumnRef in parse_expr.c via the p_rpr_pattern_vars check.
+ * XXX Pattern variable qualified expressions in DEFINE (e.g. "A.price")
+ * are not yet supported.  Currently rejected by transformColumnRef in
+ * parse_expr.c via the p_rpr_pattern_vars check.
  */
 static List *
 transformDefineClause(ParseState *pstate, WindowClause *wc, WindowDef *windef,
@@ -317,8 +317,8 @@ transformDefineClause(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	Assert(windef->rpCommonSyntax->rpDefs != NULL);
 
 	/*
-	 * Validate PATTERN variable count and collect all RPR variable names
-	 * (PATTERN + DEFINE) for use in transformColumnRef.
+	 * Validate PATTERN variable count, reject DEFINE variables not used in
+	 * PATTERN, and collect PATTERN variable names for transformColumnRef.
 	 */
 	validateRPRPatternVarCount(pstate, windef->rpCommonSyntax->rpPattern,
 							   windef->rpCommonSyntax->rpDefs,
