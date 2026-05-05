@@ -1027,10 +1027,10 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 	/* Check recursion depth limit before overflow occurs */
 	if (depth >= RPR_DEPTH_MAX)
 		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("pattern nesting too deep"),
-				 errdetail("Pattern nesting depth %d exceeds maximum %d.",
-						   depth, RPR_DEPTH_MAX - 1)));
+				errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				errmsg("pattern nesting too deep"),
+				errdetail("Pattern nesting depth %d exceeds maximum %d.",
+						  depth, RPR_DEPTH_MAX - 1));
 
 	/* Track maximum depth */
 	if (depth > *maxDepth)
@@ -1120,10 +1120,10 @@ scanRPRPattern(RPRPatternNode *node, char **varNames, int *numVars,
 
 	if (*numElements > RPR_ELEMIDX_MAX)
 		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("pattern too complex"),
-				 errdetail("Pattern has %d elements, maximum is %d.",
-						   *numElements, RPR_ELEMIDX_MAX)));
+				errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				errmsg("pattern too complex"),
+				errdetail("Pattern has %d elements, maximum is %d.",
+						  *numElements, RPR_ELEMIDX_MAX));
 }
 
 /*

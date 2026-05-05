@@ -95,20 +95,20 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	/* Frame type must be "ROW" */
 	if (wc->frameOptions & FRAMEOPTION_GROUPS)
 		ereport(ERROR,
-				(errcode(ERRCODE_WINDOWING_ERROR),
-				 errmsg("cannot use FRAME option GROUPS with row pattern recognition"),
-				 errhint("Use ROWS instead."),
-				 parser_errposition(pstate,
-									windef->frameLocation >= 0 ?
-									windef->frameLocation : windef->location)));
+				errcode(ERRCODE_WINDOWING_ERROR),
+				errmsg("cannot use FRAME option GROUPS with row pattern recognition"),
+				errhint("Use ROWS instead."),
+				parser_errposition(pstate,
+								   windef->frameLocation >= 0 ?
+								   windef->frameLocation : windef->location));
 	if (wc->frameOptions & FRAMEOPTION_RANGE)
 		ereport(ERROR,
-				(errcode(ERRCODE_WINDOWING_ERROR),
-				 errmsg("cannot use FRAME option RANGE with row pattern recognition"),
-				 errhint("Use ROWS instead."),
-				 parser_errposition(pstate,
-									windef->frameLocation >= 0 ?
-									windef->frameLocation : windef->location)));
+				errcode(ERRCODE_WINDOWING_ERROR),
+				errmsg("cannot use FRAME option RANGE with row pattern recognition"),
+				errhint("Use ROWS instead."),
+				parser_errposition(pstate,
+								   windef->frameLocation >= 0 ?
+								   windef->frameLocation : windef->location));
 
 	/* Frame must start at current row */
 	if ((wc->frameOptions & FRAMEOPTION_START_CURRENT_ROW) == 0)
@@ -130,11 +130,11 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 			   (wc->frameOptions & FRAMEOPTION_START_OFFSET_FOLLOWING));
 
 		ereport(ERROR,
-				(errcode(ERRCODE_WINDOWING_ERROR),
-				 errmsg("FRAME must start at CURRENT ROW when using row pattern recognition"),
-				 errdetail("Current frame starts with %s.", startBound),
-				 errhint("Use: %s BETWEEN CURRENT ROW AND ...", frameType),
-				 parser_errposition(pstate, windef->frameLocation >= 0 ? windef->frameLocation : windef->location)));
+				errcode(ERRCODE_WINDOWING_ERROR),
+				errmsg("FRAME must start at CURRENT ROW when using row pattern recognition"),
+				errdetail("Current frame starts with %s.", startBound),
+				errhint("Use: %s BETWEEN CURRENT ROW AND ...", frameType),
+				parser_errposition(pstate, windef->frameLocation >= 0 ? windef->frameLocation : windef->location));
 	}
 
 	/* EXCLUDE options are not permitted */
@@ -156,11 +156,11 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 			   (wc->frameOptions & FRAMEOPTION_EXCLUDE_TIES));
 
 		ereport(ERROR,
-				(errcode(ERRCODE_WINDOWING_ERROR),
-				 errmsg("cannot use EXCLUDE options with row pattern recognition"),
-				 errdetail("Frame definition includes %s.", excludeType),
-				 errhint("Remove the EXCLUDE clause from the window definition."),
-				 parser_errposition(pstate, windef->excludeLocation >= 0 ? windef->excludeLocation : windef->location)));
+				errcode(ERRCODE_WINDOWING_ERROR),
+				errmsg("cannot use EXCLUDE options with row pattern recognition"),
+				errdetail("Frame definition includes %s.", excludeType),
+				errhint("Remove the EXCLUDE clause from the window definition."),
+				parser_errposition(pstate, windef->excludeLocation >= 0 ? windef->excludeLocation : windef->location));
 	}
 
 	/* Transform AFTER MATCH SKIP TO clause */
@@ -220,11 +220,11 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 					/* Check against RPR_VARID_MAX before adding */
 					if (list_length(*varNames) >= RPR_VARID_MAX)
 						ereport(ERROR,
-								(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-								 errmsg("too many pattern variables"),
-								 errdetail("Maximum is %d.", RPR_VARID_MAX),
-								 parser_errposition(pstate,
-													exprLocation((Node *) node))));
+								errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+								errmsg("too many pattern variables"),
+								errdetail("Maximum is %d.", RPR_VARID_MAX),
+								parser_errposition(pstate,
+												   exprLocation((Node *) node)));
 
 					*varNames = lappend(*varNames, makeString(pstrdup(node->varName)));
 				}
@@ -267,10 +267,10 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 			}
 			if (!found)
 				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("DEFINE variable \"%s\" is not used in PATTERN",
-								rt->name),
-						 parser_errposition(pstate, rt->location)));
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("DEFINE variable \"%s\" is not used in PATTERN",
+							   rt->name),
+						parser_errposition(pstate, rt->location));
 		}
 	}
 }
@@ -347,10 +347,10 @@ transformDefineClause(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 
 			if (!strcmp(n, name))
 				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("DEFINE variable \"%s\" appears more than once",
-								name),
-						 parser_errposition(pstate, exprLocation((Node *) r))));
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("DEFINE variable \"%s\" appears more than once",
+							   name),
+						parser_errposition(pstate, exprLocation((Node *) r)));
 		}
 
 		restargets = lappend(restargets, restarget);
@@ -529,14 +529,14 @@ define_walker(Node *node, void *context)
 	 */
 	if (check_functions_in_node(node, nav_volatile_func_checker, NULL))
 		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("volatile functions are not allowed in DEFINE clause"),
-				 parser_errposition(ctx->pstate, exprLocation(node))));
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("volatile functions are not allowed in DEFINE clause"),
+				parser_errposition(ctx->pstate, exprLocation(node)));
 	if (IsA(node, NextValueExpr))
 		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("sequence operations are not allowed in DEFINE clause"),
-				 parser_errposition(ctx->pstate, exprLocation(node))));
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("sequence operations are not allowed in DEFINE clause"),
+				parser_errposition(ctx->pstate, exprLocation(node)));
 
 	/* Var sighting feeds the column-ref rule for the enclosing nav scope. */
 	if (IsA(node, Var) &&
@@ -600,17 +600,17 @@ define_walker(Node *node, void *context)
 					/* Reject triple-or-deeper nesting */
 					if (ctx->nav_count > 1)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("cannot nest row pattern navigation more than two levels deep"),
-								 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-								 parser_errposition(ctx->pstate, nav->location)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("cannot nest row pattern navigation more than two levels deep"),
+								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+								parser_errposition(ctx->pstate, nav->location));
 
 					if (!IsA(nav->arg, RPRNavExpr))
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("row pattern navigation operation must be a direct argument of the outer navigation"),
-								 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-								 parser_errposition(ctx->pstate, nav->location)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("row pattern navigation operation must be a direct argument of the outer navigation"),
+								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+								parser_errposition(ctx->pstate, nav->location));
 
 					inner = (RPRNavExpr *) nav->arg;
 
@@ -630,29 +630,29 @@ define_walker(Node *node, void *context)
 				}
 				else if (!outer_phys && inner_phys)
 					ereport(ERROR,
-							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("FIRST and LAST cannot contain PREV or NEXT"),
-							 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-							 parser_errposition(ctx->pstate, nav->location)));
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("FIRST and LAST cannot contain PREV or NEXT"),
+							errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+							parser_errposition(ctx->pstate, nav->location));
 				else if (outer_phys && inner_phys)
 					ereport(ERROR,
-							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("PREV and NEXT cannot contain PREV or NEXT"),
-							 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-							 parser_errposition(ctx->pstate, nav->location)));
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("PREV and NEXT cannot contain PREV or NEXT"),
+							errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+							parser_errposition(ctx->pstate, nav->location));
 				else
 					ereport(ERROR,
-							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("FIRST and LAST cannot contain FIRST or LAST"),
-							 errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-							 parser_errposition(ctx->pstate, nav->location)));
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("FIRST and LAST cannot contain FIRST or LAST"),
+							errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+							parser_errposition(ctx->pstate, nav->location));
 			}
 			else if (!ctx->has_column_ref)
 			{
 				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("argument of row pattern navigation operation must include at least one column reference"),
-						 parser_errposition(ctx->pstate, nav->location)));
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("argument of row pattern navigation operation must include at least one column reference"),
+						parser_errposition(ctx->pstate, nav->location));
 			}
 
 			/*
@@ -673,9 +673,9 @@ define_walker(Node *node, void *context)
 				(void) define_walker((Node *) nav->offset_arg, ctx);
 				if (ctx->has_column_ref)
 					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("row pattern navigation offset must be a run-time constant"),
-							 parser_errposition(ctx->pstate, exprLocation((Node *) nav->offset_arg))));
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("row pattern navigation offset must be a run-time constant"),
+							parser_errposition(ctx->pstate, exprLocation((Node *) nav->offset_arg)));
 			}
 			if (flattened && nav->compound_offset_arg != NULL)
 			{
@@ -683,9 +683,9 @@ define_walker(Node *node, void *context)
 				(void) define_walker((Node *) nav->compound_offset_arg, ctx);
 				if (ctx->has_column_ref)
 					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("row pattern navigation offset must be a run-time constant"),
-							 parser_errposition(ctx->pstate, exprLocation((Node *) nav->compound_offset_arg))));
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("row pattern navigation offset must be a run-time constant"),
+							parser_errposition(ctx->pstate, exprLocation((Node *) nav->compound_offset_arg)));
 			}
 
 			*ctx = saved;

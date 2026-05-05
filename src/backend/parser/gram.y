@@ -17610,10 +17610,10 @@ opt_row_pattern_initial_or_seek:
 			| SEEK
 				{
 					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("SEEK is not supported"),
-							 errhint("Use INITIAL instead."),
-							 parser_errposition(@1)));
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("SEEK is not supported"),
+							errhint("Use INITIAL instead."),
+							parser_errposition(@1));
 				}
 			| /*EMPTY*/		{ $$ = true; }
 		;
@@ -17740,40 +17740,40 @@ row_pattern_quantifier_opt:
 						$$ = (Node *) makeRPRQuantifier(0, 1, @1 + 1, @1, yyscanner);
 					else
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("unsupported quantifier \"%s\"", $1),
-								 errhint("Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions."),
-								 parser_errposition(@1)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("unsupported quantifier \"%s\"", $1),
+								errhint("Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions."),
+								parser_errposition(@1));
 				}
 			/* RELUCTANT quantifiers (when lexer separates tokens) */
 			| '*' Op
 				{
 					if (strcmp($2, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid token after \"*\" quantifier"),
-								 errhint("Did you mean \"*?\" for reluctant quantifier?"),
-								 parser_errposition(@2)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token after \"*\" quantifier"),
+								errhint("Did you mean \"*?\" for reluctant quantifier?"),
+								parser_errposition(@2));
 					$$ = (Node *) makeRPRQuantifier(0, INT_MAX, @2, @1, yyscanner);
 				}
 			| '+' Op
 				{
 					if (strcmp($2, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid token after \"+\" quantifier"),
-								 errhint("Did you mean \"+?\" for reluctant quantifier?"),
-								 parser_errposition(@2)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token after \"+\" quantifier"),
+								errhint("Did you mean \"+?\" for reluctant quantifier?"),
+								parser_errposition(@2));
 					$$ = (Node *) makeRPRQuantifier(1, INT_MAX, @2, @1, yyscanner);
 				}
 			| Op Op
 				{
 					if (strcmp($1, "?") != 0 || strcmp($2, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid quantifier combination"),
-								 errhint("Did you mean \"??\" for reluctant quantifier?"),
-								 parser_errposition(@1)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid quantifier combination"),
+								errhint("Did you mean \"??\" for reluctant quantifier?"),
+								parser_errposition(@1));
 					$$ = (Node *) makeRPRQuantifier(0, 1, @2, @1, yyscanner);
 				}
 			/* {n}, {n,}, {,m}, {n,m} quantifiers */
@@ -17823,10 +17823,10 @@ row_pattern_quantifier_opt:
 				{
 					if (strcmp($4, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid token after range quantifier"),
-								 errhint("Only \"?\" is allowed after {n} to make it reluctant."),
-								 parser_errposition(@4)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token after range quantifier"),
+								errhint("Only \"?\" is allowed after {n} to make it reluctant."),
+								parser_errposition(@4));
 					if ($2 <= 0 || $2 >= INT_MAX)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
@@ -17838,10 +17838,10 @@ row_pattern_quantifier_opt:
 				{
 					if (strcmp($5, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid token after range quantifier"),
-								 errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
-								 parser_errposition(@5)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token after range quantifier"),
+								errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
+								parser_errposition(@5));
 					if ($2 < 0 || $2 >= INT_MAX)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
@@ -17853,10 +17853,10 @@ row_pattern_quantifier_opt:
 				{
 					if (strcmp($5, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid token after range quantifier"),
-								 errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
-								 parser_errposition(@5)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token after range quantifier"),
+								errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
+								parser_errposition(@5));
 					if ($3 <= 0 || $3 >= INT_MAX)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
@@ -17868,10 +17868,10 @@ row_pattern_quantifier_opt:
 				{
 					if (strcmp($6, "?") != 0)
 						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("invalid token after range quantifier"),
-								 errhint("Only \"?\" is allowed after {n,m} to make it reluctant."),
-								 parser_errposition(@6)));
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token after range quantifier"),
+								errhint("Only \"?\" is allowed after {n,m} to make it reluctant."),
+								parser_errposition(@6));
 					if ($2 < 0 || $4 <= 0 || $2 >= INT_MAX || $4 >= INT_MAX)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
