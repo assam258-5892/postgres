@@ -684,7 +684,7 @@ typedef enum RPRNavKind
 	RPR_NAV_PREV_FIRST,
 	RPR_NAV_PREV_LAST,
 	RPR_NAV_NEXT_FIRST,
-	RPR_NAV_NEXT_LAST
+	RPR_NAV_NEXT_LAST,
 } RPRNavKind;
 
 typedef struct RPRNavExpr

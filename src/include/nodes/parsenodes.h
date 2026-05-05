@@ -604,7 +604,7 @@ typedef enum RPRNavOffsetKind
 	RPR_NAV_OFFSET_FIXED,		/* resolved constant; use the offset value */
 	RPR_NAV_OFFSET_NEEDS_EVAL,	/* non-constant offset; evaluate at executor
 								 * init */
-	RPR_NAV_OFFSET_RETAIN_ALL	/* cannot determine; retain all rows (no trim) */
+	RPR_NAV_OFFSET_RETAIN_ALL,	/* cannot determine; retain all rows (no trim) */
 } RPRNavOffsetKind;
 
 /*
@@ -615,7 +615,7 @@ typedef enum RPRPatternNodeType
 	RPR_PATTERN_VAR,			/* variable reference */
 	RPR_PATTERN_SEQ,			/* sequence (concatenation) */
 	RPR_PATTERN_ALT,			/* alternation (|) */
-	RPR_PATTERN_GROUP			/* group (parentheses) */
+	RPR_PATTERN_GROUP,			/* group (parentheses) */
 } RPRPatternNodeType;
 
 /*
