@@ -1178,6 +1178,122 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v = 2
 );');
 
+-- Empty matches (length 0): mirror the test_728_* cases in rpr_nfa.sql.
+-- Window aggregates over a length-0 frame return 0 / NULL, so the SELECT
+-- result alone cannot distinguish "no match" from "empty match"; the
+-- "NFA: N matched (len 0/0/0.0)" line in EXPLAIN is the only observable
+-- proof that the empty matches were found.
+
+-- (A?){0,3}: min=0, A never matches -> 3 length-0 matches
+CREATE VIEW rpr_ev_edge_empty_match_min0 AS
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){0,3})
+    DEFINE A AS FALSE
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_min0'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){0,3})
+    DEFINE A AS FALSE
+);');
+
+-- (A?){1,3}: min=1, one empty iteration satisfies min -> 3 length-0 matches
+CREATE VIEW rpr_ev_edge_empty_match_min1 AS
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){1,3})
+    DEFINE A AS FALSE
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_min1'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){1,3})
+    DEFINE A AS FALSE
+);');
+
+-- (A?){2,3}: min=2 (SQL:2016 STR06 = STRE STRE) -> 3 length-0 matches
+CREATE VIEW rpr_ev_edge_empty_match_min2 AS
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){2,3})
+    DEFINE A AS FALSE
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_min2'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){2,3})
+    DEFINE A AS FALSE
+);');
+
+-- (A?){2,3} mixed: rows 1-2 match A (real), rows 3-4 fall back to empty
+CREATE VIEW rpr_ev_edge_empty_match_mixed AS
+SELECT count(*) OVER w
+FROM generate_series(1, 4) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){2,3})
+    DEFINE A AS v <= 2
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_mixed'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 4) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?){2,3})
+    DEFINE A AS v <= 2
+);');
+
+-- (A? B?){2,3}: pure empty multi-element body -> 3 length-0 matches
+CREATE VIEW rpr_ev_edge_empty_match_multi AS
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? B?){2,3})
+    DEFINE A AS FALSE, B AS FALSE
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_multi'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 3) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? B?){2,3})
+    DEFINE A AS FALSE, B AS FALSE
+);');
+
 -- Single row
 CREATE VIEW rpr_ev_edge_single_row AS
 SELECT count(*) OVER w

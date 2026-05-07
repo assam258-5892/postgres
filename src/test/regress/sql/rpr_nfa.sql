@@ -3234,9 +3234,9 @@ WINDOW w AS (
 );
 
 -- (A?){0,3}: min=0, nullable inner.
--- A never matches. A? matches empty, min=0 satisfied immediately.
--- Per standard: empty match expected for every row.
--- XXX: visited bitmap blocks empty iteration -> no match (same as {2,3})
+-- A never matches but A? matches empty, satisfying min=0 immediately.
+-- NFA reports 3 length-0 matches (one per row); first_value / last_value
+-- are NULL because the window frame for an empty match has no rows.
 WITH test_728_min0 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -3258,9 +3258,8 @@ WINDOW w AS (
 );
 
 -- (A?){1,3}: min=1, nullable inner.
--- A never matches. Need 1 empty iteration to satisfy min=1.
--- Per standard: empty match expected for every row.
--- XXX: visited bitmap blocks empty iteration -> no match (same as {2,3})
+-- A never matches; one empty iteration satisfies min=1.
+-- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_min1 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -3281,11 +3280,9 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
--- (A?){2,3}: min=2, nullable inner.
--- A never matches. Need 2 empty iterations to satisfy min=2.
--- Per standard: STR06=(STRE STRE) is valid for min=2.
--- Expected: empty match for every row
--- XXX: visited bitmap blocks second empty iteration -> match failure
+-- (A?){2,3}: min=2, nullable inner.  Per SQL:2016 STR06 = (STRE STRE)
+-- is valid: two empty iterations satisfy min=2.
+-- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_min2 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -3307,9 +3304,8 @@ WINDOW w AS (
 );
 
 -- (A?){2,3} mixed: some rows match A, some don't
--- Rows 1-2: A matches, greedy takes 2 -> min satisfied
--- Row 3: A doesn't match, needs 2 empty iterations for min=2
--- XXX: Row 3 fails due to visited bitmap (same as pure empty {2,3})
+-- Rows 1-2: A matches, greedy takes 2 -> min satisfied (real match)
+-- Row 3: A doesn't match, two empty iterations satisfy min=2 (length-0 match)
 -- Row 4: A matches 1 real iter + 1 ff empty exit -> match 4-4
 WITH test_728_min2_mixed AS (
     SELECT * FROM (VALUES
@@ -3364,9 +3360,8 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- (A? B?){2,3}: pure empty body (nothing matches)
--- XXX: All NULL: same issue as test_728_min2 (empty match at context
--- start yields UNMATCHED via startPos-1 initial advance)
+-- (A? B?){2,3}: pure empty body (nothing matches A or B).
+-- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_multi_empty AS (
     SELECT * FROM (VALUES
         (1, ARRAY['C']),
