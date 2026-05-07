@@ -36,7 +36,6 @@
 #include "access/htup_details.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_aggregate.h"
-#include "common/int.h"
 #include "catalog/pg_proc.h"
 #include "common/int.h"
 #include "executor/executor.h"
