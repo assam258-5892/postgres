@@ -1944,6 +1944,28 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 		case EXPR_KIND_FOR_PORTION:
 			err = _("cannot use subquery in FOR PORTION OF expression");
 			break;
+
+			/*----------
+			 * XXX SQL/RPR (19075-5 4.18.4 / 6.17.4; R010 / R020)
+			 * permits a subquery nested in a DEFINE expression provided
+			 * that:
+			 *   (a) the subquery does not itself perform row pattern
+			 *       recognition, and
+			 *   (b) the subquery does not reference a row pattern variable
+			 *       of the outer query.
+			 *
+			 * We reject all subqueries here for now.  Implementing the
+			 * case distinction would mean walking the analyzed subquery
+			 * Query tree for nested RPR window clauses to enforce (a),
+			 * and walking it for ColumnRef qualifiers matching any
+			 * ancestor's p_rpr_pattern_vars to enforce (b).  Both checks
+			 * are doable with the existing infrastructure -- they are
+			 * left as future work, not blocked on any other feature.
+			 * Until then this blanket rejection is intentional
+			 * over-rejection, not a standard fit; it subsumes both (a)
+			 * and (b) by making the subquery itself unreachable.
+			 *----------
+			 */
 		case EXPR_KIND_RPR_DEFINE:
 			err = _("cannot use subquery in DEFINE expression");
 			break;
