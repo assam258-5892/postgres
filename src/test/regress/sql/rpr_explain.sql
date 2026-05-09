@@ -1228,7 +1228,7 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );');
 
--- (A?){2,3}: min=2 (SQL:2016 STR06 = STRE STRE) -> 3 length-0 matches
+-- (A?){2,3}: min=2 (ISO/IEC 19075-5 7.2.8 STR06 = STRE STRE) -> 3 length-0 matches
 CREATE VIEW rpr_ev_edge_empty_match_min2 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 3) AS s(v)

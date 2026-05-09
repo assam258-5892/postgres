@@ -736,8 +736,9 @@ nfa_absorb_contexts(WindowAggState *winstate)
  * once per row by evaluating all DEFINE expressions.  NULL means no DEFINE
  * clauses exist (only possible during early development/testing).
  *
- * Per SQL:2016 R020, pattern variables not listed in DEFINE are implicitly
- * TRUE -- they match every row.  This is checked via varId >= list_length.
+ * Per ISO/IEC 19075-5 Feature R020, pattern variables not listed in DEFINE
+ * are implicitly TRUE -- they match every row.  This is checked via
+ * varId >= list_length.
  */
 static bool
 nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,

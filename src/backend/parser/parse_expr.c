@@ -631,11 +631,12 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	/*----------
 	 * Qualified references in DEFINE need a tri-classification:
 	 *
-	 *	  pattern variable qualifier (e.g. UP.price): valid per 19075-5 4.16
-	 *	  but not yet implemented -- raise FEATURE_NOT_SUPPORTED.
+	 *	  pattern variable qualifier (e.g. UP.price): valid per
+	 *	  ISO/IEC 19075-5 6.15 / 4.16 but not yet implemented --
+	 *	  raise FEATURE_NOT_SUPPORTED.
 	 *
-	 *	  FROM-clause range variable qualifier: prohibited by 19075-5 6.5
-	 *	  -- raise SYNTAX_ERROR.
+	 *	  FROM-clause range variable qualifier: prohibited by
+	 *	  ISO/IEC 19075-5 6.5 -- raise SYNTAX_ERROR.
 	 *
 	 *	  any other qualifier (typo, undefined name): fall through and let
 	 *	  normal column resolution produce a sensible error.
@@ -1946,7 +1947,7 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 			break;
 
 			/*----------
-			 * XXX SQL/RPR (19075-5 4.18.4 / 6.17.4; R010 / R020)
+			 * XXX SQL/RPR (ISO/IEC 19075-5 6.17.4 / 4.18.4; R020 / R010)
 			 * permits a subquery nested in a DEFINE expression provided
 			 * that:
 			 *   (a) the subquery does not itself perform row pattern

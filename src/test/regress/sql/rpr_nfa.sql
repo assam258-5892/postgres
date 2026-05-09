@@ -2976,7 +2976,7 @@ WINDOW w AS (
 
 -- ============================================================
 -- Standard Clause 7: Formal Pattern Matching Rules
--- ISO/IEC 19075-5:2021, Clause 7
+-- ISO/IEC 19075-5, Clause 7
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -3280,7 +3280,7 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
--- (A?){2,3}: min=2, nullable inner.  Per SQL:2016 STR06 = (STRE STRE)
+-- (A?){2,3}: min=2, nullable inner.  Per ISO/IEC 19075-5 7.2.8 STR06 = (STRE STRE)
 -- is valid: two empty iterations satisfy min=2.
 -- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_min2 AS (

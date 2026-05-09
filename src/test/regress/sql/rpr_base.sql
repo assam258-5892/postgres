@@ -1,6 +1,6 @@
 -- ============================================================
 -- RPR Base Tests
--- Tests for Row Pattern Recognition (ISO/IEC 19075-5:2016)
+-- Tests for Row Pattern Recognition (ISO/IEC 19075-5)
 -- ============================================================
 --
 -- Parser Layer:
@@ -2083,7 +2083,7 @@ WINDOW w AS (
 
 -- Qualified column references (NOT SUPPORTED)
 
--- Pattern variable qualified name: not supported (valid per SQL standard 4.16, not yet implemented)
+-- Pattern variable qualified name: not supported (valid per ISO/IEC 19075-5 6.15 / 4.16, not yet implemented)
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -2116,7 +2116,7 @@ WINDOW w AS (
 );
 -- Expected: ERROR: pattern variable qualified expression "b.val" is not supported
 
--- FROM-clause range variable qualified name: not allowed (prohibited by SQL standard 6.5)
+-- FROM-clause range variable qualified name: not allowed (prohibited by ISO/IEC 19075-5 6.5)
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (

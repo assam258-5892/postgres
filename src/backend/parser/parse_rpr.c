@@ -467,7 +467,7 @@ transformDefineClause(ParseState *pstate, WindowClause *wc, WindowDef *windef,
  *     (RPR's NFA may evaluate the same row's predicate multiple times
  *     during backtracking, so a volatile result would make matching
  *     non-deterministic).
- *   - For each outer RPRNavExpr (per SQL 5.6.4 nesting rules):
+ *   - For each outer RPRNavExpr (per ISO/IEC 19075-5 5.6.4 nesting rules):
  *     * arg must contain at least one column reference
  *     * PREV/NEXT wrapping FIRST/LAST flattens to a compound kind
  *     * Other nestings are rejected (FIRST(PREV()), PREV(PREV()), ...)

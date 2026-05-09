@@ -38,6 +38,12 @@ What is a Flat-Array Stream NFA?
 Chapter I  Row Pattern Recognition Overview
 ============================================================================
 
+Normative reference: ISO/IEC 19075-5 (SQL Technical Report, Part 5: Row
+pattern recognition in SQL).  Subclause numbers cited throughout this code
+base refer to that document.  Where Chapters 4 (FROM clause) and 6 (WINDOW
+clause) describe parallel material, this implementation cites the Chapter 6
+subclause first because it targets Feature R020.
+
 Row Pattern Recognition (hereafter RPR) is a feature introduced in SQL:2016
 that matches regex-based patterns against ordered row sets.
 
@@ -1033,7 +1039,7 @@ match:
 
 X-3. INITIAL vs SEEK
 
-  Standard definition (section 6.12):
+  Standard definition (ISO/IEC 19075-5 6.12):
   INITIAL: "is used to look for a match whose first row is R."
   SEEK:    "is used to permit a search for the first match anywhere
            from R through the end of the full window frame."
