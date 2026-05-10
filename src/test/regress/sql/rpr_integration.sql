@@ -783,24 +783,19 @@ ORDER BY o.id, r.id;
 -- ============================================================
 -- B7. RPR + Recursive CTE
 -- ============================================================
--- Verify that an RPR window can appear inside the non-recursive
--- (base) leg of a recursive CTE.  The plan must show the RPR
--- WindowAgg sitting under the Recursive Union as the base-leg
--- child, with the WorkTable Scan feeding the recursive leg above
--- it.  This confirms that RPR output can seed a recursive CTE
--- (window functions cannot appear in the recursive leg itself, a
--- PostgreSQL restriction, so this is the natural place to exercise
--- "RPR under Recursive Union").
---
--- XXX: Whether this case falls under the ISO/IEC 19075-5 6.17.5 /
--- 4.18.5 prohibition is not something I can judge.  If this case
--- is not prohibited, the open question is whether a query that
--- does trigger the prohibition can be constructed at all.
--- Whether to prohibit this case is left to the community.
+-- Verify that RPR is rejected inside a recursive query.
+-- ISO/IEC 19075-5 6.17.5 (R020) and 4.18.5 (R010) cite CREATE
+-- RECURSIVE VIEW examples and state that "row pattern matching
+-- is prohibited in recursive queries".  The formal rule lives in
+-- ISO/IEC 9075-2:2016 7.17 Syntax Rule 3)f): a potentially
+-- recursive <with list element> shall not contain a <row pattern
+-- measures> or <row pattern common syntax>.  Per 3)e), every
+-- <with list element> under WITH RECURSIVE is "potentially
+-- recursive", so the rejection covers the base (non-recursive)
+-- leg too, not just the self-referencing leg.
 
--- Plan: Recursive Union with the RPR WindowAgg on the base leg and
--- the WorkTable Scan on the recursive leg.
-EXPLAIN (COSTS OFF)
+-- WITH RECURSIVE: RPR in the base leg is rejected even though the
+-- base leg never references the recursive CTE name.
 WITH RECURSIVE seq AS (
     SELECT id, val, count(*) OVER w AS cnt
     FROM rpr_integ
@@ -813,19 +808,17 @@ WITH RECURSIVE seq AS (
 )
 SELECT id, val, cnt FROM seq ORDER BY id;
 
--- Result: the base leg contributes the RPR match counts; the
--- recursive leg propagates those counts with shifted ids.
-WITH RECURSIVE seq AS (
-    SELECT id, val, count(*) OVER w AS cnt
+-- CREATE RECURSIVE VIEW: rewritten by makeRecursiveViewSelect()
+-- into WITH RECURSIVE, so the same rejection applies.  This is
+-- the form ISO/IEC 19075-5 6.17.5 cites verbatim.
+CREATE RECURSIVE VIEW rpr_recv(id, val, cnt) AS
+    SELECT id, val, count(*) OVER w
     FROM rpr_integ
     WINDOW w AS (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
-        DEFINE B AS val > PREV(val))
-    UNION ALL
-    SELECT id + 100, val, cnt FROM seq WHERE id < 3
-)
-SELECT id, val, cnt FROM seq ORDER BY id;
+        DEFINE B AS val > PREV(val));
+DROP VIEW rpr_recv;
 
 -- ============================================================
 -- B8. RPR + Incremental sort
