@@ -818,7 +818,6 @@ CREATE RECURSIVE VIEW rpr_recv(id, val, cnt) AS
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val > PREV(val));
-DROP VIEW rpr_recv;
 
 -- ============================================================
 -- B8. RPR + Incremental sort

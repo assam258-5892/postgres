@@ -17585,6 +17585,7 @@ opt_row_pattern_skip_to opt_row_pattern_initial_or_seek
 				n->initial = $2;
 				n->rpPattern = (RPRPatternNode *) $5;
 				n->rpDefs = $8;
+				n->location = @3;
 				$$ = (Node *) n;
 			}
 			| /*EMPTY*/		{ $$ = NULL; }

@@ -532,6 +532,7 @@ Constraint
 ConstraintCategory
 ConstraintInfo
 ConstraintsSetStmt
+ContainRPRContext
 ControlData
 ControlFileData
 ConvInfo

@@ -646,6 +646,7 @@ typedef struct RPCommonSyntax
 	RPRPatternNode *rpPattern;	/* PATTERN clause AST */
 	List	   *rpDefs;			/* row pattern definitions clause (list of
 								 * ResTarget) */
+	ParseLoc	location;		/* PATTERN keyword location, or -1 */
 } RPCommonSyntax;
 
 /*
