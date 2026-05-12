@@ -522,9 +522,14 @@ V-3. RPR Fields of WindowAggState
   nfaVarMatched                 Per-row cache: varMatched[varId]
   nfaVisitedElems               Bitmap for cycle detection
   nfaVisitedNWords              Number of bitmapwords in nfaVisitedElems
+  nfaVisitedMinWord             Lowest bitmapword index touched since last reset
+  nfaVisitedMaxWord             Highest bitmapword index touched since last reset
   nfaStateSize                  Precomputed size of RPRNFAState
   defineMatchStartDependent     DEFINE vars needing per-context evaluation (match_start-dependent)
   nfaLastProcessedRow           Last row processed by NFA (-1 = none)
+
+  EXPLAIN ANALYZE instrumentation counters are omitted here; see
+  execnodes.h for the full list.
 
 Memory management:
 
@@ -1480,7 +1485,13 @@ Appendix B. Data Structure Relationship Diagram
     |--- defineVariableList: List<String> (variable names, DEFINE order)
     |--- defineClauseList: List<ExprState>
     |--- nfaVarMatched: bool[] (per-row cache)
+    |--- defineMatchStartDependent: Bitmapset* (match_start-dependent
+    |        DEFINE vars; see VI-4)
     |--- nfaVisitedElems: bitmapword* (cycle detection)
+    |--- nfaVisitedNWords: int (size of nfaVisitedElems)
+    |--- nfaVisitedMinWord / nfaVisitedMaxWord: int16
+    |        (touched-word range for fast reset)
+    |--- nfaLastProcessedRow: int64 (-1 = none)
     |--- nfaStateSize: Size (pre-calculated RPRNFAState allocation size)
     |--- nfaContext <-> nfaContextTail (doubly-linked list)
     |   +--- RPRNFAContext
