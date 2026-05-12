@@ -2,11 +2,15 @@
   PostgreSQL Row Pattern Recognition: Flat-Array Stream NFA Guide
 ============================================================================
 
-  Target audience: Developers with a basic understanding of the PostgreSQL
-                   executor and planner architecture
+  This README's target audience is developers with a basic
+  understanding of the PostgreSQL executor and planner architecture.
+  Also it would be better for them to understand the specification of
+  the row pattern recognition in the SQL standard [1][2]. If you do
+  not have access to the SQL standard, Oracle's manual or Trino's
+  manual can be alternatives for them.
 
-  Scope: The entire process from PATTERN/DEFINE clause parsing to NFA
-         runtime execution
+  This README's scope is the entire process from PATTERN/DEFINE clause
+  parsing to NFA runtime execution.
 
   Related code:
     - src/backend/parser/parse_rpr.c          (parser phase)
@@ -23,10 +27,11 @@
 
 What is a Flat-Array Stream NFA?
 
-  The NFA in this implementation is not a traditional state-transition graph
-  but a flat array of fixed-size 16-byte elements. At runtime, it processes
-  the row stream in a forward-only manner, expanding epsilon transitions
-  eagerly without backtracking.
+  The NFA (Nondeterministic Finite Automaton) in this implementation
+  is not a traditional state-transition graph but a flat array of
+  fixed-size 16-byte elements. At runtime, it processes the row stream
+  in a forward-only manner, expanding epsilon transitions eagerly
+  without backtracking.
 
   - Flat-Array: Pattern compiled into a flat array,
                 not a graph (Chapter IV)
@@ -132,14 +137,14 @@ following:
 
   (3) DEFINE clause transformation (transformDefineClause)
 
-III-2. PATTERN AST
+III-2. PATTERN AST (Abstract Syntax Tree)
 
 The parser transforms the PATTERN clause into an RPRPatternNode tree.
 Each node has one of the following four types:
 
   RPR_PATTERN_VAR    Variable reference. Name stored in varName field.
   RPR_PATTERN_SEQ    Concatenation. Children node list in children.
-  RPR_PATTERN_ALT    Alternation. Branch node list in children.
+  RPR_PATTERN_ALT    Alternation (or). Branch node list in children.
   RPR_PATTERN_GROUP  Group (parentheses). Body node list in children.
 
 All nodes have min/max fields to express quantifiers:
@@ -270,9 +275,11 @@ Element flags (1 byte, bitmask):
         matches. (IV-4b)
 
   0x04  RPR_ELEM_ABSORBABLE_BRANCH  (VAR, BEGIN, END, ALT)
-        Element lies within an absorbable region.  Used at runtime
-        to track whether the current NFA state is in an absorbable
-        context.
+        Element lies within an absorbable region.  Used at runtime to
+        track whether the current NFA state is in an absorbable
+        context. See "IV-5. Absorbability Analysis" and
+        "VIII-2. Solution: Context Absorption" for more details about
+        absorption.
 
   0x08  RPR_ELEM_ABSORBABLE         (VAR, END)
         Absorption judgment point.  Where to compare consecutive
@@ -514,7 +521,10 @@ V-3. RPR Fields of WindowAggState
   nfaStateFree                  Reuse pool for states
   nfaVarMatched                 Per-row cache: varMatched[varId]
   nfaVisitedElems               Bitmap for cycle detection
+  nfaVisitedNWords              Number of bitmapwords in nfaVisitedElems
   nfaStateSize                  Precomputed size of RPRNFAState
+  defineMatchStartDependent     DEFINE vars needing per-context evaluation (match_start-dependent)
+  nfaLastProcessedRow           Last row processed by NFA (-1 = none)
 
 Memory management:
 
@@ -1053,6 +1063,10 @@ X-3. INITIAL vs SEEK
 
 X-4. Bounded Frame Handling
 
+  With RPR, the frame mode is always ROWS and the frame start must be
+  CURRENT ROW. The frame end can be either UNBOUNDED FOLLOWING or n
+  FOLLOWING.
+
   When the frame is bounded (e.g., ROWS BETWEEN CURRENT ROW AND 5
   FOLLOWING), ExecRPRProcessRow receives hasLimitedFrame=true and
   frameOffset indicating the upper bound.  Before the match phase,
@@ -1578,6 +1592,15 @@ C-7. PATTERN ((A+ B | C*)+ D)  -- Per-branch absorption in ALT
   END has EMPTY_LOOP: branch 2 (C*) is nullable, making the group body
   nullable.
   BEGIN and ALT get ABSORBABLE_BRANCH (on the path to absorbable elements).
+
+
+References:
+
+[1] ISO/IEC 19075-5 Information technology - Guidance for the use of
+    database language SQL - Part 5: Row pattern recognition
+
+[2] ISO/IEC 9075-2 Information technology - Database languages - SQL -
+    Part 2: Foundation (SQL/Foundation)
 
 ============================================================================
   End of document
