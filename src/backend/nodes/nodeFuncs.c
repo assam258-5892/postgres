@@ -4641,6 +4641,8 @@ raw_expression_tree_walker_impl(Node *node,
 					return true;
 				if (WALK(wd->endOffset))
 					return true;
+				if (WALK(wd->rpCommonSyntax))
+					return true;
 			}
 			break;
 		case T_RangeSubselect:
@@ -4893,6 +4895,24 @@ raw_expression_tree_walker_impl(Node *node,
 				if (WALK(gp->path_pattern_list))
 					return true;
 				if (WALK(gp->whereClause))
+					return true;
+			}
+			break;
+		case T_RPCommonSyntax:
+			{
+				RPCommonSyntax *rc = (RPCommonSyntax *) node;
+
+				if (WALK(rc->rpPattern))
+					return true;
+				if (WALK(rc->rpDefs))
+					return true;
+			}
+			break;
+		case T_RPRPatternNode:
+			{
+				RPRPatternNode *rp = (RPRPatternNode *) node;
+
+				if (WALK(rp->children))
 					return true;
 			}
 			break;
