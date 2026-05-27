@@ -354,7 +354,8 @@ The flag is set on all elements that carry the quantifier:
   Simple VAR (A+?):     RPR_ELEM_RELUCTANT on the VAR element
   Group ((...)+?):      RPR_ELEM_RELUCTANT on BEGIN and END elements
 
-At runtime (nfa_advance), the flag controls DFS exploration order:
+At runtime (nfa_advance), the flag controls Depth-First Search
+(DFS) exploration order:
 
   VAR with quantifier:
     Greedy:    primary path = next (continue), clone = jump (skip)
@@ -582,7 +583,8 @@ Creates a new context and performs the initial advance.
   (2) Set matchStartRow = pos
   (3) Create initial state: elemIdx=0 (first pattern element),
       counts=all zero
-  (4) Call nfa_advance(initialAdvance=true)
+  (4) Call nfa_advance() with currentPos = pos - 1 (no row consumed
+      yet)
 
 The initial advance expands epsilon transitions at the beginning of
 the pattern. For example, the initial advance for PATTERN ((A | B) C):
@@ -737,6 +739,15 @@ Immediate advance for simple VARs:
 Chapter VIII  Phase 2: Absorb (Context Absorption)
 ============================================================================
 
+Absorption is the runtime optimization that collapses contexts which
+have converged on identical future behavior.  Two contexts are
+treated as equivalent when one's bookkeeping (elemIdx and per-depth
+iteration counts) is dominated by another's; the younger one is then
+discarded.  The optimization is safe because pattern matching is
+monotonic -- an earlier context's reachable matches always contain a
+later context's.  This is what reduces the naive O(N^2) state count
+to O(N).
+
 VIII-1. Problem
 
 In the current implementation, a new context is started for each row
@@ -761,6 +772,25 @@ the state where Context 2 (started at row 2) matched A 4 times
 is already contained within Context 1.
 
 Therefore Context 2 can be "absorbed" into Context 1.
+
+Worked example for PATTERN (A+) over 3 rows (each matches A):
+
+  After row 1:
+    Ctx_1 (started row 1): state at A with counts[0] = 1
+
+  After row 2:
+    Ctx_1: state at A with counts[0] = 2
+    Ctx_2 (started row 2): state at A with counts[0] = 1
+    -> Same elemIdx; Ctx_1.count (2) dominates Ctx_2.count (1).
+    -> Ctx_2 absorbed.
+
+  After row 3:
+    Ctx_1: state at A with counts[0] = 3
+    Ctx_3 (started row 3): state at A with counts[0] = 1
+    -> Ctx_1.count (3) dominates Ctx_3.count (1).
+    -> Ctx_3 absorbed.
+
+Total active contexts stays at O(1) instead of growing with N.
 
 VIII-3. Absorption Conditions
 
