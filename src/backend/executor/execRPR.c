@@ -61,7 +61,7 @@ static RPRNFAState *nfa_state_create(WindowAggState *winstate, int16 elemIdx,
 									 int32 *counts, bool sourceAbsorbable);
 static bool nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1,
 							 RPRNFAState *s2);
-static bool nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx,
+static void nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx,
 								 RPRNFAState *state);
 static void nfa_add_matched_state(WindowAggState *winstate, RPRNFAContext *ctx,
 								  RPRNFAState *state, int64 matchEndRow);
@@ -335,10 +335,10 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
  * nfa_add_state_unique
  *
  * Add a state to ctx->states at the END, only if no duplicate exists.
- * Returns true if state was added, false if duplicate found (state is freed).
- * Earlier states have better lexical order (DFS traversal order), so existing wins.
+ * Earlier states have better lexical order (DFS traversal order), so existing
+ * wins; the new state is freed when a duplicate is found.
  */
-static bool
+static void
 nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx, RPRNFAState *state)
 {
 	RPRNFAState *s;
@@ -365,7 +365,7 @@ nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx, RPRNFAState *
 			 */
 			nfa_state_free(winstate, state);
 			winstate->nfaStatesMerged++;
-			return false;
+			return;
 		}
 		tail = s;
 	}
@@ -376,8 +376,6 @@ nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx, RPRNFAState *
 		ctx->states = state;
 	else
 		tail->next = state;
-
-	return true;
 }
 
 /*
