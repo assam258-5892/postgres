@@ -1554,6 +1554,35 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
+-- A{3,5}? B (reluctant bounded mid-band): the VAR-level count in
+-- nfa_advance_var cycles through 3, 4, 5 within a single match
+-- attempt.  Exercises the count > 2 && reluctant && !isAbsorbable
+-- branch (absorbability analysis excludes reluctant quantifiers, so
+-- isAbsorbable stays false for A).
+WITH test_reluctant_mid_band AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A']),
+        (6, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_reluctant_mid_band
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A{3,5}? B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
 -- ============================================================
 -- Pathological Pattern Runtime Protection
 -- ============================================================
