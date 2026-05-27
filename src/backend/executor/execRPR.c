@@ -311,9 +311,19 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
 	if (s1->elemIdx != s2->elemIdx)
 		return false;
 
-	/* Compare counts up to current element's depth */
+	/*
+	 * Compare counts up to current element's depth.  Two states sharing
+	 * elemIdx are equivalent iff every enclosing-or-current depth count
+	 * matches.
+	 *
+	 * The +1 is the slot arithmetic: comparing through depth N requires
+	 * counts[0..N], i.e., N+1 entries.  Deeper slots (counts[d] with d >
+	 * elem->depth) are excluded because they hold scratch state from inner
+	 * groups that gets zeroed on re-entry (see END loop-back in
+	 * nfa_advance_end), and so must not participate in equivalence judgment.
+	 */
 	elem = &pattern->elements[s1->elemIdx];
-	compareDepth = elem->depth + 1; /* depth 0 needs 1 count, etc. */
+	compareDepth = elem->depth + 1;
 
 	if (memcmp(s1->counts, s2->counts, sizeof(int32) * compareDepth) != 0)
 		return false;
@@ -334,7 +344,12 @@ nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx, RPRNFAState *
 	RPRNFAState *s;
 	RPRNFAState *tail = NULL;
 
-	/* Mark VAR in visited before duplicate check to prevent DFS loops */
+	/*
+	 * Mark VAR in visited before duplicate check to prevent DFS loops. This
+	 * is the deferred half of the asymmetric visited-marking scheme; see
+	 * nfa_advance_state for the non-VAR (END/ALT/BEGIN/FIN) half and the
+	 * rationale for the asymmetry.
+	 */
 	nfa_mark_visited(winstate, state->elemIdx);
 
 	/* Check for duplicate and find tail */
@@ -950,7 +965,16 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
 		RPRPatternElement *altElem = &elements[altIdx];
 		RPRNFAState *newState;
 
-		/* Stop if element is outside ALT scope (not a branch) */
+		/*
+		 * Stop if element is outside ALT scope (not a branch).  The check
+		 * fires when the last branch is a quantified group whose BEGIN.jump
+		 * (set by fillRPRPatternGroup) is preserved -- not overridden by
+		 * fillRPRPatternAlt, which only links non-last branch heads -- and
+		 * leads to a post-ALT element.  Other branch shapes terminate the
+		 * walk earlier via altIdx = RPR_ELEMIDX_INVALID.  Use <=, not <: the
+		 * post-ALT element may sit at the same depth as the ALT when the ALT
+		 * has a sibling at that level.
+		 */
 		if (altElem->depth <= elem->depth)
 			break;
 
@@ -1016,7 +1040,12 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	}
 	else
 	{
-		/* Greedy: enter first, skip second */
+		/*
+		 * Greedy-or-non-nullable: route to the first child.  For optional
+		 * groups (skipState != NULL, greedy min=0) additionally create the
+		 * skip path; for non-nullable groups (skipState == NULL, min>0) the
+		 * skip-path action is suppressed by the guard below.
+		 */
 		state->elemIdx = elem->next;
 		nfa_route_to_elem(winstate, ctx, state,
 						  &elements[state->elemIdx], currentPos);
@@ -1204,6 +1233,9 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 
 	/* After a successful match, count >= 1, so at least one must be true */
 	Assert(canLoop || canExit);
+
+	/* elem->next must be a valid index for any reachable VAR */
+	Assert(elem->next >= 0 && elem->next < pattern->numElements);
 
 	if (canLoop && canExit)
 	{
@@ -1428,6 +1460,15 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 
 		state = states;
 		states = states->next;
+
+		/*
+		 * Boundary contract: state->next is reset to NULL here, before
+		 * crossing into nfa_advance_state's epsilon-expansion DFS.  The inner
+		 * branches (nfa_advance_var, nfa_advance_begin/end/alt) treat
+		 * state->next as already-NULL and don't reset it themselves; the
+		 * other linking site is nfa_add_state_unique, which sets it when
+		 * appending to ctx->states.
+		 */
 		state->next = NULL;
 
 		nfa_advance_state(winstate, ctx, state, currentPos);
@@ -1779,8 +1820,28 @@ ExecRPRCleanupDeadContexts(WindowAggState *winstate, RPRNFAContext *excludeCtx)
 /*
  * ExecRPRFinalizeAllContexts
  *
- * Finalize all active contexts when partition ends.
- * Match with NULL to force mismatch, then advance to process epsilon transitions.
+ * Partition-end classification policy: kill any VAR states still pursuing
+ * when rows run out, so cleanup sees a uniform ctx->states == NULL across
+ * every context.  By the time this runs, all genuine FIN reaches have
+ * already been recorded in-flight; three shapes survive here:
+ *
+ *   - Pure pursuit (matchedState == NULL): VAR states waiting for input
+ *     that never arrives (e.g., A+ B mid-pattern at partition end).
+ *   - Empty-match candidate + pursuit (matchedState != NULL,
+ *     matchEndRow < matchStartRow): initial-advance FIN-via-skip recorded
+ *     an empty match while VAR states are still chasing a longer one
+ *     (e.g., greedy A*).
+ *   - Real match + pursuit (matchedState != NULL,
+ *     matchEndRow >= matchStartRow): a match has been recorded and VAR
+ *     states are still looping for a longer one.
+ *
+ * Killing the VAR reclassifies the first two as failures in cleanup
+ * (otherwise they linger without contributing to stats).  The third is
+ * stat-neutral -- cleanup skips it either way -- but goes through the
+ * same uniform path so partition-end classification stays centralized.
+ *
+ * Implementation: nfa_match with NULL forces VAR mismatch; nfa_advance
+ * then drains any remaining epsilon transitions.
  */
 void
 ExecRPRFinalizeAllContexts(WindowAggState *winstate, int64 lastPos)
