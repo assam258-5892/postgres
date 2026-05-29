@@ -4434,7 +4434,12 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 	}
 	else if (targetCtx->states == NULL)
 	{
-		/* Context already completed - skip to result registration */
+		/*
+		 * The head context already completed in an earlier call.  Reachable
+		 * under SKIP TO NEXT ROW, where overlapping contexts let one reach
+		 * FIN -- recording its result -- before the call for its own start
+		 * row arrives.  Register that result.
+		 */
 		goto register_result;
 	}
 
