@@ -4306,6 +4306,16 @@ clear_reduced_frame(WindowAggState *winstate)
  *   RF_FRAME_HEAD      pos is the start of the current match
  *   RF_SKIPPED         pos is inside the current match but not the start
  *   RF_UNMATCHED       pos is processed but not part of any match
+ *   RF_EMPTY_MATCH     pos is the start of an empty (zero-length) match
+ *
+ * update_reduced_frame() records the current match as exactly one of three
+ * (rpr_match_matched, rpr_match_length) shapes: (false, 1) for unmatched,
+ * (true, 0) for an empty match, and (true, >= 1) for a real match.  The
+ * tests below form a cascade with early returns: each is a minimal check
+ * that relies on the negations the preceding returns have already
+ * established, so their order is significant.  The "by here" notes spell
+ * out the running invariant; reordering a test would misclassify one of
+ * the three shapes.
  */
 static int
 get_reduced_frame_status(WindowAggState *winstate, int64 pos)
@@ -4316,17 +4326,31 @@ get_reduced_frame_status(WindowAggState *winstate, int64 pos)
 	if (!winstate->rpr_match_valid)
 		return RF_NOT_DETERMINED;
 
-	/* Empty match: covers only the start position */
+	/*
+	 * By here the record is valid and holds one of the three shapes above.
+	 *
+	 * The empty match (true, 0) must be classified first: it has length 0, so
+	 * the range test below would compute start + length == start and reject
+	 * its own start position as out of range.
+	 */
 	if (pos == start && winstate->rpr_match_matched && length == 0)
 		return RF_EMPTY_MATCH;
 
-	/* Outside the result range */
+	/*
+	 * By here length >= 1 -- the only zero-length record, the empty match,
+	 * has been handled -- so [start, start + length) is a well-formed range.
+	 */
 	if (pos < start || pos >= start + length)
 		return RF_NOT_DETERMINED;
 
+	/*
+	 * By here pos lies within [start, start + length).  An unmatched record
+	 * is (false, 1), so this returns for its single in-range position.
+	 */
 	if (!winstate->rpr_match_matched)
 		return RF_UNMATCHED;
 
+	/* By here the match is real (true, >= 1) and pos is one of its rows. */
 	if (pos == start)
 		return RF_FRAME_HEAD;
 
