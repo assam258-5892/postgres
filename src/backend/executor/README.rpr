@@ -526,7 +526,7 @@ V-3. RPR Fields of WindowAggState
   nfaVisitedMinWord             Lowest bitmapword index touched since last reset
   nfaVisitedMaxWord             Highest bitmapword index touched since last reset
   nfaStateSize                  Precomputed size of RPRNFAState
-  defineMatchStartDependent     DEFINE vars needing per-context evaluation (match_start-dependent)
+  defineMatchStartDependent     DEFINE vars needing per-context evaluation (match_start_dependent)
   nfaLastProcessedRow           Last row processed by NFA (-1 = none)
 
   EXPLAIN ANALYZE instrumentation counters are omitted here; see
@@ -631,7 +631,7 @@ the same row.
 
 The varMatched array is referenced later in Phase 1 (Match).
 
-VI-4. Per-Context Re-evaluation (match_start-dependent variables)
+VI-4. Per-Context Re-evaluation (match_start_dependent variables)
 
 DEFINE variables that depend on match_start (those containing FIRST,
 LAST-with-offset, or compound PREV_FIRST/NEXT_FIRST/PREV_LAST/NEXT_LAST)
@@ -801,7 +801,7 @@ Planner-time prerequisites (all must hold for absorption to be enabled):
   (b) Unbounded frame (ROWS BETWEEN CURRENT ROW AND UNBOUNDED
       FOLLOWING).  Limited frames apply differently to each context,
       breaking the monotonicity principle.
-  (c) No match_start-dependent navigation in DEFINE.
+  (c) No match_start_dependent navigation in DEFINE.
 
       Mechanism: each context has a different matchStartRow, so FIRST
       resolves to a different row for each context at the same
@@ -820,7 +820,27 @@ Planner-time prerequisites (all must hold for absorption to be enabled):
       FIRST (any)                     direct            unsafe
       Compound (inner FIRST)          direct            unsafe
       Compound (inner LAST, no off.)  none              safe
-      Compound (inner LAST, w/off.)   boundary chk      unsafe
+      Compound (inner LAST, w/off.)   boundary check    unsafe
+
+  The "match_start dep." column classifies how the navigation ties a
+  DEFINE result to the context's matchStartRow:
+
+    none            Independent of matchStartRow.  The result depends
+                    only on currentpos (or a fixed offset from it), so
+                    every context evaluates it identically.
+    direct          Computed from matchStartRow itself -- FIRST counts
+                    forward from match start -- so the resolved row,
+                    and thus the result, differs per context.
+    boundary check  The resolved row is currentpos-relative (LAST with
+                    a backward offset, or a compound whose inner LAST
+                    carries an offset), but its in-range test is taken
+                    against the match range [matchStartRow, currentpos].
+                    The range bound differs per context, so the result
+                    can too.
+
+  Only "none" is safe for absorption; "direct" and "boundary check"
+  both make an earlier context's result stop subsuming a later one's
+  (see (c) above).
 
 Runtime conditions (evaluated per context pair):
 
@@ -828,10 +848,13 @@ Runtime conditions (evaluated per context pair):
   (2) allStatesAbsorbable of the target context is true
   (3) An earlier context "covers" all states of the target
 
-Cover condition (nfa_states_covered):
+Cover condition (nfa_states_covered) -- "count-dominance":
 
   A state with the same elemIdx exists in the earlier context,
-  and the count at that depth is greater than or equal -- then it is covered.
+  and the count at that depth is greater than or equal -- then it is
+  covered.  The earlier context's per-depth iteration count thus
+  dominates the later one's; this is the count-dominance comparison
+  referenced in VIII-3(c).
 
 VIII-4. Dual-Flag Design
 
@@ -1515,7 +1538,7 @@ Appendix B. Data Structure Relationship Diagram
     |--- defineVariableList: List<String> (variable names, DEFINE order)
     |--- defineClauseList: List<ExprState>
     |--- nfaVarMatched: bool[] (per-row cache)
-    |--- defineMatchStartDependent: Bitmapset* (match_start-dependent
+    |--- defineMatchStartDependent: Bitmapset* (match_start_dependent
     |        DEFINE vars; see VI-4)
     |--- nfaVisitedElems: bitmapword* (cycle detection)
     |--- nfaVisitedNWords: int (size of nfaVisitedElems)
