@@ -1706,7 +1706,7 @@ ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos,
 		if (ctx->states == NULL)
 			continue;
 
-		/* Check frame boundary - finalize if exceeded */
+		/* Check frame boundary - finalize the context when it is reached */
 		if (hasLimitedFrame)
 		{
 			int64		ctxFrameEnd;
@@ -1716,9 +1716,18 @@ ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos,
 									&ctxFrameEnd))
 				ctxFrameEnd = PG_INT64_MAX;
 
-			if (currentPos >= ctxFrameEnd)
+			/*
+			 * currentPos advances by exactly one per call, and a finalized
+			 * context is skipped by the states == NULL guard above, so it can
+			 * only ever reach ctxFrameEnd, never overshoot it.  The Assert
+			 * turns a future change that broke that invariant into an
+			 * immediate failure rather than a silent slip past the boundary.
+			 */
+			Assert(currentPos <= ctxFrameEnd);
+
+			if (currentPos == ctxFrameEnd)
 			{
-				/* Frame boundary exceeded: force mismatch */
+				/* Frame boundary reached: force mismatch */
 				nfa_match(winstate, ctx, NULL);
 				continue;
 			}
