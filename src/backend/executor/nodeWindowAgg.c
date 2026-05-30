@@ -4399,7 +4399,7 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 	 */
 	hasLimitedFrame = (frameOptions & FRAMEOPTION_ROWS) &&
 		!(frameOptions & FRAMEOPTION_END_UNBOUNDED_FOLLOWING);
-	if (hasLimitedFrame && winstate->endOffsetValue != 0)
+	if (hasLimitedFrame)
 		frameOffset = DatumGetInt64(winstate->endOffsetValue);
 
 	/*
