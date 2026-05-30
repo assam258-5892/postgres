@@ -542,7 +542,8 @@ ERROR:  frame end cannot be UNBOUNDED PRECEDING
 LINE 5:     ROWS BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING
                                          ^
 -- Expected: ERROR: frame end cannot be UNBOUNDED PRECEDING
--- Single row frame: CURRENT ROW AND CURRENT ROW
+-- Single row frame: CURRENT ROW AND CURRENT ROW is rejected (the standard
+-- allows only UNBOUNDED FOLLOWING or a positive offset FOLLOWING).
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -553,17 +554,13 @@ WINDOW w AS (
     DEFINE A AS val > 0
 )
 ORDER BY id;
- id | val | cnt 
-----+-----+-----
-  1 |  10 |   1
-  2 |  10 |   1
-  3 |  10 |   1
-  4 |  20 |   1
-  5 |  20 |   1
-  6 |  30 |   1
-(6 rows)
-
--- Zero offset: CURRENT ROW AND 0 FOLLOWING (equivalent to CURRENT ROW)
+ERROR:  cannot use CURRENT ROW as frame end with row pattern recognition
+LINE 5:     ROWS BETWEEN CURRENT ROW AND CURRENT ROW
+            ^
+HINT:  Use UNBOUNDED FOLLOWING or a positive offset FOLLOWING.
+-- Expected: ERROR: cannot use CURRENT ROW as frame end with row pattern recognition
+-- Zero offset: CURRENT ROW AND 0 FOLLOWING denotes the same one-row frame
+-- and is likewise rejected (caught at execution time).
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -574,6 +571,22 @@ WINDOW w AS (
     DEFINE A AS val > 0
 )
 ORDER BY id;
+ERROR:  frame ending offset must be positive with row pattern recognition
+-- Expected: ERROR: frame ending offset must be positive with row pattern recognition
+-- A non-constant frame end offset is allowed; a zero value is still rejected,
+-- this time at execution time (a literal cannot exercise that path).
+PREPARE rpr_end_offset(int8) AS
+SELECT id, val, COUNT(*) OVER w as cnt
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND $1 FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (A)
+    DEFINE A AS val > 0
+)
+ORDER BY id;
+EXECUTE rpr_end_offset(2);
  id | val | cnt 
 ----+-----+-----
   1 |  10 |   1
@@ -584,6 +597,10 @@ ORDER BY id;
   6 |  30 |   1
 (6 rows)
 
+EXECUTE rpr_end_offset(0);
+ERROR:  frame ending offset must be positive with row pattern recognition
+-- Expected: ERROR: frame ending offset must be positive with row pattern recognition
+DEALLOCATE rpr_end_offset;
 -- Large offset: CURRENT ROW AND 1000 FOLLOWING
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame

@@ -2369,6 +2369,16 @@ calculate_frame_offsets(PlanState *pstate)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PRECEDING_OR_FOLLOWING_SIZE),
 						 errmsg("frame ending offset must not be negative")));
+
+			/*
+			 * Row pattern recognition forbids a zero-length frame end;
+			 * checked here so a non-constant offset (e.g. a bind parameter)
+			 * is caught, not just a literal 0.
+			 */
+			if (winstate->rpPattern != NULL && offset == 0)
+				ereport(ERROR,
+						(errcode(ERRCODE_WINDOWING_ERROR),
+						 errmsg("frame ending offset must be positive with row pattern recognition")));
 		}
 	}
 	winstate->all_first = false;

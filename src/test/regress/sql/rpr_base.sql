@@ -445,7 +445,8 @@ WINDOW w AS (
 );
 -- Expected: ERROR: frame end cannot be UNBOUNDED PRECEDING
 
--- Single row frame: CURRENT ROW AND CURRENT ROW
+-- Single row frame: CURRENT ROW AND CURRENT ROW is rejected (the standard
+-- allows only UNBOUNDED FOLLOWING or a positive offset FOLLOWING).
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -456,8 +457,10 @@ WINDOW w AS (
     DEFINE A AS val > 0
 )
 ORDER BY id;
+-- Expected: ERROR: cannot use CURRENT ROW as frame end with row pattern recognition
 
--- Zero offset: CURRENT ROW AND 0 FOLLOWING (equivalent to CURRENT ROW)
+-- Zero offset: CURRENT ROW AND 0 FOLLOWING denotes the same one-row frame
+-- and is likewise rejected (caught at execution time).
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -468,6 +471,25 @@ WINDOW w AS (
     DEFINE A AS val > 0
 )
 ORDER BY id;
+-- Expected: ERROR: frame ending offset must be positive with row pattern recognition
+
+-- A non-constant frame end offset is allowed; a zero value is still rejected,
+-- this time at execution time (a literal cannot exercise that path).
+PREPARE rpr_end_offset(int8) AS
+SELECT id, val, COUNT(*) OVER w as cnt
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND $1 FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (A)
+    DEFINE A AS val > 0
+)
+ORDER BY id;
+EXECUTE rpr_end_offset(2);
+EXECUTE rpr_end_offset(0);
+-- Expected: ERROR: frame ending offset must be positive with row pattern recognition
+DEALLOCATE rpr_end_offset;
 
 -- Large offset: CURRENT ROW AND 1000 FOLLOWING
 SELECT id, val, COUNT(*) OVER w as cnt

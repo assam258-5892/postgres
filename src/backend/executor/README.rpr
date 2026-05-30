@@ -1122,8 +1122,9 @@ X-3. INITIAL vs SEEK
 X-4. Bounded Frame Handling
 
   With RPR, the frame mode is always ROWS and the frame start must be
-  CURRENT ROW. The frame end can be either UNBOUNDED FOLLOWING or n
-  FOLLOWING.
+  CURRENT ROW. The frame end must be UNBOUNDED FOLLOWING or a positive
+  offset (n >= 1) FOLLOWING; a CURRENT ROW end or a zero offset is
+  rejected, since it would reduce the frame to the single current row.
 
   When the frame is bounded (e.g., ROWS BETWEEN CURRENT ROW AND 5
   FOLLOWING), ExecRPRProcessRow receives hasLimitedFrame=true and

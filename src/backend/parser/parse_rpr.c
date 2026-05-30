@@ -163,6 +163,20 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 				parser_errposition(pstate, windef->excludeLocation >= 0 ? windef->excludeLocation : windef->location));
 	}
 
+	/*
+	 * The standard allows only UNBOUNDED FOLLOWING or a positive offset
+	 * FOLLOWING as the frame end.  The equivalent 0 FOLLOWING spelling is
+	 * caught at runtime in calculate_frame_offsets().
+	 */
+	if (wc->frameOptions & FRAMEOPTION_END_CURRENT_ROW)
+		ereport(ERROR,
+				errcode(ERRCODE_WINDOWING_ERROR),
+				errmsg("cannot use CURRENT ROW as frame end with row pattern recognition"),
+				errhint("Use UNBOUNDED FOLLOWING or a positive offset FOLLOWING."),
+				parser_errposition(pstate,
+								   windef->frameLocation >= 0 ?
+								   windef->frameLocation : windef->location));
+
 	/* Transform AFTER MATCH SKIP TO clause */
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
 
