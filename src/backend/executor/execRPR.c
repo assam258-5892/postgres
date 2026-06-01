@@ -1706,7 +1706,8 @@ nfa_reevaluate_dependent_vars(WindowAggState *winstate, RPRNFAContext *ctx,
 			Datum		result;
 			bool		isnull;
 
-			result = ExecEvalExpr(exprState, econtext, &isnull);
+			/* Per-tuple context; scratch freed by the per-row reset */
+			result = ExecEvalExprSwitchContext(exprState, econtext, &isnull);
 			winstate->nfaVarMatched[varIdx] = (!isnull && DatumGetBool(result));
 		}
 

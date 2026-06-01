@@ -4515,6 +4515,12 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 		 * appropriately as pruned or mismatched.
 		 */
 		ExecRPRCleanupDeadContexts(winstate, targetCtx);
+
+		/*
+		 * Free this row's per-tuple DEFINE-evaluation scratch; cross-row
+		 * state (nfaVarMatched, NFA states) lives in other contexts.
+		 */
+		ResetExprContext(winstate->ss.ps.ps_ExprContext);
 	}
 
 register_result:
@@ -4606,8 +4612,8 @@ nfa_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched)
 		Datum		result;
 		bool		isnull;
 
-		/* Evaluate DEFINE expression */
-		result = ExecEvalExpr(exprState, econtext, &isnull);
+		/* Per-tuple context so by-ref scratch is freed by the per-row reset */
+		result = ExecEvalExprSwitchContext(exprState, econtext, &isnull);
 
 		varMatched[varIdx] = (!isnull && DatumGetBool(result));
 
