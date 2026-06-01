@@ -89,6 +89,8 @@ static void checkExprIsVarFree(ParseState *pstate, Node *n,
 							   const char *constructName);
 static TargetEntry *findTargetlistEntrySQL92(ParseState *pstate, Node *node,
 											 List **tlist, ParseExprKind exprKind);
+static TargetEntry *findTargetlistEntrySQL99(ParseState *pstate, Node *node,
+											 List **tlist, ParseExprKind exprKind);
 static int	get_matching_location(int sortgroupref,
 								  List *sortgrouprefs, List *exprs);
 static List *resolve_unique_index_expr(ParseState *pstate, InferClause *infer,
@@ -2310,7 +2312,7 @@ findTargetlistEntrySQL92(ParseState *pstate, Node *node, List **tlist,
  * tlist	the target list (passed by reference so we can append to it)
  * exprKind identifies clause type being processed
  */
-TargetEntry *
+static TargetEntry *
 findTargetlistEntrySQL99(ParseState *pstate, Node *node, List **tlist,
 						 ParseExprKind exprKind)
 {
