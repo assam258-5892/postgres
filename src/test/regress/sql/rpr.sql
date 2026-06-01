@@ -531,6 +531,58 @@ WINDOW w AS (
     DEFINE A AS PREV(1, 1) > 0
 );
 
+-- Compound navigation without a column reference must be rejected too,
+-- consistent with the simple forms above.
+-- PREV(FIRST(1)): compound, constant only, no column reference
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(FIRST(1)) > 0
+);
+
+-- NEXT(LAST(1 + 2)): compound, constant expression, no column reference
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS NEXT(LAST(1 + 2)) > 0
+);
+
+-- PREV(FIRST(1, 2)): compound, two-arg inner, no column reference
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(FIRST(1, 2)) > 0
+);
+
+-- PREV(FIRST(1), 2): compound, outer offset only, no column reference
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(FIRST(1), 2) > 0
+);
+
+-- PREV(FIRST(1, 2), 3): compound, inner and outer offsets, no column reference
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(FIRST(1, 2), 3) > 0
+);
+
 -- Non-constant offset: column reference as offset
 SELECT price FROM stock
 WINDOW w AS (

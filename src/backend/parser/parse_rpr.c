@@ -641,6 +641,16 @@ define_walker(Node *node, void *context)
 					nav->offset_arg = inner->offset_arg;
 					nav->arg = inner->arg;
 					flattened = true;
+
+					/*
+					 * The flattened argument must include a column reference,
+					 * just like the simple-nav case below.
+					 */
+					if (!ctx->has_column_ref)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("argument of row pattern navigation operation must include at least one column reference"),
+								parser_errposition(ctx->pstate, nav->location));
 				}
 				else if (!outer_phys && inner_phys)
 					ereport(ERROR,
