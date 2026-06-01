@@ -957,10 +957,35 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 			skipState = nfa_state_clone(winstate, nextElem->next,
 										state->counts, state->isAbsorbable);
 
-		nfa_add_state_unique(winstate, ctx, state);
+		if (skipState != NULL && RPRElemIsReluctant(nextElem))
+		{
+			RPRNFAState *savedMatch = ctx->matchedState;
 
-		if (skipState != NULL)
+			/*
+			 * Reluctant optional VAR: prefer skipping.  Explore the skip path
+			 * first so it outranks the enter (match) path; if it reaches FIN
+			 * the shortest match is found and the enter state is dropped.
+			 * This mirrors the reluctant branch of nfa_advance_begin used by
+			 * the leading-position and optional-group paths.
+			 */
 			nfa_advance_state(winstate, ctx, skipState, currentPos);
+
+			if (ctx->matchedState != savedMatch)
+			{
+				nfa_state_free(winstate, state);
+				return;
+			}
+
+			nfa_add_state_unique(winstate, ctx, state);
+		}
+		else
+		{
+			/* Greedy (or non-skippable): enter first, then skip */
+			nfa_add_state_unique(winstate, ctx, state);
+
+			if (skipState != NULL)
+				nfa_advance_state(winstate, ctx, skipState, currentPos);
+		}
 	}
 	else
 	{

@@ -860,6 +860,62 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
+-- Non-leading reluctant optional VAR: (B A?? C)
+-- Reluctant A?? should prefer to skip, matching B(1) C(2) with A left
+-- unmatched (match_end 2).  The leading/group reluctant cases above go through
+-- the begin path; this exercises the non-leading skip path in
+-- nfa_route_to_elem, which must honor reluctant ordering too.
+WITH test_nonleading_reluctant AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A', 'C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nonleading_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (B A?? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- Non-leading reluctant optional GROUP with a follower: (B (A X)?? C)
+-- Like the VAR case above but a multi-element group; it goes through the
+-- begin path (nfa_advance_begin), which already honors reluctant ordering.
+-- Reluctant (A X)?? should skip, matching B(1) C(2), with the group skipped
+-- to the following C (not to FIN).
+WITH test_nonleading_reluctant_group AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A', 'C']),
+        (3, ARRAY['X']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nonleading_reluctant_group
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (B (A X)?? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        X AS 'X' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
 -- Greedy/reluctant sequence: A+ B+? (greedy A, reluctant B at end)
 -- A consumes greedily, B+? exits to FIN after minimum match
 WITH test_greedy_then_reluctant AS (
