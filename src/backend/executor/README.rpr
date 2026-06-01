@@ -221,7 +221,7 @@ applied:
   (d) Consecutive ALT merging: Merge repeated identical ALT nodes
       (A | B) (A | B) (A | B) -> (A | B){3}
 
-  (e) Prefix/suffix absorption: Absorb identical sequences before/after
+  (e) Prefix/suffix merging: Merge identical sequences before/after
       a group
       A B (A B)+ -> (A B){2,INF}
 

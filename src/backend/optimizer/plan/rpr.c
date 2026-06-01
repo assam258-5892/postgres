@@ -480,7 +480,7 @@ mergeConsecutiveAlts(List *children)
  *		Merge sequence prefix/suffix into GROUP with matching children.
  *
  * When a GROUP's children appear as a prefix before and/or suffix after
- * the GROUP in a SEQ, absorb them by incrementing the GROUP's quantifier.
+ * the GROUP in a SEQ, merge them by incrementing the GROUP's quantifier.
  * This runs iteratively: A B A B (A B)+ A B -> (A B){5,}.
  *
  * Algorithm:
@@ -503,15 +503,15 @@ mergeGroupPrefixSuffix(List *children)
 	List	   *result = NIL;
 	int			numChildren = list_length(children);
 	int			i;
-	int			skipUntil = -1; /* skip suffix elements already absorbed */
+	int			skipUntil = -1; /* skip suffix elements already merged */
 
 	for (i = 0; i < numChildren; i++)
 	{
 		RPRPatternNode *child = (RPRPatternNode *) list_nth(children, i);
 
 		/*
-		 * The suffix absorption logic below adjusts i to skip absorbed
-		 * elements, ensuring we never revisit them. Verify this invariant.
+		 * The suffix merge logic below adjusts i to skip merged elements,
+		 * ensuring we never revisit them. Verify this invariant.
 		 */
 		Assert(i >= skipUntil);
 
@@ -543,7 +543,7 @@ mergeGroupPrefixSuffix(List *children)
 			groupChildCount = list_length(groupContent);
 
 			/*
-			 * PREFIX MERGE: Check if preceding elements match. Keep absorbing
+			 * PREFIX MERGE: Check if preceding elements match. Keep merging
 			 * as long as we have matching prefixes.
 			 */
 			while (prefixLen >= groupChildCount && groupChildCount > 0)
@@ -592,7 +592,7 @@ mergeGroupPrefixSuffix(List *children)
 			}
 
 			/*
-			 * SUFFIX MERGE: Check if following elements match. Keep absorbing
+			 * SUFFIX MERGE: Check if following elements match. Keep merging
 			 * as long as we have matching suffixes.
 			 */
 			while (i + groupChildCount < numChildren && groupChildCount > 0)
@@ -623,7 +623,7 @@ mergeGroupPrefixSuffix(List *children)
 					 child->max < RPR_QUANTITY_INF - 1))
 				{
 					/*
-					 * Match! Absorb suffix by incrementing quantifier and
+					 * Match! Merge suffix by incrementing quantifier and
 					 * skipping.
 					 */
 					child->min += 1;
@@ -632,8 +632,7 @@ mergeGroupPrefixSuffix(List *children)
 					skipUntil = suffixStart + groupChildCount;
 
 					/*
-					 * Update i to continue suffix check after absorbed
-					 * elements
+					 * Update i to continue suffix check after merged elements
 					 */
 					i = skipUntil - 1;
 				}
