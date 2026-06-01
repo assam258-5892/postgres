@@ -1583,6 +1583,59 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
+-- Nested quantifier flattening must not widen the matching language (H-1).
+-- (A{k,})* with k >= 2 reaches repetition counts {0} UNION [k, INF); the gap
+-- 1..k-1 is unreachable, so it must NOT collapse to A*.  An isolated single A
+-- must yield an EMPTY match (count 0), not a length-1 match.
+WITH test_nested_quant_var AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),  -- isolated A: (A{2,})* matches empty here, not 1
+        (2, ARRAY['_']),
+        (3, ARRAY['A']),
+        (4, ARRAY['A']),  -- run of 2: matched
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end,
+       count(*) OVER w AS match_count
+FROM test_nested_quant_var
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2,})*)
+    DEFINE A AS 'A' = ANY(flags)
+);
+
+-- Same for a GROUP child: ((A B){2,})* must not collapse to (A B)*.
+-- An isolated single (A B) pair must yield an EMPTY match (count 0).
+WITH test_nested_quant_group AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),  -- isolated (A B) pair: matches empty here
+        (2, ARRAY['B']),
+        (3, ARRAY['_']),
+        (4, ARRAY['A']),
+        (5, ARRAY['B']),
+        (6, ARRAY['A']),
+        (7, ARRAY['B']),  -- run of 2 pairs: matched
+        (8, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end,
+       count(*) OVER w AS match_count
+FROM test_nested_quant_group
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((A B){2,})*)
+    DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags)
+);
+
 -- ============================================================
 -- Pathological Pattern Runtime Protection
 -- ============================================================

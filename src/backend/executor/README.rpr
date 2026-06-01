@@ -232,6 +232,7 @@ applied:
   (g) Quantifier multiplication: Collapse nested quantifiers when safe
       (A+)+ -> A+
       (A{2,3}){5} -> A{10,15}
+      (A{2,})* stays as-is (count 1 unreachable; A* would be wrong)
 
   (h) Single-child unwrap
       SEQ(A) -> A,  (A){1,1} -> A

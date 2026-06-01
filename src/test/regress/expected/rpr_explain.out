@@ -782,6 +782,47 @@ WINDOW w AS (
    ->  Function Scan on generate_series s (actual rows=1000.00 loops=1)
 (10 rows)
 
+-- (A{2,})* must NOT flatten to a* (H-1): counts {0} UNION [2, INF) leave 1
+-- unreachable.  The planner keeps it as (a{2,})*, not a*.
+CREATE VIEW rpr_ev_nested_quant_no_flatten AS
+SELECT count(*) OVER w
+FROM generate_series(1, 6) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2,})*)
+    DEFINE A AS v % 3 <> 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nested_quant_no_flatten'), E'\n')) AS line WHERE line ~ 'PATTERN';
+         line          
+-----------------------
+   PATTERN ((a{2,})*) 
+(1 row)
+
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 6) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2,})*)
+    DEFINE A AS v % 3 <> 0
+);');
+                         rpr_explain_filter                          
+---------------------------------------------------------------------
+ WindowAgg (actual rows=6.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a{2,}")*
+   Nav Mark Lookback: 0
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 5 peak, 18 total, 0 merged
+   NFA Contexts: 3 peak, 7 total, 2 pruned
+   NFA: 2 matched (len 2/2/2.0), 0 mismatched
+   NFA: 2 absorbed (len 1/1/1.0), 0 skipped
+   ->  Function Scan on generate_series s (actual rows=6.00 loops=1)
+(10 rows)
+
 -- ============================================================
 -- Context Statistics Tests (peak, total, pruned + absorbed/skipped)
 -- ============================================================

@@ -781,7 +781,8 @@ optimizeAltPattern(RPRPatternNode *pattern)
  *		Try to multiply quantifiers.
  *
  * Multiplication is SAFE when:
- *   1. Both unbounded: (A*)* -> A*, (A+)+ -> A+
+ *   1. Both unbounded, with skipless outer or child->min <= 1:
+ *      (A*)* -> A*, (A+)+ -> A+, (A+)* -> A*, (A{2,})+ -> A{2,}
  *   2. Outer exact: (A{m,n}){k} -> A{m*k, n*k}
  *   3. Outer range + child {1,1}: (A){2,} -> A{2,}
  *
@@ -789,6 +790,9 @@ optimizeAltPattern(RPRPatternNode *pattern)
  *   - Only child unbounded: (A+){3} has different semantics
  *   - Outer range + child not {1,1}: gaps possible
  *     e.g., (A{2}){2,3} yields 4,6 only (not 4,5,6)
+ *   - Skippable outer (min 0) + child->min >= 2: (A{2,})* reaches
+ *     {0} UNION [child->min, INF), so 1..child->min-1 are unreachable
+ *     and A* would wrongly admit them
  *
  * Returns the child node with multiplied quantifiers if successful,
  * otherwise returns the original pattern unchanged.
@@ -816,6 +820,18 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 	/* Case 1: Both unbounded - (A*)* -> A*, (A+)+ -> A+ */
 	if (child->max == RPR_QUANTITY_INF && pattern->max == RPR_QUANTITY_INF)
 	{
+		/*
+		 * A skippable outer (min 0) over a child with min >= 2 reaches
+		 * repetition counts {0} UNION [child->min, INF): the counts
+		 * 1..child->min-1 are unreachable, and no single quantifier can
+		 * express that gap.  Flattening to A{0,INF} = A* would wrongly admit
+		 * them, e.g. (A{2,})* would match a single A.  Multiplication is safe
+		 * here only when child->min <= 1 (the reachable set is then
+		 * contiguous from 0); otherwise leave the pattern unflattened.
+		 */
+		if (pattern->min == 0 && child->min >= 2)
+			return pattern;
+
 		new_min_64 = (int64) child->min * pattern->min;
 		if (new_min_64 >= RPR_QUANTITY_INF)
 			return pattern;		/* overflow, skip optimization */

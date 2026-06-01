@@ -499,6 +499,29 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2
 );');
 
+-- (A{2,})* must NOT flatten to a* (H-1): counts {0} UNION [2, INF) leave 1
+-- unreachable.  The planner keeps it as (a{2,})*, not a*.
+CREATE VIEW rpr_ev_nested_quant_no_flatten AS
+SELECT count(*) OVER w
+FROM generate_series(1, 6) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2,})*)
+    DEFINE A AS v % 3 <> 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nested_quant_no_flatten'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 6) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2,})*)
+    DEFINE A AS v % 3 <> 0
+);');
+
 -- ============================================================
 -- Context Statistics Tests (peak, total, pruned + absorbed/skipped)
 -- ============================================================
