@@ -2386,6 +2386,15 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A A+) DEFINE A AS val > 0);
 
+-- Consecutive VAR merge at the boundary: A{1073741823,} A{1073741823,} ->
+-- a{2147483646,}.  The min sum 2147483646 = INT32_MAX - 1 is the largest
+-- still-finite bound, so the merge proceeds; a sum of exactly INF instead
+-- falls back (see the Optimization Fallback Tests).
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{1073741823,} A{1073741823,}) DEFINE A AS val > 0);
+
 -- Consecutive GROUP merge with finite quantifiers: ((A B){5}) ((A B){10}) -> merged
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
@@ -2405,6 +2414,15 @@ EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B){2} (A B)+) DEFINE A AS val <= 50, B AS val > 50);
+
+-- Consecutive GROUP merge at the boundary: (A B){1073741823,} (A B){1073741823,}
+-- -> (a b){2147483646,}.  The min sum INT32_MAX - 1 is still finite, so the
+-- merge proceeds; a sum of exactly INF instead falls back (see the
+-- Optimization Fallback Tests).
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN ((A B){1073741823,} (A B){1073741823,}) DEFINE A AS val <= 50, B AS val > 50);
 
 -- PREFIX merge: A B (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
@@ -3212,6 +3230,31 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5, C AS val > 10, D AS val > 15
 );
 -- Expected: Fallback - prefix elements don't match GROUP content
+
+-- Test: consecutive VAR merge whose min sum is exactly INF causes fallback.
+-- 1073741824 + 1073741823 = 2147483647 = INT32_MAX = RPR_QUANTITY_INF.
+-- Merging would yield a VAR with min == INF, so the merge must fall back and
+-- leave the two VARs unmerged (mirrors the multiply path's >= INF guard).
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1073741824,} A{1073741823,})
+    DEFINE A AS val > 0
+);
+-- Expected: Fallback - VARs not merged (min sum 2147483647 == INF)
+
+-- Test: consecutive GROUP merge whose min sum is exactly INF causes fallback.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ((A B){1073741824,} (A B){1073741823,})
+    DEFINE A AS val > 0, B AS val > 5
+);
+-- Expected: Fallback - GROUPs not merged (min sum 2147483647 == INF)
 
 DROP TABLE rpr_fallback;
 

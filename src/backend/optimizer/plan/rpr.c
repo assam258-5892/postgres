@@ -245,13 +245,16 @@ mergeConsecutiveVars(List *children)
 			/* ----------------------
 			 * Can merge consecutive VAR nodes if:
 			 * 1. Same variable name
-			 * 2. No min overflow: prev->min + child->min <= INF
-			 * 3. No max overflow: prev->max + child->max <= INF (or either is INF)
+			 * 2. No min overflow: prev->min + child->min < INF
+			 * 3. No max overflow: prev->max + child->max < INF (or either is INF)
+			 *
+			 * Strict <: a sum equal to INF would alias the unbounded sentinel
+			 * (min must stay finite; a finite max must not become INF).
 			 */
 			if (prev != NULL &&
 				strcmp(prev->varName, child->varName) == 0 &&
-				prev->min <= RPR_QUANTITY_INF - child->min &&
-				(prev->max <= RPR_QUANTITY_INF - child->max ||
+				prev->min < RPR_QUANTITY_INF - child->min &&
+				(prev->max < RPR_QUANTITY_INF - child->max ||
 				 prev->max == RPR_QUANTITY_INF ||
 				 child->max == RPR_QUANTITY_INF))
 			{
@@ -319,13 +322,16 @@ mergeConsecutiveGroups(List *children)
 			/* ----------------------
 			 * Can merge consecutive GROUP nodes if:
 			 * 1. Identical children
-			 * 2. No min overflow: prev->min + child->min <= INF
-			 * 3. No max overflow: prev->max + child->max <= INF (or either is INF)
+			 * 2. No min overflow: prev->min + child->min < INF
+			 * 3. No max overflow: prev->max + child->max < INF (or either is INF)
+			 *
+			 * Strict <: a sum equal to INF would alias the unbounded sentinel
+			 * (min must stay finite; a finite max must not become INF).
 			 */
 			if (prev != NULL &&
 				rprPatternChildrenEqual(prev->children, child->children) &&
-				prev->min <= RPR_QUANTITY_INF - child->min &&
-				(prev->max <= RPR_QUANTITY_INF - child->max ||
+				prev->min < RPR_QUANTITY_INF - child->min &&
+				(prev->max < RPR_QUANTITY_INF - child->max ||
 				 prev->max == RPR_QUANTITY_INF ||
 				 child->max == RPR_QUANTITY_INF))
 			{
