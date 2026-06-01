@@ -1805,9 +1805,9 @@ ExecRPRCleanupDeadContexts(WindowAggState *winstate, RPRNFAContext *excludeCtx)
 			continue;
 
 		/*
-		 * This is a failed context - count and remove it. Only count if it
-		 * actually processed its start row. Contexts created for
-		 * beyond-partition rows are silently removed.
+		 * Failed context: always removed below.  Only record the failure
+		 * statistic if it actually processed its start row; contexts created
+		 * for beyond-partition rows are removed without being counted.
 		 */
 		if (ctx->lastProcessedRow >= ctx->matchStartRow)
 		{
@@ -1815,7 +1815,6 @@ ExecRPRCleanupDeadContexts(WindowAggState *winstate, RPRNFAContext *excludeCtx)
 
 			ExecRPRRecordContextFailure(winstate, failedLen);
 		}
-		/* else: context was never processed (beyond-partition), just remove */
 
 		ExecRPRFreeContext(winstate, ctx);
 	}
