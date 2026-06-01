@@ -315,8 +315,9 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
 	 * The +1 is the slot arithmetic: comparing through depth N requires
 	 * counts[0..N], i.e., N+1 entries.  Deeper slots (counts[d] with d >
 	 * elem->depth) are excluded because they hold scratch state from inner
-	 * groups that gets zeroed on re-entry (see END loop-back in
-	 * nfa_advance_end), and so must not participate in equivalence judgment.
+	 * groups.  Per the count-clear policy such a slot is zeroed when its
+	 * owning element exits (see nfa_advance_var and the inline fast path in
+	 * nfa_match), so it must not participate in equivalence judgment.
 	 */
 	elem = &pattern->elements[s1->elemIdx];
 	compareDepth = elem->depth + 1;
@@ -859,6 +860,16 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, bool *varMatched)
 					state->counts[endDepth] = endCount;
 
 					/*
+					 * Leaf VAR exited (reached max): clear its own count so
+					 * the next occupant enters with zero, as nfa_advance_var
+					 * does on exit (this inline path replaces that exit).
+					 * depth > endDepth, so this leaves the group count just
+					 * written intact.
+					 */
+					Assert(endDepth < depth);
+					state->counts[depth] = 0;
+
+					/*
 					 * Chain through END elements within the absorbable region
 					 * (ABSORBABLE_BRANCH) until reaching the judgment point
 					 * (ABSORBABLE).  Continue only on must-exit path (count
@@ -873,7 +884,13 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, bool *varMatched)
 						int			outerDepth = outerEnd->depth;
 						int32		outerCount = state->counts[outerDepth];
 
-						/* Reset exited group's count */
+						/*
+						 * Exit this intermediate group: clear its own count
+						 * (count-clear policy).  It sits below the absorbable
+						 * judgment point, so it is excluded from the
+						 * dominance comparison; the judgment point where the
+						 * chain stops keeps its count.
+						 */
 						state->counts[endDepth] = 0;
 
 						/* Increment outer group count */
@@ -924,6 +941,15 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 	if (RPRElemIsVar(nextElem))
 	{
 		RPRNFAState *skipState = NULL;
+
+		/*
+		 * Entry-side check of the count-clear policy: a VAR is always routed
+		 * to with a clean slot.  Each element zeroes its own count on exit,
+		 * so a nonzero count here would be a leak from an earlier element
+		 * (see nfa_advance_var / nfa_advance_end exit handling and the inline
+		 * fast path in nfa_match).
+		 */
+		Assert(state->counts[nextElem->depth] == 0);
 
 		/* Create skip state before add_unique, which may free state */
 		if (RPRElemCanSkip(nextElem))
@@ -989,9 +1015,10 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
  * nfa_advance_begin
  *
  * Handle BEGIN element: group entry logic.
- * BEGIN is only visited at initial group entry (count is always 0).
+ * BEGIN is only visited at initial group entry; loop-back from END goes
+ * directly to first child, bypassing BEGIN.  Per the count-clear policy the
+ * group's own count slot is therefore already zero on entry (asserted below).
  * If min=0, creates a skip path past the group.
- * Loop-back from END goes directly to first child, bypassing BEGIN.
  */
 static void
 nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
@@ -1002,7 +1029,12 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	RPRPatternElement *elements = pattern->elements;
 	RPRNFAState *skipState = NULL;
 
-	state->counts[elem->depth] = 0;
+	/*
+	 * Entry-side check of the count-clear policy: the group's own count slot
+	 * is already zero here.  BEGIN is only visited at initial group entry,
+	 * and the previous occupant of this depth slot cleared it on exit.
+	 */
+	Assert(state->counts[elem->depth] == 0);
 
 	/* Optional group: create skip path (but don't route yet) */
 	if (elem->min == 0)
@@ -1094,8 +1126,6 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 									  state->counts, state->isAbsorbable);
 
 		/* Primary path: loop back for real matches */
-		for (int d = depth + 1; d < pattern->maxDepth; d++)
-			state->counts[d] = 0;
 		state->elemIdx = elem->jump;
 		jumpElem = &elements[state->elemIdx];
 		nfa_route_to_elem(winstate, ctx, state, jumpElem,
@@ -1112,6 +1142,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		{
 			RPRPatternElement *nextElem;
 
+			/* Exit the group: clear its own count (count-clear policy) */
 			ffState->counts[depth] = 0;
 			ffState->elemIdx = elem->next;
 			nextElem = &elements[ffState->elemIdx];
@@ -1130,6 +1161,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		/* Must exit: reached max iterations. */
 		RPRPatternElement *nextElem;
 
+		/* Exit: clear the group's own count (count-clear policy) */
 		state->counts[depth] = 0;
 		state->elemIdx = elem->next;
 		nextElem = &elements[state->elemIdx];
@@ -1161,6 +1193,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		 */
 		exitState = nfa_state_clone(winstate, elem->next,
 									state->counts, state->isAbsorbable);
+		/* Exit branch: clear the group's own count (count-clear policy) */
 		exitState->counts[depth] = 0;
 		nextElem = &elements[exitState->elemIdx];
 
@@ -1169,8 +1202,6 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 			exitState->counts[nextElem->depth]++;
 
 		/* Prepare loop state */
-		for (int d = depth + 1; d < pattern->maxDepth; d++)
-			state->counts[d] = 0;
 		state->elemIdx = elem->jump;
 		jumpElem = &elements[state->elemIdx];
 
@@ -1253,6 +1284,7 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 			/* Clone for exit, original stays for loop */
 			cloneState = nfa_state_clone(winstate, elem->next,
 										 state->counts, state->isAbsorbable);
+			/* Exit: clear the VAR's own count (count-clear policy) */
 			cloneState->counts[depth] = 0;
 			nextElem = &elements[cloneState->elemIdx];
 
@@ -1289,7 +1321,7 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 			/* Loop first (preferred for greedy) */
 			nfa_add_state_unique(winstate, ctx, cloneState);
 
-			/* Exit second */
+			/* Exit second: clear the VAR's own count (count-clear policy) */
 			state->counts[depth] = 0;
 			state->elemIdx = elem->next;
 			nextElem = &elements[state->elemIdx];
@@ -1326,6 +1358,7 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 		/* Exit only: advance to next element */
 		RPRPatternElement *nextElem;
 
+		/* Exit: clear the VAR's own count (count-clear policy) */
 		state->counts[depth] = 0;
 		state->elemIdx = elem->next;
 		nextElem = &elements[state->elemIdx];

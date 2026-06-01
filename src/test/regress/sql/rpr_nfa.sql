@@ -346,6 +346,37 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
+-- Two consecutive unbounded groups: (A B)+ (C D)+
+-- The leading group (A B)+ is absorbable (unbounded multi-element); (C D)+ is
+-- a distinct sibling group that does not merge with it.  When the leading group
+-- exits into the sibling, its body leaf-VAR count must be cleared so it does
+-- not leak into the sibling's shared depth slot.
+WITH test_absorb_two_groups AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['C']),
+        (4, ARRAY['D']),
+        (5, ARRAY['A']),
+        (6, ARRAY['B']),
+        (7, ARRAY['C']),
+        (8, ARRAY['D'])
+    ) AS t(id, flags)
+)
+SELECT id, flags, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM test_absorb_two_groups
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B)+ (C D)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
 -- Fixed-length group absorption: (A B{2})+ C
 -- B{2} has min == max, equivalent to unrolling to (A B B)+ C
 WITH test_absorb_fixedlen AS (
