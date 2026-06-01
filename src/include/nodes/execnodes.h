@@ -2671,8 +2671,6 @@ typedef struct WindowAggState
 											 * (match_start-dependent) */
 	bitmapword *nfaVisitedElems;	/* elemIdx visited bitmap for cycle
 									 * detection */
-	int			nfaVisitedNWords;	/* number of bitmapwords in
-									 * nfaVisitedElems */
 	int16		nfaVisitedMinWord;	/* lowest bitmapword index touched since
 									 * last reset (INT16_MAX = none) */
 	int16		nfaVisitedMaxWord;	/* highest bitmapword index touched since

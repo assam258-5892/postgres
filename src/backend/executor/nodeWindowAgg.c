@@ -3058,12 +3058,14 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	/* Calculate NFA state size and allocate cycle detection bitmap */
 	if (node->rpPattern != NULL)
 	{
+		int			nfaVisitedNWords;
+
 		winstate->nfaStateSize = offsetof(RPRNFAState, counts) +
 			sizeof(int32) * node->rpPattern->maxDepth;
-		winstate->nfaVisitedNWords =
+		nfaVisitedNWords =
 			(node->rpPattern->numElements - 1) / BITS_PER_BITMAPWORD + 1;
 		winstate->nfaVisitedElems = palloc0(sizeof(bitmapword) *
-											winstate->nfaVisitedNWords);
+											nfaVisitedNWords);
 		/* High-water mark sentinels: no bits set yet. */
 		winstate->nfaVisitedMinWord = INT16_MAX;
 		winstate->nfaVisitedMaxWord = -1;

@@ -41,7 +41,7 @@
 /*
  * Set the visited bit for elemIdx and update the high-water marks
  * (nfaVisitedMin/MaxWord) so that the next reset only has to clear
- * the touched range instead of the full nfaVisitedNWords array.
+ * the touched range instead of the full nfaVisitedElems bitmap.
  */
 static inline void
 nfa_mark_visited(WindowAggState *winstate, int16 elemIdx)

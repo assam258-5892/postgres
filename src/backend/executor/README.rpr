@@ -522,7 +522,6 @@ V-3. RPR Fields of WindowAggState
   nfaStateFree                  Reuse pool for states
   nfaVarMatched                 Per-row cache: varMatched[varId]
   nfaVisitedElems               Bitmap for cycle detection
-  nfaVisitedNWords              Number of bitmapwords in nfaVisitedElems
   nfaVisitedMinWord             Lowest bitmapword index touched since last reset
   nfaVisitedMaxWord             Highest bitmapword index touched since last reset
   nfaStateSize                  Precomputed size of RPRNFAState
@@ -1542,7 +1541,6 @@ Appendix B. Data Structure Relationship Diagram
     |--- defineMatchStartDependent: Bitmapset* (match_start_dependent
     |        DEFINE vars; see VI-4)
     |--- nfaVisitedElems: bitmapword* (cycle detection)
-    |--- nfaVisitedNWords: int (size of nfaVisitedElems)
     |--- nfaVisitedMinWord / nfaVisitedMaxWord: int16
     |        (touched-word range for fast reset)
     |--- nfaLastProcessedRow: int64 (-1 = none)
