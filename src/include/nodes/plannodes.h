@@ -1296,15 +1296,22 @@ typedef struct RPRPattern
 	 * Context absorption optimization.
 	 *
 	 * Absorption is only safe when later matches are guaranteed to be
-	 * suffixes of earlier matches. This requires simple pattern structure:
+	 * suffixes of earlier matches, which requires the pattern to start with
+	 * an unbounded greedy element.  Phase-1 normalization (consecutive
+	 * variable / group / ALT merging and prefix/suffix merging) rewrites the
+	 * pattern toward that form first -- so e.g. A B (A B)+ is merged to
+	 * (A B){2,} and then judged absorbable.
 	 *
-	 * Case 1: No ALT, single unbounded element (A+, (A B)+)
-	 * Case 2: Top-level ALT with each branch being single unbounded (A+ | B+)
+	 * computeAbsorbability() marks the absorbable cases (see isUnboundedStart):
+	 *   - simple unbounded VAR at the start:                    A+ B C
+	 *   - unbounded GROUP with fixed-length children:           (A B)+, (A B{2})+
+	 *   - top-level ALT with independently absorbable branches: A+ | B+
+	 *     (handled in computeAbsorbabilityRecursive)
 	 *
-	 * Complex patterns like A B (A B)+ could theoretically be transformed to
-	 * (A B){2,} for absorption, but this changes lexical order and is not
-	 * implemented. Similarly, (A|B)+ cannot be absorbed because different
-	 * start positions produce different match contents (not suffix relation).
+	 * Not absorbable: an unbounded element not at the start (A B+), a
+	 * reluctant quantifier (A+?), or an ALT inside a group ((A|B)+) -- there
+	 * different start positions yield different match contents, so later
+	 * matches are not suffixes of earlier ones.
 	 */
 	bool		isAbsorbable;	/* true if pattern supports context absorption */
 } RPRPattern;

@@ -245,7 +245,7 @@ RPRPatternElement struct (16 bytes):
 
   Field      Size     Description
   ---------------------------------------------------------
-  varId      1B      Variable ID (0-251) or control code (252-255)
+  varId      1B      Variable ID (0-250) or control code (252-255)
   depth      1B      Group nesting depth
   flags      1B      Bit flags (see below)
   reserved   1B      Padding
@@ -1303,11 +1303,11 @@ XI-4. Execution Trace
 
 XI-5. Final Result
 
-  Row 0: unmatched     -> frame = the row itself
+  Row 0: unmatched     -> reduced frame empty (window funcs NULL, count() 0)
   Row 1: match head    -> frame = rows 1 through 3
   Row 2: inside match  -> skipped
   Row 3: inside match  -> skipped
-  Row 4: unmatched     -> frame = the row itself
+  Row 4: unmatched     -> reduced frame empty (window funcs NULL, count() 0)
 
 Chapter XII  Summary of Key Design Decisions
 ============================================================================

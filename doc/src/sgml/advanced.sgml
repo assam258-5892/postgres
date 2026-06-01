@@ -600,8 +600,9 @@ DEFINE
     subsequent rows all window functions are shown as NULL. Aggregates on
     non-starting rows return their initial value: for example,
     <function>count()</function> returns 0 and <function>sum()</function>
-    returns NULL. For rows that do not match the PATTERN, columns are shown
-    as NULL too. Example of a <literal>SELECT</literal> using
+    returns NULL. For rows that do not match the PATTERN, window functions
+    are likewise shown as NULL and aggregates return their initial value.
+    Example of a <literal>SELECT</literal> using
     the <literal>DEFINE</literal> and <literal>PATTERN</literal> clause is as
     follows.
 
