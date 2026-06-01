@@ -334,7 +334,8 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
 /*
  * nfa_add_state_unique
  *
- * Add a state to ctx->states at the END, only if no duplicate exists.
+ * Add the state to the end of the ctx->states linked list, but only if a
+ * duplicate state is not already present.
  * Earlier states have better lexical order (DFS traversal order), so existing
  * wins; the new state is freed when a duplicate is found.
  */
@@ -779,7 +780,7 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
  *     previous advance when count >= min was satisfied)
  *
  * For VARs that reached max count followed by END:
- *   - Advance through END chain to reach absorption judgment point
+ *   - Advance through the END-element chain to the absorption judgment point
  *   - Only deterministic exits (count >= max, max != INF) are handled
  *   - Chains through END elements while count >= max (must-exit path)
  *
@@ -796,8 +797,8 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, bool *varMatched)
 
 	/*
 	 * Evaluate VAR elements against current row. For VARs that reach max
-	 * count with END next, advance through END chain inline so absorb phase
-	 * can compare states at judgment points.
+	 * count with END next, advance through the chain of END elements inline
+	 * so absorb phase can compare states at judgment points.
 	 */
 	for (state = ctx->states; state != NULL; state = nextState)
 	{
@@ -1229,7 +1230,7 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 	bool		canLoop = (elem->max == RPR_QUANTITY_INF || count < elem->max);
 	bool		canExit = (count >= elem->min);
 
-	/* After a successful match, count >= 1, so at least one must be true */
+	/* min <= max, so !canExit (count < min) implies canLoop (count < max) */
 	Assert(canLoop || canExit);
 
 	/* elem->next must be a valid index for any reachable VAR */

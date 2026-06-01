@@ -2379,8 +2379,8 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+ A*) DEFINE A AS val > 0);
 
 -- Consecutive VAR merge: A A+ -> a{2,}
--- Tests line 251: child->max == RPR_QUANTITY_INF branch in mergeConsecutiveVars
--- prev: A{1,1} (finite), child: A+ (infinite) triggers line 251 evaluation
+-- Exercises the child->max == RPR_QUANTITY_INF branch in mergeConsecutiveVars,
+-- where a finite prev (A{1,1}) meets an infinite child (A+).
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2399,8 +2399,8 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+ (A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
 -- Consecutive GROUP merge: (A B){2} (A B)+ -> (a b){3,}
--- Tests line 325: child->max == RPR_QUANTITY_INF branch in mergeConsecutiveGroups
--- prev: (A B){2,2} (finite), child: (A B)+ (infinite) triggers line 325 evaluation
+-- Exercises the child->max == RPR_QUANTITY_INF branch in mergeConsecutiveGroups,
+-- where a finite prev ((A B){2,2}) meets an infinite child ((A B)+).
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
