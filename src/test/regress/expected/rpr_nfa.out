@@ -3844,7 +3844,7 @@ WINDOW w AS (
 
 -- Non-absorbable context during absorption
 -- Pattern (A B)+ C: A,B in absorbable group, C is not.
--- When END exits to C via nfa_state_create, isAbsorbable becomes false.
+-- When END exits to C via nfa_state_clone, isAbsorbable becomes false.
 WITH test_non_absorbable AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),

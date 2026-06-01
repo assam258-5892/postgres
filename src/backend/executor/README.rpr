@@ -579,7 +579,7 @@ VI-2. Context Creation: ExecRPRStartContext()
 
 Creates a new context and performs the initial advance.
 
-  (1) Allocate context via nfa_context_alloc()
+  (1) Allocate context via nfa_context_make()
   (2) Set matchStartRow = pos
   (3) Create initial state: elemIdx=0 (first pattern element),
       counts=all zero

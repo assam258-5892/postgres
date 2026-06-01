@@ -54,11 +54,11 @@ nfa_mark_visited(WindowAggState *winstate, int16 elemIdx)
 }
 
 /* Forward declarations - NFA state management */
-static RPRNFAState *nfa_state_alloc(WindowAggState *winstate);
+static RPRNFAState *nfa_state_make(WindowAggState *winstate);
 static void nfa_state_free(WindowAggState *winstate, RPRNFAState *state);
 static void nfa_state_free_list(WindowAggState *winstate, RPRNFAState *list);
-static RPRNFAState *nfa_state_create(WindowAggState *winstate, int16 elemIdx,
-									 int32 *counts, bool sourceAbsorbable);
+static RPRNFAState *nfa_state_clone(WindowAggState *winstate, int16 elemIdx,
+									int32 *counts, bool sourceAbsorbable);
 static bool nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1,
 							 RPRNFAState *s2);
 static void nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx,
@@ -67,7 +67,7 @@ static void nfa_add_matched_state(WindowAggState *winstate, RPRNFAContext *ctx,
 								  RPRNFAState *state, int64 matchEndRow);
 
 /* Forward declarations - NFA context management (internal) */
-static RPRNFAContext *nfa_context_alloc(WindowAggState *winstate);
+static RPRNFAContext *nfa_context_make(WindowAggState *winstate);
 static void nfa_unlink_context(WindowAggState *winstate, RPRNFAContext *ctx);
 
 /* Forward declarations - NFA statistics */
@@ -199,14 +199,14 @@ static void nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx,
  */
 
 /*
- * nfa_state_alloc
+ * nfa_state_make
  *
  * Allocate an NFA state, reusing from freeList if available.
  * freeList is stored in WindowAggState for reuse across match attempts.
  * Uses flexible array member for counts[].
  */
 static RPRNFAState *
-nfa_state_alloc(WindowAggState *winstate)
+nfa_state_make(WindowAggState *winstate)
 {
 	RPRNFAState *state;
 
@@ -265,21 +265,21 @@ nfa_state_free_list(WindowAggState *winstate, RPRNFAState *list)
 }
 
 /*
- * nfa_state_create
+ * nfa_state_clone
  *
- * Create a new state with given elemIdx and counts.
+ * Clone a state from the given elemIdx and counts.
  * isAbsorbable is computed immediately: inherited AND new element's flag.
  * Monotonic property: once false, stays false through all transitions.
  *
  * Caller is responsible for linking the returned state.
  */
 static RPRNFAState *
-nfa_state_create(WindowAggState *winstate, int16 elemIdx,
-				 int32 *counts, bool sourceAbsorbable)
+nfa_state_clone(WindowAggState *winstate, int16 elemIdx,
+				int32 *counts, bool sourceAbsorbable)
 {
 	RPRPattern *pattern = winstate->rpPattern;
 	int			maxDepth = pattern->maxDepth;
-	RPRNFAState *state = nfa_state_alloc(winstate);
+	RPRNFAState *state = nfa_state_make(winstate);
 	RPRPatternElement *elem = &pattern->elements[elemIdx];
 
 	state->elemIdx = elemIdx;
@@ -418,12 +418,12 @@ nfa_add_matched_state(WindowAggState *winstate, RPRNFAContext *ctx,
 }
 
 /*
- * nfa_context_alloc
+ * nfa_context_make
  *
  * Allocate an NFA context, reusing from free list if available.
  */
 static RPRNFAContext *
-nfa_context_alloc(WindowAggState *winstate)
+nfa_context_make(WindowAggState *winstate)
 {
 	RPRNFAContext *ctx;
 
@@ -931,8 +931,8 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 
 		/* Create skip state before add_unique, which may free state */
 		if (RPRElemCanSkip(nextElem))
-			skipState = nfa_state_create(winstate, nextElem->next,
-										 state->counts, state->isAbsorbable);
+			skipState = nfa_state_clone(winstate, nextElem->next,
+										state->counts, state->isAbsorbable);
 
 		nfa_add_state_unique(winstate, ctx, state);
 
@@ -978,8 +978,8 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
 			break;
 
 		/* Create independent state for each branch */
-		newState = nfa_state_create(winstate, altIdx,
-									state->counts, state->isAbsorbable);
+		newState = nfa_state_clone(winstate, altIdx,
+								   state->counts, state->isAbsorbable);
 
 		/* Recursively process this branch before next */
 		nfa_advance_state(winstate, ctx, newState, currentPos);
@@ -1011,8 +1011,8 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	/* Optional group: create skip path (but don't route yet) */
 	if (elem->min == 0)
 	{
-		skipState = nfa_state_create(winstate, elem->jump,
-									 state->counts, state->isAbsorbable);
+		skipState = nfa_state_clone(winstate, elem->jump,
+									state->counts, state->isAbsorbable);
 	}
 
 	if (skipState != NULL && RPRElemIsReluctant(elem))
@@ -1094,8 +1094,8 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		 *----------
 		 */
 		if (RPRElemCanEmptyLoop(elem))
-			ffState = nfa_state_create(winstate, state->elemIdx,
-									   state->counts, state->isAbsorbable);
+			ffState = nfa_state_clone(winstate, state->elemIdx,
+									  state->counts, state->isAbsorbable);
 
 		/* Primary path: loop back for real matches */
 		for (int d = depth + 1; d < pattern->maxDepth; d++)
@@ -1163,8 +1163,8 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		 * Create exit state first (need original counts before modifying
 		 * state)
 		 */
-		exitState = nfa_state_create(winstate, elem->next,
-									 state->counts, state->isAbsorbable);
+		exitState = nfa_state_clone(winstate, elem->next,
+									state->counts, state->isAbsorbable);
 		exitState->counts[depth] = 0;
 		nextElem = &elements[exitState->elemIdx];
 
@@ -1255,8 +1255,8 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 			RPRNFAState *savedMatch = ctx->matchedState;
 
 			/* Clone for exit, original stays for loop */
-			cloneState = nfa_state_create(winstate, elem->next,
-										  state->counts, state->isAbsorbable);
+			cloneState = nfa_state_clone(winstate, elem->next,
+										 state->counts, state->isAbsorbable);
 			cloneState->counts[depth] = 0;
 			nextElem = &elements[cloneState->elemIdx];
 
@@ -1287,8 +1287,8 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 		else
 		{
 			/* Clone for loop, original used for exit */
-			cloneState = nfa_state_create(winstate, state->elemIdx,
-										  state->counts, state->isAbsorbable);
+			cloneState = nfa_state_clone(winstate, state->elemIdx,
+										 state->counts, state->isAbsorbable);
 
 			/* Loop first (preferred for greedy) */
 			nfa_add_state_unique(winstate, ctx, cloneState);
@@ -1505,9 +1505,9 @@ ExecRPRStartContext(WindowAggState *winstate, int64 startPos)
 	RPRPattern *pattern = winstate->rpPattern;
 	RPRPatternElement *elem;
 
-	ctx = nfa_context_alloc(winstate);
+	ctx = nfa_context_make(winstate);
 	ctx->matchStartRow = startPos;
-	ctx->states = nfa_state_alloc(winstate);	/* initial state at elem 0 */
+	ctx->states = nfa_state_make(winstate); /* initial state at elem 0 */
 
 	elem = &pattern->elements[0];
 
