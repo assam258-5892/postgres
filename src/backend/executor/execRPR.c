@@ -53,7 +53,7 @@ nfa_mark_visited(WindowAggState *winstate, int16 elemIdx)
 	winstate->nfaVisitedMaxWord = Max(winstate->nfaVisitedMaxWord, w);
 }
 
-/* Forward declarations - NFA state management */
+/* Forward declarations */
 static RPRNFAState *nfa_state_make(WindowAggState *winstate);
 static void nfa_state_free(WindowAggState *winstate, RPRNFAState *state);
 static void nfa_state_free_list(WindowAggState *winstate, RPRNFAState *list);
@@ -66,23 +66,19 @@ static void nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx,
 static void nfa_add_matched_state(WindowAggState *winstate, RPRNFAContext *ctx,
 								  RPRNFAState *state, int64 matchEndRow);
 
-/* Forward declarations - NFA context management (internal) */
 static RPRNFAContext *nfa_context_make(WindowAggState *winstate);
 static void nfa_unlink_context(WindowAggState *winstate, RPRNFAContext *ctx);
 
-/* Forward declarations - NFA statistics */
 static void nfa_update_length_stats(int64 count, NFALengthStats *stats, int64 newLen);
 static void nfa_record_context_skipped(WindowAggState *winstate, int64 skippedLen);
 static void nfa_record_context_absorbed(WindowAggState *winstate, int64 absorbedLen);
 
-/* Forward declarations - NFA absorption */
 static void nfa_update_absorption_flags(RPRNFAContext *ctx);
 static bool nfa_states_covered(RPRPattern *pattern, RPRNFAContext *older,
 							   RPRNFAContext *newer);
 static void nfa_try_absorb_context(WindowAggState *winstate, RPRNFAContext *ctx);
 static void nfa_absorb_contexts(WindowAggState *winstate);
 
-/* Forward declarations - NFA match and advance */
 static bool nfa_eval_var_match(WindowAggState *winstate,
 							   RPRPatternElement *elem, bool *varMatched);
 static void nfa_match(WindowAggState *winstate, RPRNFAContext *ctx,
