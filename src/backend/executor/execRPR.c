@@ -279,8 +279,9 @@ nfa_state_clone(WindowAggState *winstate, int16 elemIdx,
 	RPRPatternElement *elem = &pattern->elements[elemIdx];
 
 	state->elemIdx = elemIdx;
-	if (counts != NULL && maxDepth > 0)
-		memcpy(state->counts, counts, sizeof(int32) * maxDepth);
+	/* Every reachable caller passes a live state's counts; maxDepth >= 1. */
+	Assert(counts != NULL && maxDepth > 0);
+	memcpy(state->counts, counts, sizeof(int32) * maxDepth);
 
 	/*
 	 * Compute isAbsorbable immediately at transition time. isAbsorbable =
@@ -981,10 +982,14 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
 	RPRPatternElement *elements = pattern->elements;
 	RPRElemIdx	altIdx = elem->next;
 
-	while (altIdx >= 0 && altIdx < pattern->numElements)
+	while (altIdx >= 0)
 	{
-		RPRPatternElement *altElem = &elements[altIdx];
+		RPRPatternElement *altElem;
 		RPRNFAState *newState;
+
+		/* Branch jump/next links are always -1 or a valid index */
+		Assert(altIdx < pattern->numElements);
+		altElem = &elements[altIdx];
 
 		/*
 		 * Stop if element is outside ALT scope (not a branch).  The check
@@ -1146,6 +1151,13 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 			ffState->counts[depth] = 0;
 			ffState->elemIdx = elem->next;
 			nextElem = &elements[ffState->elemIdx];
+
+			/*
+			 * Unlike the must-exit path, no isAbsorbable update is needed:
+			 * the fast-forward path runs only for EMPTY_LOOP (nullable)
+			 * groups, which are never inside an absorbable region, so
+			 * isAbsorbable is already false here.
+			 */
 
 			/* END->END: increment outer END's count */
 			if (RPRElemIsEnd(nextElem) &&
@@ -1353,11 +1365,12 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 		/* Loop only: keep state as-is */
 		nfa_add_state_unique(winstate, ctx, state);
 	}
-	else if (canExit)
+	else
 	{
-		/* Exit only: advance to next element */
+		/* Exit only: advance to next element (canExit necessarily true) */
 		RPRPatternElement *nextElem;
 
+		Assert(canExit);
 		/* Exit: clear the VAR's own count (count-clear policy) */
 		state->counts[depth] = 0;
 		state->elemIdx = elem->next;
