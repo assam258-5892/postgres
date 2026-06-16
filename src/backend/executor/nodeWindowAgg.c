@@ -176,7 +176,6 @@ typedef struct WindowStatePerAggData
 	bool		restart;		/* need to restart this agg in this cycle? */
 } WindowStatePerAggData;
 
-
 static void initialize_windowaggregate(WindowAggState *winstate,
 									   WindowStatePerFunc perfuncstate,
 									   WindowStatePerAgg peraggstate);
@@ -1023,7 +1022,6 @@ eval_windowaggregates(WindowAggState *winstate)
 							  agg_row_slot, false);
 		if (ret < 0)
 			break;
-
 		if (ret == 0)
 			goto next_tuple;
 
@@ -1084,7 +1082,6 @@ next_tuple:
 		winstate->aggregatedupto++;
 		ExecClearTuple(agg_row_slot);
 	}
-
 
 	/* The frame's end is not supposed to move backwards, ever */
 	Assert(aggregatedupto_nonrestarted <= winstate->aggregatedupto);
