@@ -31,10 +31,10 @@
 /*
  * RPR_COUNT_INF is the value a runtime repetition count saturates at to avoid
  * int32 overflow (see the count++ guard in nfa_match).  It is defined as
- * RPR_QUANTITY_INF so that a saturated count compares as "unbounded", just
- * like an unbounded quantifier's max.
+ * RPR_QUANTITY_INF (from nodes/parsenodes.h, included above) so that a
+ * saturated count compares as "unbounded", just like an unbounded
+ * quantifier's max.
  */
-#define RPR_QUANTITY_INF	PG_INT32_MAX	/* unbounded quantifier */
 #define RPR_COUNT_INF		RPR_QUANTITY_INF
 #define RPR_ELEMIDX_MAX		PG_INT16_MAX	/* max pattern elements */
 #define RPR_ELEMIDX_INVALID	((RPRElemIdx) -1)	/* invalid index */

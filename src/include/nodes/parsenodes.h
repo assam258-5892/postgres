@@ -620,6 +620,14 @@ typedef enum RPRPatternNodeType
 } RPRPatternNodeType;
 
 /*
+ * RPR_QUANTITY_INF is the sentinel stored in RPRPatternNode.max for an
+ * unbounded quantifier (*, +, or {n,}); later stages treat this max as
+ * "no upper bound".  It lives here, next to the node, so the parser, the
+ * planner (optimizer/rpr.h), and the executor all share one definition.
+ */
+#define RPR_QUANTITY_INF	PG_INT32_MAX	/* unbounded quantifier */
+
+/*
  * RPRPatternNode - Row Pattern Recognition pattern parse tree node
  */
 typedef struct RPRPatternNode
@@ -627,7 +635,8 @@ typedef struct RPRPatternNode
 	NodeTag		type;			/* T_RPRPatternNode */
 	RPRPatternNodeType nodeType;	/* VAR, SEQ, ALT, GROUP */
 	int32		min;			/* minimum repetitions (0 for *, ?) */
-	int32		max;			/* maximum repetitions (PG_INT32_MAX for *, +) */
+	int32		max;			/* maximum repetitions (RPR_QUANTITY_INF for
+								 * *, +) */
 	bool		reluctant;		/* true for reluctant (non-greedy) */
 	ParseLoc	location;		/* token location, or -1 if unknown */
 	char	   *varName;		/* VAR: variable name */

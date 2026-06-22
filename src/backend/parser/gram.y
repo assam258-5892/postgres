@@ -17828,11 +17828,11 @@ row_pattern_quantifier_opt:
 				}
 			| '*'
 				{
-					$$ = (Node *) makeRPRQuantifier(0, PG_INT32_MAX, false, @1);
+					$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, false, @1);
 				}
 			| '+'
 				{
-					$$ = (Node *) makeRPRQuantifier(1, PG_INT32_MAX, false, @1);
+					$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, false, @1);
 				}
 			| Op
 				{
@@ -17840,19 +17840,19 @@ row_pattern_quantifier_opt:
 					if (strcmp($1, "?") == 0)
 						$$ = (Node *) makeRPRQuantifier(0, 1, false, @1);
 					else if (strcmp($1, "*?") == 0)
-						$$ = (Node *) makeRPRQuantifier(0, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
 					else if (strcmp($1, "+?") == 0)
-						$$ = (Node *) makeRPRQuantifier(1, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
 					else if (strcmp($1, "??") == 0)
 						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
 					else if (strcmp($1, "*|") == 0)
 					{
-						$$ = (Node *) makeRPRQuantifier(0, PG_INT32_MAX, false, @1);
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, false, @1);
 						((RPRPatternNode *) $$)->trailing_alt = true;
 					}
 					else if (strcmp($1, "+|") == 0)
 					{
-						$$ = (Node *) makeRPRQuantifier(1, PG_INT32_MAX, false, @1);
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, false, @1);
 						((RPRPatternNode *) $$)->trailing_alt = true;
 					}
 					else if (strcmp($1, "?|") == 0)
@@ -17862,12 +17862,12 @@ row_pattern_quantifier_opt:
 					}
 					else if (strcmp($1, "*?|") == 0)
 					{
-						$$ = (Node *) makeRPRQuantifier(0, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
 						((RPRPatternNode *) $$)->trailing_alt = true;
 					}
 					else if (strcmp($1, "+?|") == 0)
 					{
-						$$ = (Node *) makeRPRQuantifier(1, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
 						((RPRPatternNode *) $$)->trailing_alt = true;
 					}
 					else if (strcmp($1, "??|") == 0)
@@ -17886,11 +17886,11 @@ row_pattern_quantifier_opt:
 			| '*' Op
 				{
 					if (strcmp($2, "?") == 0)
-						$$ = (Node *) makeRPRQuantifier(0, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
 					else if (strcmp($2, "?|") == 0)
 					{
 						/* "A* ?|B" = reluctant "A*?" plus alternation */
-						$$ = (Node *) makeRPRQuantifier(0, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
 						((RPRPatternNode *) $$)->trailing_alt = true;
 					}
 					else
@@ -17903,11 +17903,11 @@ row_pattern_quantifier_opt:
 			| '+' Op
 				{
 					if (strcmp($2, "?") == 0)
-						$$ = (Node *) makeRPRQuantifier(1, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
 					else if (strcmp($2, "?|") == 0)
 					{
 						/* "A+ ?|B" = reluctant "A+?" plus alternation */
-						$$ = (Node *) makeRPRQuantifier(1, PG_INT32_MAX, true, @1);
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
 						((RPRPatternNode *) $$)->trailing_alt = true;
 					}
 					else
@@ -17943,37 +17943,37 @@ row_pattern_quantifier_opt:
 			/* {n}, {n,}, {,m}, {n,m} quantifiers */
 			| '{' Iconst '}'
 				{
-					if ($2 <= 0 || $2 >= PG_INT32_MAX)
+					if ($2 <= 0 || $2 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bound must be between 1 and %d", PG_INT32_MAX - 1),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
 					$$ = (Node *) makeRPRQuantifier($2, $2, false, @1);
 				}
 			| '{' Iconst ',' '}'
 				{
-					if ($2 < 0 || $2 >= PG_INT32_MAX)
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bound must be between 0 and %d", PG_INT32_MAX - 1),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
-					$$ = (Node *) makeRPRQuantifier($2, PG_INT32_MAX, false, @1);
+					$$ = (Node *) makeRPRQuantifier($2, RPR_QUANTITY_INF, false, @1);
 				}
 			| '{' ',' Iconst '}'
 				{
-					if ($3 <= 0 || $3 >= PG_INT32_MAX)
+					if ($3 <= 0 || $3 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bound must be between 1 and %d", PG_INT32_MAX - 1),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@3));
 					$$ = (Node *) makeRPRQuantifier(0, $3, false, @1);
 				}
 			| '{' Iconst ',' Iconst '}'
 				{
-					if ($2 < 0 || $4 <= 0 || $2 >= PG_INT32_MAX || $4 >= PG_INT32_MAX)
+					if ($2 < 0 || $4 <= 0 || $2 >= RPR_QUANTITY_INF || $4 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bounds must be between 0 and %d with max >= 1", PG_INT32_MAX - 1),
+								errmsg("quantifier bounds must be between 0 and %d with max >= 1", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
 					if ($2 > $4)
 						ereport(ERROR,
@@ -17991,10 +17991,10 @@ row_pattern_quantifier_opt:
 								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($4)),
 								errhint("Only \"?\" is allowed after {n} to make it reluctant."),
 								parser_errposition(@4));
-					if ($2 <= 0 || $2 >= PG_INT32_MAX)
+					if ($2 <= 0 || $2 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bound must be between 1 and %d", PG_INT32_MAX - 1),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
 					$$ = (Node *) makeRPRQuantifier($2, $2, true, @1);
 					if (strcmp($4, "?|") == 0)
@@ -18008,12 +18008,12 @@ row_pattern_quantifier_opt:
 								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($5)),
 								errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
 								parser_errposition(@5));
-					if ($2 < 0 || $2 >= PG_INT32_MAX)
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bound must be between 0 and %d", PG_INT32_MAX - 1),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
-					$$ = (Node *) makeRPRQuantifier($2, PG_INT32_MAX, true, @1);
+					$$ = (Node *) makeRPRQuantifier($2, RPR_QUANTITY_INF, true, @1);
 					if (strcmp($5, "?|") == 0)
 						((RPRPatternNode *) $$)->trailing_alt = true;
 				}
@@ -18025,10 +18025,10 @@ row_pattern_quantifier_opt:
 								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($5)),
 								errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
 								parser_errposition(@5));
-					if ($3 <= 0 || $3 >= PG_INT32_MAX)
+					if ($3 <= 0 || $3 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bound must be between 1 and %d", PG_INT32_MAX - 1),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@3));
 					$$ = (Node *) makeRPRQuantifier(0, $3, true, @1);
 					if (strcmp($5, "?|") == 0)
@@ -18042,10 +18042,10 @@ row_pattern_quantifier_opt:
 								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($6)),
 								errhint("Only \"?\" is allowed after {n,m} to make it reluctant."),
 								parser_errposition(@6));
-					if ($2 < 0 || $4 <= 0 || $2 >= PG_INT32_MAX || $4 >= PG_INT32_MAX)
+					if ($2 < 0 || $4 <= 0 || $2 >= RPR_QUANTITY_INF || $4 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bounds must be between 0 and %d with max >= 1", PG_INT32_MAX - 1),
+								errmsg("quantifier bounds must be between 0 and %d with max >= 1", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
 					if ($2 > $4)
 						ereport(ERROR,
@@ -21490,6 +21490,8 @@ makeRPRQuantifier(int32 min, int32 max, bool reluctant, int location)
 	n->max = max;
 	n->reluctant = reluctant;
 	n->location = location;
+
+	/* Other fields are irrelevant for a quantifier node */
 	return n;
 }
 
@@ -21525,9 +21527,6 @@ makeRPRSeqOrSingle(List *children, int location)
 static RPRPatternNode *
 splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 {
-	ListCell   *lc;
-	int			i = 0;
-
 	if (node->nodeType != RPR_PATTERN_SEQ)
 	{
 		if (node->trailing_alt)
@@ -21541,14 +21540,13 @@ splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 		return node;
 	}
 
-	foreach(lc, node->children)
+	foreach_node(RPRPatternNode, child, node->children)
 	{
-		RPRPatternNode *child = (RPRPatternNode *) lfirst(lc);
-
 		if (child->trailing_alt)
 		{
-			List	   *lefthalf = list_copy_head(node->children, i + 1);
-			List	   *righthalf = list_copy_tail(node->children, i + 1);
+			int			splitIdx = foreach_current_index(child);
+			List	   *lefthalf = list_copy_head(node->children, splitIdx + 1);
+			List	   *righthalf = list_copy_tail(node->children, splitIdx + 1);
 			RPRPatternNode *altn;
 			RPRPatternNode *rightnode;
 
@@ -21573,7 +21571,6 @@ splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 			altn->location = node->location;
 			return altn;
 		}
-		i++;
 	}
 	return node;
 }
