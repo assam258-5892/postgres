@@ -75,7 +75,7 @@
 #define RPRElemCanSkip(e)		((e)->min == 0)
 
 extern void validate_rpr_define_volatility(List *defineClause);
-extern RPRPattern *buildRPRPattern(RPRPatternNode *pattern, List *defineVariableList,
+extern RPRPattern *buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 								   RPSkipTo rpSkipTo, int frameOptions,
 								   bool hasMatchStartDependent);
 
