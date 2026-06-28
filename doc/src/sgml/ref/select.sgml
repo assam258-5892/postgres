@@ -1208,8 +1208,7 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
 
    <para>
     The purpose of a <literal>WINDOW</literal> clause is to specify the
-    behavior of <firstterm>window functions</firstterm> appearing in the
-    query's
+    behavior of <firstterm>window functions</firstterm> appearing in the query's
     <link linkend="sql-select-list"><command>SELECT</command> list</link> or
     <link linkend="sql-orderby"><literal>ORDER BY</literal></link> clause.
     These functions
