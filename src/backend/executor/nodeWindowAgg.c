@@ -3576,8 +3576,7 @@ window_gettupleslot(WindowObject winobj, int64 pos, TupleTableSlot *slot)
 		return false;
 
 	if (pos < winobj->markpos)
-		elog(ERROR, "cannot fetch row: " INT64_FORMAT " before WindowObject's mark position: " INT64_FORMAT,
-			 pos, winobj->markpos);
+		elog(ERROR, "cannot fetch row before WindowObject's mark position");
 
 	oldcontext = MemoryContextSwitchTo(winstate->ss.ps.ps_ExprContext->ecxt_per_query_memory);
 
