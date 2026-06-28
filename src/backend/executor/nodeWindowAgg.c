@@ -4947,11 +4947,12 @@ WinCheckAndInitializeNullTreatment(WindowObject winobj,
 	{
 		const char *funcname = get_func_name(fcinfo->flinfo->fn_oid);
 
-		/* the executing function's name always resolves; stay safe regardless */
+		if (!funcname)
+			elog(ERROR, "could not get function name");
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("function %s does not allow RESPECT/IGNORE NULLS",
-						funcname ? funcname : "?")));
+						funcname)));
 	}
 	else if (winobj->ignore_nulls == PARSER_IGNORE_NULLS)
 		winobj->ignore_nulls = IGNORE_NULLS;
