@@ -1603,6 +1603,149 @@ SELECT cnt FROM (
 (16 rows)
 
 DROP TABLE rpr_over1, rpr_over2;
+-- A row pattern navigation offset that resolves to a correlated PARAM_EXEC
+-- (here through SRF inlining of rpr_srf_f(g.n)) must be re-resolved on every
+-- rescan, not frozen at executor init.  The inlined WindowAgg is the inner
+-- side of a nestloop and is rescanned once per outer row, so each row sees its
+-- own PREV(v, n) offset; a frozen offset would report the same value for all.
+CREATE TABLE rpr_srf (v int);
+INSERT INTO rpr_srf SELECT generate_series(1, 10);
+CREATE FUNCTION rpr_srf_f(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS v > PREV(v, k))
+$$ LANGUAGE sql STABLE;
+-- The offset reads "runtime"; the WindowAgg inlines into the nestloop and is
+-- rescanned per outer row.
+EXPLAIN (COSTS OFF)
+SELECT g.n, max(s) FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_f(g.n) s
+GROUP BY g.n ORDER BY g.n;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*VALUES*".column1
+   ->  HashAggregate
+         Group Key: "*VALUES*".column1
+         ->  Nested Loop
+               ->  Values Scan on "*VALUES*"
+               ->  WindowAgg
+                     Window: w AS (ORDER BY rpr_srf.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+                     Pattern: a+"
+                     Nav Mark Lookback: runtime
+                     ->  Sort
+                           Sort Key: rpr_srf.v
+                           ->  Seq Scan on rpr_srf
+(13 rows)
+
+-- Each outer row yields its own offset (9, 8, 7), not one frozen value.
+SELECT g.n, max(s) AS m FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_f(g.n) s
+GROUP BY g.n ORDER BY g.n;
+ n | m 
+---+---
+ 1 | 9
+ 2 | 8
+ 3 | 7
+(3 rows)
+
+-- A forward FIRST-family offset with a correlated PARAM_EXEC must likewise be
+-- re-resolved per scan (navFirstOffset / navFirstOffsetKind), not frozen at init.
+-- PATTERN (B A+) anchors the match start at B so A can reference FIRST(v, k)
+-- k rows ahead; each outer k yields its own forward offset (k=0 matches all
+-- ten rows, k>=1 makes the first A fail), proving per-scan re-resolution.
+CREATE FUNCTION rpr_srf_first(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (B A+) DEFINE A AS v > FIRST(v, k))
+$$ LANGUAGE sql STABLE;
+-- The forward offset reads "runtime" and the WindowAgg inlines into the nestloop.
+EXPLAIN (COSTS OFF)
+SELECT g.n, max(s) FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
+GROUP BY g.n ORDER BY g.n;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*VALUES*".column1
+   ->  HashAggregate
+         Group Key: "*VALUES*".column1
+         ->  Nested Loop
+               ->  Values Scan on "*VALUES*"
+               ->  WindowAgg
+                     Window: w AS (ORDER BY rpr_srf.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+                     Pattern: b a+
+                     Nav Mark Lookback: 0
+                     Nav Mark Lookahead: runtime
+                     ->  Sort
+                           Sort Key: rpr_srf.v
+                           ->  Seq Scan on rpr_srf
+(14 rows)
+
+-- k=0 -> 10, k>=1 -> 0: distinct per outer row, so the forward offset is not
+-- frozen at ExecInit.
+SELECT g.n, max(s) AS m FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
+GROUP BY g.n ORDER BY g.n;
+ n | m  
+---+----
+ 0 | 10
+ 1 |  0
+ 2 |  0
+(3 rows)
+
+DROP FUNCTION rpr_srf_first(int);
+-- A compound navigation whose OUTER offset is a correlated PARAM_EXEC must be
+-- re-resolved per scan as well.  An outer offset that overflows int64 flips the
+-- backward trim to RETAIN_ALL for that scan only; a smaller offset on the next
+-- rescan must go back to FIXED.  k=1 -> 9, k=3 -> 7, k=overflow -> 0 (out of
+-- range, no match), proving both the per-scan outer-offset resolution and the
+-- RETAIN_ALL <-> FIXED toggle across rescans.
+CREATE FUNCTION rpr_srf_cmp(k int8) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+) DEFINE B AS v > PREV(LAST(v, 1), k))
+$$ LANGUAGE sql STABLE;
+SELECT g.n, max(s) AS m
+FROM (VALUES (1::int8), (3::int8), (9223372036854775807::int8)) g(n),
+     LATERAL rpr_srf_cmp(g.n) s
+GROUP BY g.n ORDER BY g.n;
+          n          | m 
+---------------------+---
+                   1 | 9
+                   3 | 7
+ 9223372036854775807 | 0
+(3 rows)
+
+DROP FUNCTION rpr_srf_cmp(int8);
+DROP FUNCTION rpr_srf_f(int);
+DROP TABLE rpr_srf;
+-- A correlated PARAM_EXEC that appears only inside DEFINE must be registered in
+-- the WindowAgg's extParam so the chgParam signal reaches a caching node above.
+-- Here the inlined function's argument is used only in DEFINE, DISTINCT is
+-- planned as a HashAgg, and HashAgg rescan is gated on chgParam; without the
+-- param in extParam the hash table built for the first outer row would be
+-- re-served for the rest.  Each threshold must get its own answer set
+-- (10 -> {0, 90}, 200 -> {0}); a stale cache would add a spurious 200|90.
+CREATE TABLE rpr_hcache_thr (threshold int);
+INSERT INTO rpr_hcache_thr VALUES (10), (200);
+CREATE TABLE rpr_hcache_stock (price int);
+INSERT INTO rpr_hcache_stock SELECT g FROM generate_series(1, 100) g;
+CREATE FUNCTION rpr_hcache_fn(th int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $$
+  SELECT DISTINCT count(*) OVER w FROM rpr_hcache_stock
+  WINDOW w AS (ORDER BY price ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               AFTER MATCH SKIP PAST LAST ROW
+               INITIAL PATTERN (a+) DEFINE a AS price > th) $$;
+SELECT o.threshold, f FROM rpr_hcache_thr o, LATERAL rpr_hcache_fn(o.threshold) f
+ORDER BY 1, 2;
+ threshold | f  
+-----------+----
+        10 |  0
+        10 | 90
+       200 |  0
+(3 rows)
+
+DROP FUNCTION rpr_hcache_fn(int);
+DROP TABLE rpr_hcache_thr, rpr_hcache_stock;
 -- Cleanup
 DROP TABLE rpr_integ;
 DROP TABLE rpr_integ2;

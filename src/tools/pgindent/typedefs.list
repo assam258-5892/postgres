@@ -1843,8 +1843,6 @@ NamedLWLockTrancheRequest
 NamedTuplestoreScan
 NamedTuplestoreScanState
 NamespaceInfo
-NavTraversal
-NavVisitFn
 NestLoop
 NestLoopParam
 NestLoopState
@@ -2545,6 +2543,8 @@ RPRNFAState
 RPRNavExpr
 RPRNavKind
 RPRNavOffsetKind
+RPRNavOffsets
+RPRNavState
 RPRPattern
 RPRPatternElement
 RPRPatternNode
