@@ -6012,34 +6012,6 @@ ExecAggPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
 }
 
 /*
- * Extract compound (outer) offset from step data.
- * For compound nav, offset_value is an array: [0]=inner, [1]=outer.
- * Returns the outer offset; errors on NULL or negative.
- * Default is 1 (like PREV/NEXT implicit offset).
- */
-static int64
-rpr_nav_get_compound_offset(ExprEvalStep *op)
-{
-	int64		val;
-
-	Assert(op->d.rpr_nav.offset_value != NULL);
-
-	if (op->d.rpr_nav.offset_isnull[1])
-		ereport(ERROR,
-				errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-				errmsg("row pattern navigation offset must not be null"));
-
-	val = DatumGetInt64(op->d.rpr_nav.offset_value[1]);
-
-	if (val < 0)
-		ereport(ERROR,
-				errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				errmsg("row pattern navigation offset must not be negative"));
-
-	return val;
-}
-
-/*
  * Evaluate RPR navigation (PREV/NEXT/FIRST/LAST): swap slot to target row.
  *
  * Saves the current outertuple into winstate for later restore, computes
@@ -6054,42 +6026,15 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
 	WindowAggState *winstate = op->d.rpr_nav.winstate;
 	int64		offset;
+	int64		compound_offset;
 	int64		target_pos;
 	TupleTableSlot *target_slot;
 
 	/* Save current slot for later restore */
 	winstate->nav_saved_outertuple = econtext->ecxt_outertuple;
 
-	/*
-	 * Determine the inner offset.  NULL or negative offsets are errors per
-	 * the SQL standard.
-	 *
-	 * Default offset when offset_arg is NULL: PREV/NEXT: 1 (standard 5.6.2)
-	 * FIRST/LAST and compound: 0 for inner, 1 for outer
-	 */
-	if (op->d.rpr_nav.offset_value != NULL)
-	{
-		if (*op->d.rpr_nav.offset_isnull)
-			ereport(ERROR,
-					errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-					errmsg("row pattern navigation offset must not be null"));
-
-		offset = DatumGetInt64(*op->d.rpr_nav.offset_value);
-
-		if (offset < 0)
-			ereport(ERROR,
-					errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					errmsg("row pattern navigation offset must not be negative"));
-	}
-	else
-	{
-		/* Default offset: 1 for simple PREV/NEXT, 0 otherwise */
-		if (op->d.rpr_nav.kind == RPR_NAV_PREV ||
-			op->d.rpr_nav.kind == RPR_NAV_NEXT)
-			offset = 1;
-		else
-			offset = 0;
-	}
+	offset = op->d.rpr_nav.offset;
+	compound_offset = op->d.rpr_nav.compound_offset;
 
 	/*
 	 * Calculate target position based on navigation direction.  On overflow,
@@ -6129,7 +6074,6 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 		case RPR_NAV_PREV_FIRST:
 		case RPR_NAV_NEXT_FIRST:
 			{
-				int64		compound_offset;
 				int64		inner_pos;
 
 				/* Inner: match_start + offset */
@@ -6143,9 +6087,6 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 					target_pos = -1;
 					break;
 				}
-
-				/* Outer offset */
-				compound_offset = rpr_nav_get_compound_offset(op);
 
 				/* Apply outer: PREV subtracts, NEXT adds */
 				if (op->d.rpr_nav.kind == RPR_NAV_PREV_FIRST)
@@ -6168,7 +6109,6 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 		case RPR_NAV_PREV_LAST:
 		case RPR_NAV_NEXT_LAST:
 			{
-				int64		compound_offset;
 				int64		inner_pos;
 
 				/* Inner: currentpos - offset */
@@ -6182,9 +6122,6 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 					target_pos = -1;
 					break;
 				}
-
-				/* Outer offset */
-				compound_offset = rpr_nav_get_compound_offset(op);
 
 				/* Apply outer: PREV subtracts, NEXT adds */
 				if (op->d.rpr_nav.kind == RPR_NAV_PREV_LAST)
@@ -6206,7 +6143,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 			break;
 		default:
 			elog(ERROR, "unrecognized RPR navigation kind: %d",
-				 op->d.rpr_nav.kind);
+				 (int) op->d.rpr_nav.kind);
 			break;
 	}
 
@@ -6238,8 +6175,6 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
  * Evaluate RPR navigation: restore slot to original row.
  *
  * Restores econtext->ecxt_outertuple from the saved slot in winstate.
- * When slot swap was elided (target == currentpos), this is a harmless
- * no-op since saved and current slots are identical.
  * The caller is responsible for updating any local slot cache.
  *
  * For pass-by-reference result types, the result datum points into
@@ -6254,6 +6189,13 @@ ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
 					  ExprContext *econtext)
 {
 	WindowAggState *winstate = op->d.rpr_nav.winstate;
+
+	/*
+	 * When slot swap was elided (target == currentpos), this is a harmless
+	 * no-op since saved and current slots are identical.
+	 */
+	if (econtext->ecxt_outertuple == winstate->nav_saved_outertuple)
+		return;
 
 	econtext->ecxt_outertuple = winstate->nav_saved_outertuple;
 
