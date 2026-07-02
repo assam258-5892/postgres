@@ -6013,6 +6013,26 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
 
 RESET plan_cache_mode;
 DEALLOCATE rpr_nav_offset_prep;
+-- EXPLAIN (GENERIC_PLAN) of an unbound parameter offset must not evaluate the
+-- parameter: the offset stays "runtime" instead of failing with "no value
+-- found for parameter 1".
+EXPLAIN (GENERIC_PLAN, COSTS OFF)
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > PREV(v, $1)
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+"
+   Nav Mark Lookback: runtime
+   ->  Function Scan on generate_series s
+(5 rows)
+
 -- FIRST(v): retain all (references match_start row)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -6028,6 +6048,24 @@ WINDOW w AS (
    Pattern: a+
    Nav Mark Lookback: 0
    Nav Mark Lookahead: 0
+   ->  Function Scan on generate_series s
+(6 rows)
+
+-- FIRST(v, 5): forward reach 5
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > FIRST(v, 5)
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+
+   Nav Mark Lookback: 0
+   Nav Mark Lookahead: 5
    ->  Function Scan on generate_series s
 (6 rows)
 
@@ -6311,9 +6349,9 @@ EXECUTE test_prev_implicit_offset(0);
 
 DEALLOCATE test_prev_implicit_offset;
 -- NEEDS_EVAL executor offset paths: a Param nav offset stays non-Const under a
--- generic plan, so the planner marks the offset NEEDS_EVAL and the executor
--- resolves it at init via eval_define_offsets -> visit_nav_exec.  Each query
--- below exercises a different navigation arm of that walker.
+-- generic plan, so build_define_offsets() marks the offset NEEDS_EVAL and
+-- resolve_nav_offsets() settles it once per scan.  Each query below exercises
+-- a different navigation arm of that walker.
 -- Simple FIRST(v, $1): forward-reach FIRST arm.
 PREPARE test_eval_first(int8) AS
 SELECT count(*) OVER w
@@ -6446,3 +6484,28 @@ WINDOW w AS (
 EXECUTE test_runtime_null_offset(NULL);
 ERROR:  row pattern navigation offset must not be null
 DEALLOCATE test_runtime_null_offset;
+-- A correlated PARAM_EXEC nav offset (reaching the offset via SRF inlining) is
+-- resolved per scan by resolve_nav_offsets(); after execution EXPLAIN ANALYZE
+-- must display the concrete resolved bound (a number), not "runtime" -- that is,
+-- navMaxOffsetKind resolves to FIXED.  Plain EXPLAIN of the same query shows
+-- "runtime"; only ANALYZE exercises the per-scan clear.
+CREATE TABLE rpr_exp_srf (v int);
+INSERT INTO rpr_exp_srf SELECT generate_series(1, 10);
+CREATE FUNCTION rpr_exp_srf_f(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_exp_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS v > PREV(v, k))
+$$ LANGUAGE sql STABLE;
+SELECT t FROM rpr_explain_filter(
+  'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, BUFFERS OFF)
+   SELECT g.n, max(s) FROM (VALUES (2), (2)) g(n), LATERAL rpr_exp_srf_f(g.n) s
+   GROUP BY g.n') AS t
+WHERE t LIKE '%Nav Mark Lookback%';
+                 t                  
+------------------------------------
+               Nav Mark Lookback: 2
+(1 row)
+
+DROP FUNCTION rpr_exp_srf_f(int);
+DROP TABLE rpr_exp_srf;
