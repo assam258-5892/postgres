@@ -703,9 +703,9 @@ typedef struct ExprEvalStep
 		struct
 		{
 			WindowAggState *winstate;
-			RPRNavKind	kind;	/* navigation kind (simple or compound) */
-			Datum	   *offset_value;	/* offset value(s), or NULL */
-			bool	   *offset_isnull;	/* offset null flag(s) */
+			RPRNavKind	kind;
+			int64		offset;
+			int64		compound_offset;
 			/* For compound nav: offset_value[0] = inner, [1] = outer */
 			int16		resulttyplen;	/* RESTORE: result type length */
 			bool		resulttypbyval; /* RESTORE: result pass-by-value? */
