@@ -3202,11 +3202,6 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 	/* Show Row Pattern Recognition pattern if present */
 	if (wagg->rpPattern != NULL)
 	{
-		RPRNavOffsetKind maxKind = wagg->navMaxOffsetKind;
-		int64		maxOffset = wagg->navMaxOffset;
-		RPRNavOffsetKind firstKind = wagg->navFirstOffsetKind;
-		int64		firstOffset = wagg->navFirstOffset;
-
 		char	   *patternStr = deparse_rpr_pattern(wagg->rpPattern);
 
 		ExplainPropertyText("Pattern", patternStr, es);
@@ -3214,19 +3209,11 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 		pfree(patternStr);
 
 		/*
-		 * Show navigation offsets for tuplestore trim.  For EXPLAIN ANALYZE,
-		 * use the executor-resolved values (which may differ from the plan
-		 * when NEEDS_EVAL was resolved to FIXED or RETAIN_ALL at init).
+		 * Navigation offsets for tuplestore trim are resolved at executor
+		 * init, which runs even for plain EXPLAIN, so read the resolved value
+		 * and its kind from the planstate.
 		 */
-		if (es->analyze)
-		{
-			maxKind = planstate->navMaxOffsetKind;
-			maxOffset = planstate->navMaxOffset;
-			firstKind = planstate->navFirstOffsetKind;
-			firstOffset = planstate->navFirstOffset;
-		}
-
-		switch (maxKind)
+		switch (planstate->navMaxOffsetKind)
 		{
 			case RPR_NAV_OFFSET_NEEDS_EVAL:
 				ExplainPropertyText("Nav Mark Lookback", "runtime", es);
@@ -3234,38 +3221,20 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 			case RPR_NAV_OFFSET_RETAIN_ALL:
 				ExplainPropertyText("Nav Mark Lookback", "retain all", es);
 				break;
-			case RPR_NAV_OFFSET_FIXED:
-				ExplainPropertyInteger("Nav Mark Lookback", NULL,
-									   maxOffset, es);
-				break;
 			default:
-				elog(ERROR, "unrecognized RPR nav offset kind: %d",
-					 maxKind);
-				break;
+				ExplainPropertyInteger("Nav Mark Lookback", NULL,
+									   planstate->navMaxOffset, es);
 		}
 
-		if (wagg->hasFirstNav)
+		if (planstate->hasFirstNav)
 		{
-			switch (firstKind)
-			{
-				case RPR_NAV_OFFSET_NEEDS_EVAL:
-					ExplainPropertyText("Nav Mark Lookahead", "runtime",
-										es);
-					break;
-				case RPR_NAV_OFFSET_FIXED:
-					if (firstOffset == PG_INT64_MAX)
-						ExplainPropertyText("Nav Mark Lookahead", "infinite",
-											es);
-					else
-						ExplainPropertyInteger("Nav Mark Lookahead", NULL,
-											   firstOffset, es);
-					break;
-				default:
-					/* RPR_NAV_OFFSET_RETAIN_ALL is lookback-only, never here */
-					elog(ERROR, "unrecognized RPR nav offset kind: %d",
-						 firstKind);
-					break;
-			}
+			if (planstate->navFirstOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL)
+				ExplainPropertyText("Nav Mark Lookahead", "runtime", es);
+			else if (planstate->navFirstOffset == PG_INT64_MAX)
+				ExplainPropertyText("Nav Mark Lookahead", "infinite", es);
+			else
+				ExplainPropertyInteger("Nav Mark Lookahead", NULL,
+									   planstate->navFirstOffset, es);
 		}
 	}
 }
