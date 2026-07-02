@@ -6007,7 +6007,7 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: runtime
+   Nav Mark Lookback: 2
    ->  Function Scan on generate_series s
 (5 rows)
 
@@ -6224,7 +6224,7 @@ EXPLAIN (COSTS OFF) EXECUTE test_overflow_lookback(4611686018427387904, 46116860
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: runtime
+   Nav Mark Lookback: retain all
    ->  Function Scan on generate_series s
 (5 rows)
 
@@ -6292,7 +6292,7 @@ EXPLAIN (COSTS OFF) EXECUTE p_first_runtime(1, 1);
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
    Nav Mark Lookback: 0
-   Nav Mark Lookahead: runtime
+   Nav Mark Lookahead: 2
    ->  Function Scan on generate_series s
 (6 rows)
 

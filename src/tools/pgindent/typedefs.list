@@ -2544,7 +2544,6 @@ RPRNFAContext
 RPRNFAState
 RPRNavExpr
 RPRNavKind
-RPRNavOffsetKind
 RPRPattern
 RPRPatternElement
 RPRPatternNode

@@ -2726,14 +2726,16 @@ typedef struct WindowAggState
 	TupleTableSlot *temp_slot_2;
 
 	/* RPR navigation */
-	RPRNavOffsetKind navMaxOffsetKind;	/* status of navMaxOffset */
-	int64		navMaxOffset;	/* max backward nav offset (when FIXED) */
+	int64		navMaxOffset;	/* max backward nav offset, -1 means infinite
+								 * offset, retain all */
 	bool		hasFirstNav;	/* FIRST() present in DEFINE */
-	RPRNavOffsetKind navFirstOffsetKind;	/* status of navFirstOffset */
 	int64		navFirstOffset; /* min FIRST() offset (when FIXED) */
 	struct WindowObjectData *nav_winobj;	/* winobj for RPR nav fetch */
 	int64		nav_slot_pos;	/* position cached in nav_slot, or -1 */
-	TupleTableSlot *nav_slot;	/* slot for PREV/NEXT/FIRST/LAST target row */
+	TupleTableSlot *nav_slot;	/* slot holding the resolved navigation target
+								 * row (simple or compound
+								 * PREV/NEXT/FIRST/LAST) */
+
 	TupleTableSlot *nav_saved_outertuple;	/* saved slot during nav swap */
 	TupleTableSlot *nav_null_slot;	/* all NULL slot */
 	int64		nav_match_start;	/* match_start for FIRST/LAST nav */
