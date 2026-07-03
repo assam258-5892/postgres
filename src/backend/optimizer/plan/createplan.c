@@ -2492,9 +2492,7 @@ typedef struct DefineMetadataContext
 } DefineMetadataContext;
 
 /*
- * visit_nav_plan
- *		nav_traversal_walker callback (NavVisitFn) for the planner side.
- *		At each RPRNavExpr in a DEFINE expression, computes:
+ * compute_matchStartDependent
  *
  * per-variable match_start dependency for absorption suppression: outer nav
  * kinds that reach match_start (FIRST, LAST-with-offset, PREV_FIRST,
@@ -2505,10 +2503,8 @@ typedef struct DefineMetadataContext
  * prevent FIRST/LAST inside a PREV/NEXT value subexpression.
  */
 static void
-visit_nav_plan(NavTraversal *t, RPRNavExpr *nav)
+compute_matchStartDependent(RPRNavExpr *nav, DefineMetadataContext *context)
 {
-	DefineMetadataContext *context = (DefineMetadataContext *) t->data;
-
 	/*
 	 * Parser guarantee: by the time the planner sees a DEFINE expression,
 	 * compound nesting has been flattened into a single RPRNavExpr and any
@@ -2539,6 +2535,17 @@ visit_nav_plan(NavTraversal *t, RPRNavExpr *nav)
 						   context->curVarIdx);
 }
 
+static bool
+RPRNavExpr_walker(Node *node, DefineMetadataContext *ctx)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, RPRNavExpr))
+		compute_matchStartDependent(castNode(RPRNavExpr, node), ctx);
+
+	return expression_tree_walker(node, RPRNavExpr_walker, ctx);
+}
+
 /*
  * compute_define_metadata
  *		Classify which DEFINE variables depend on the match start.
@@ -2557,18 +2564,15 @@ static void
 compute_define_metadata(List *defineClause, Bitmapset **matchStartDependent)
 {
 	DefineMetadataContext ctx;
-	NavTraversal trav;
 
 	ctx.curVarIdx = 0;
 	ctx.matchStartDependent = NULL;
 
-	trav.visit = visit_nav_plan;
-	trav.data = &ctx;
-
 	foreach_node(TargetEntry, te, defineClause)
 	{
-		nav_traversal_walker((Node *) te->expr, &trav);
-		ctx.curVarIdx++;
+		ctx.curVarIdx = foreach_current_index(te);
+
+		RPRNavExpr_walker((Node *) te->expr, &ctx);
 	}
 
 	*matchStartDependent = ctx.matchStartDependent;
