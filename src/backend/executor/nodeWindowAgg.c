@@ -47,7 +47,6 @@
 #include "nodes/plannodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/optimizer.h"
-#include "optimizer/rpr.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_coerce.h"
 #include "utils/acl.h"
@@ -177,6 +176,17 @@ typedef struct WindowStatePerAggData
 	bool		restart;		/* need to restart this agg in this cycle? */
 } WindowStatePerAggData;
 
+typedef struct
+{
+	WindowAggState *winstate;
+	int64		maxOffset;		/* max backward-reach offset across all nav
+								 * exprs */
+	bool		maxOverflow;	/* true if backward-reach overflow detected */
+	int64		minFirstOffset; /* min forward-from-match_start offset; may be
+								 * negative (PREV_FIRST: inner - outer < 0) */
+	bool		hasFirst;		/* any FIRST-based nav found */
+} EvalDefineOffsetsContext;
+
 static void initialize_windowaggregate(WindowAggState *winstate,
 									   WindowStatePerFunc perfuncstate,
 									   WindowStatePerAgg peraggstate);
@@ -248,9 +258,9 @@ static void update_reduced_frame(WindowObject winobj, int64 pos);
 
 /* Forward declarations - DEFINE row evaluation */
 static bool rpr_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched);
-
-/* Forward declarations - navigation offset evaluation */
 static void eval_define_offsets(WindowAggState *winstate, List *defineClause);
+static bool RPRNavExpr_walker(Node *node, EvalDefineOffsetsContext *ctx);
+static void compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context);
 
 /*
  * Not null info bit array consists of 2-bit items
@@ -4014,20 +4024,8 @@ eval_nav_offset(WindowAggState *winstate, Expr *offset_expr)
 	return offset;
 }
 
-typedef struct
-{
-	WindowAggState *winstate;
-	int64		maxOffset;		/* max backward-reach offset across all nav
-								 * exprs */
-	bool		maxOverflow;	/* true if backward-reach overflow detected */
-	int64		minFirstOffset; /* min forward-from-match_start offset; may be
-								 * negative (PREV_FIRST: inner - outer < 0) */
-	bool		hasFirst;		/* any FIRST-based nav found */
-} EvalDefineOffsetsContext;
-
 /*
- * visit_nav_exec
- *		nav_traversal_walker callback (NavVisitFn) for the executor side.
+ * compute_nav_offsets
  *		At each RPRNavExpr, evaluates the nav's offset expression(s) at
  *		runtime via eval_nav_offset and accumulates:
  *
@@ -4039,23 +4037,17 @@ typedef struct
  *			compound NEXT_FIRST (= inner + outer, clamped to PG_INT64_MAX on
  *			overflow; always >= 0 so never updates minFirstOffset in practice)
  *
- * Counterpart of visit_nav_plan but using runtime evaluation instead of
- * Const folding; runs only for offsets the planner marked NEEDS_EVAL.
- * Match-start dependency is not recomputed here -- the planner's bitmapset
- * is reused via winstate->defineMatchStartDependent.
  */
 static void
-visit_nav_exec(NavTraversal *t, RPRNavExpr *nav)
+compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 {
 	int64		inner;
 	int64		outer;
 
-	EvalDefineOffsetsContext *context = (EvalDefineOffsetsContext *) t->data;
-
 	/*
-	 * Parser guarantee (mirrors visit_nav_plan): nav's direct children are
-	 * never RPRNavExpr -- compound nesting is flattened in place and any
-	 * other nesting is rejected.  Outer-kind dispatch is sufficient.
+	 * Parser guarantee (mirrors compute_matchStartDependent): nav's direct
+	 * children are never RPRNavExpr -- compound nesting is flattened in place
+	 * and any other nesting is rejected.  Outer-kind dispatch is sufficient.
 	 */
 	Assert(nav->arg == NULL || !IsA(nav->arg, RPRNavExpr));
 	Assert(nav->offset_arg == NULL || !IsA(nav->offset_arg, RPRNavExpr));
@@ -4143,8 +4135,8 @@ visit_nav_exec(NavTraversal *t, RPRNavExpr *nav)
  *		Compute navigation offsets for tuplestore trim from the DEFINE clause,
  *		at executor init.
  *
- * Evaluates every nav offset expression (constant or not) via visit_nav_exec
- * and stores the results in the WindowAggState:
+ * Evaluates every nav offset expression via compute_nav_offsets and stores the
+ * results in the WindowAggState:
  *	 - navMaxOffset: max backward (PREV/LAST) reach; set to -1 (the retain-all
  *	   sentinel) on int64 overflow so advance_nav_mark() disables trim.
  *	 - hasFirstNav / navFirstOffset: forward (FIRST) reach from match_start;
@@ -4157,7 +4149,6 @@ static void
 eval_define_offsets(WindowAggState *winstate, List *defineClause)
 {
 	EvalDefineOffsetsContext ctx;
-	NavTraversal trav;
 
 	/* Defaults: no backward, no FIRST navigation */
 	winstate->navMaxOffset = 0;
@@ -4173,12 +4164,9 @@ eval_define_offsets(WindowAggState *winstate, List *defineClause)
 	ctx.minFirstOffset = PG_INT64_MAX;
 	ctx.hasFirst = false;
 
-	trav.visit = visit_nav_exec;
-	trav.data = &ctx;
-
 	foreach_node(TargetEntry, te, defineClause)
 	{
-		nav_traversal_walker((Node *) te->expr, &trav);
+		RPRNavExpr_walker((Node *) te->expr, &ctx);
 	}
 
 	/*
@@ -4201,6 +4189,17 @@ eval_define_offsets(WindowAggState *winstate, List *defineClause)
 		else
 			winstate->navFirstOffset = PG_INT64_MAX;
 	}
+}
+
+static bool
+RPRNavExpr_walker(Node *node, EvalDefineOffsetsContext *ctx)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, RPRNavExpr))
+		compute_nav_offsets(castNode(RPRNavExpr, node), ctx);
+
+	return expression_tree_walker(node, RPRNavExpr_walker, ctx);
 }
 
 /*
