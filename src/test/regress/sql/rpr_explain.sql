@@ -3291,6 +3291,15 @@ WINDOW w AS (
     DEFINE A AS v > FIRST(v)
 );
 
+-- FIRST(v, 5): forward reach 5
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > FIRST(v, 5)
+);
+
 -- LAST(v, 1): backward reach 1, same as PREV(v, 1)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
