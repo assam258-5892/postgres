@@ -235,6 +235,7 @@ static void put_notnull_info(WindowObject winobj,
 							 int64 pos, int argno, bool isnull);
 static bool rpr_is_defined(WindowAggState *winstate);
 static int64 row_is_in_reduced_frame(WindowObject winobj, int64 pos);
+static void ensure_reduced_frame(WindowObject winobj, int64 pos);
 
 static void clear_reduced_frame(WindowAggState *winstate);
 static int	get_reduced_frame_status(WindowAggState *winstate, int64 pos);
@@ -2531,8 +2532,8 @@ ExecWindowAgg(PlanState *pstate)
 				 * leave the match state behind currentpos.
 				 */
 				Assert(winstate->nav_winobj != NULL);
-				(void) row_is_in_reduced_frame(winstate->nav_winobj,
-											   winstate->currentpos);
+				ensure_reduced_frame(winstate->nav_winobj,
+									 winstate->currentpos);
 			}
 
 			/*
@@ -4251,13 +4252,7 @@ row_is_in_reduced_frame(WindowObject winobj, int64 pos)
 		return rtn;
 	}
 
-	state = get_reduced_frame_status(winstate, pos);
-
-	if (state == RF_NOT_DETERMINED)
-	{
-		update_frameheadpos(winstate);
-		update_reduced_frame(winobj, pos);
-	}
+	ensure_reduced_frame(winobj, pos);
 
 	state = get_reduced_frame_status(winstate, pos);
 
@@ -4283,6 +4278,26 @@ row_is_in_reduced_frame(WindowObject winobj, int64 pos)
 	}
 
 	return rtn;
+}
+
+/*
+ * ensure_reduced_frame
+ *		Drive the row pattern match forward so pos is resolved.
+ *
+ * Idempotent: a pos already determined is left untouched, so callers may
+ * invoke this repeatedly for the same row (once per row to track the row
+ * scan, and again when a window function accesses the frame).
+ */
+static void
+ensure_reduced_frame(WindowObject winobj, int64 pos)
+{
+	WindowAggState *winstate = winobj->winstate;
+
+	if (get_reduced_frame_status(winstate, pos) == RF_NOT_DETERMINED)
+	{
+		update_frameheadpos(winstate);
+		update_reduced_frame(winobj, pos);
+	}
 }
 
 /*
