@@ -723,6 +723,18 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (pg_temp.stock.*) IS NOT NULL
 );
+-- A two-part table-qualified whole-row reference is rejected as well, through
+-- a separate range-variable check (a bare relation name is instead accepted
+-- as a whole-row Var).
+-- 2-part (table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS (stock.*) IS NOT NULL
+);
 
 --
 -- 2-arg PREV/NEXT: functional tests
@@ -1147,8 +1159,11 @@ FROM rpr_nav WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(FIRST(val, 1), 1) > 0
 );
 
--- PREV(LAST(val), 2): target = currentpos - 0 - 2 = currentpos - 2
--- Same backward reach as PREV(val, 2)
+-- PREV(LAST(val), 2): LAST(val) is the current row (inner offset 0), so
+-- target = currentpos - 0 - 2 = currentpos - 2.  Same backward reach as PREV(val, 2).
+-- At currentpos=2 (start id=1): target=0 -> out of range -> NULL -> B fails.
+-- At currentpos=3 (start id=2): target=1(val=10) -> in range -> B runs on id3..id6,
+-- so the match is id2..id6.
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav WINDOW w AS (
     ORDER BY id
@@ -1158,8 +1173,12 @@ FROM rpr_nav WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(LAST(val), 2) IS NOT NULL
 );
 
--- NEXT(LAST(val, 1), 2): target = currentpos - 1 + 2 = currentpos + 1
--- Looks 1 row ahead: same as NEXT(val, 1)
+-- NEXT(LAST(val, 1), 2): LAST(val, 1) is one row back (inner offset 1), then
+-- NEXT adds 2, so target = currentpos - 1 + 2 = currentpos + 1.  Looks one row
+-- ahead: same as NEXT(val, 1).
+-- At currentpos=2 (start id=1): target=3(val=30) -> in range -> B true.
+-- B stays true through id5 (target=6); at id6 target=7 -> out of range -> NULL,
+-- so the match is id1..id5.
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav WINDOW w AS (
     ORDER BY id
