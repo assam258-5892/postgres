@@ -304,6 +304,29 @@ SELECT count(*) FROM (
         DEFINE B AS val > PREV(val))
 ) t;
 
+-- The same guard must also cover a whole-row Var.  Writing the bare
+-- relation name (rpr_integ) in DEFINE resolves to a whole-row Var, whose
+-- attribute number is 0.  remove_unused_subquery_outputs() matches the
+-- guard on attribute number, so the whole-row Var is retained as a single
+-- entry while the unused scalar "val" output is still replaced with NULL;
+-- DEFINE evaluates against the intact row, and the match is unchanged.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT sum(c) FROM (
+    SELECT val, count(*) OVER w AS c FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS rpr_integ IS NOT NULL)
+) t;
+
+SELECT sum(c) FROM (
+    SELECT val, count(*) OVER w AS c FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS rpr_integ IS NOT NULL)
+) t;
+
 -- ============================================================
 -- A6. Inverse transition bypass
 -- ============================================================
@@ -333,6 +356,51 @@ WINDOW w AS (ORDER BY id
     PATTERN (A B+)
     DEFINE B AS val > PREV(val))
 ORDER BY id;
+
+-- A custom aggregate logs how its transition functions are called: msfunc
+-- appends '+' for a forward transition, minvfunc appends '-' for an inverse
+-- transition.  Over an RPR reduced frame only '+' appears, confirming the
+-- inverse-transition path is not used, and the logged values show which rows
+-- each frame feeds the aggregate.
+CREATE FUNCTION rpr_logging_sfunc(text, anyelement) RETURNS text AS
+$$ SELECT COALESCE($1, '') || '*' || quote_nullable($2) $$ LANGUAGE SQL IMMUTABLE;
+CREATE FUNCTION rpr_logging_msfunc(text, anyelement) RETURNS text AS
+$$ SELECT COALESCE($1, '') || '+' || quote_nullable($2) $$ LANGUAGE SQL IMMUTABLE;
+CREATE FUNCTION rpr_logging_minvfunc(text, anyelement) RETURNS text AS
+$$ SELECT $1 || '-' || quote_nullable($2) $$ LANGUAGE SQL IMMUTABLE;
+CREATE AGGREGATE rpr_logging_agg (anyelement)
+(
+    stype = text,
+    sfunc = rpr_logging_sfunc,
+    mstype = text,
+    msfunc = rpr_logging_msfunc,
+    minvfunc = rpr_logging_minvfunc
+);
+
+-- Match 1 is id1..id3 (v = NULL,'a','b') and match 2 is id4..id6
+-- (v = NULL,'c','d'); B extends the match while k increases.  Every frame
+-- shows '+' only (no '-'), and the two matches never share state across their
+-- boundary.
+SELECT id, v,
+    rpr_logging_agg(v) OVER w AS logged
+FROM (VALUES
+    (1, 1, NULL),
+    (2, 3, 'a'),
+    (3, 5, 'b'),
+    (4, 2, NULL),
+    (5, 4, 'c'),
+    (6, 6, 'd')
+) AS t(id, k, v)
+WINDOW w AS (ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS k > PREV(k))
+ORDER BY id;
+
+DROP AGGREGATE rpr_logging_agg(anyelement);
+DROP FUNCTION rpr_logging_sfunc(text, anyelement);
+DROP FUNCTION rpr_logging_msfunc(text, anyelement);
+DROP FUNCTION rpr_logging_minvfunc(text, anyelement);
 
 -- ============================================================
 -- A7. Cost estimation RPR awareness
