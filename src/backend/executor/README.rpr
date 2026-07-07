@@ -564,7 +564,7 @@ Pseudocode of the row processing loop:
       targetCtx = ExecRPRStartContext(pos)
 
   for currentPos = startPos; targetCtx->states != NULL; currentPos++:
-      if not nfa_evaluate_row(currentPos):  -- row does not exist
+      if not rpr_evaluate_row(currentPos):  -- row does not exist
           ExecRPRFinalizeAllContexts()      -- finalize all contexts
           ExecRPRCleanupDeadContexts()      -- clean up after finalization
           break
@@ -601,7 +601,7 @@ the pattern. For example, the initial advance for PATTERN ((A | B) C):
 During the initial advance, reaching FIN is not recorded as a match.
 This is to prevent empty matches.
 
-VI-3. Row Evaluation: nfa_evaluate_row()
+VI-3. Row Evaluation: rpr_evaluate_row()
 
 Evaluates all variable conditions in the DEFINE clause at once for
 the current row.
@@ -638,7 +638,7 @@ VI-4. Per-Context Re-evaluation (match_start_dependent variables)
 DEFINE variables that depend on match_start (those containing FIRST,
 LAST-with-offset, or compound PREV_FIRST/NEXT_FIRST/PREV_LAST/NEXT_LAST)
 are identified at plan time via defineMatchStartDependent.  The shared
-evaluation in nfa_evaluate_row() uses the head context's matchStartRow
+evaluation in rpr_evaluate_row() uses the head context's matchStartRow
 for FIRST/LAST base position.
 
 When processing a context whose matchStartRow differs from the shared
@@ -1192,7 +1192,7 @@ XI-4. Execution Trace
   Initial advance: elemIdx=0(A) -> VAR, so state is added.
   C0.states = [{elemIdx=0, counts=[0]}]
 
-  nfa_evaluate_row(0):
+  rpr_evaluate_row(0):
     A: price(100) > PREV(price) -> no PREV -> false
     B: price(100) < PREV(price) -> no PREV -> false
     varMatched = [false, false]
@@ -1214,7 +1214,7 @@ XI-4. Execution Trace
   Context C1 created (matchStartRow=1).
   Initial advance: C1.states = [{elemIdx=0, counts=[0]}]
 
-  nfa_evaluate_row(1):
+  rpr_evaluate_row(1):
     A: 110 > PREV(100) -> true
     B: 110 < PREV(100) -> false
     varMatched = [true, false]
@@ -1236,7 +1236,7 @@ XI-4. Execution Trace
   Context C2 created (matchStartRow=2).
   Initial advance: C2.states = [{elemIdx=0, counts=[0]}]
 
-  nfa_evaluate_row(2):
+  rpr_evaluate_row(2):
     A: 120 > PREV(110) -> true
     B: 120 < PREV(110) -> false
     varMatched = [true, false]
@@ -1268,7 +1268,7 @@ XI-4. Execution Trace
 
 --- Row 3 (price=115) ---
 
-  nfa_evaluate_row(3):
+  rpr_evaluate_row(3):
     A: 115 > PREV(120) -> false
     B: 115 < PREV(120) -> true
     varMatched = [false, true]
@@ -1297,7 +1297,7 @@ XI-4. Execution Trace
   C3 was already created but matchStartRow=3, so it is not applicable.
   New context C4 created (matchStartRow=4).
 
-  nfa_evaluate_row(4):
+  rpr_evaluate_row(4):
     A: 130 > PREV(115) -> true
     B: 130 < PREV(115) -> false
 
@@ -1473,7 +1473,7 @@ Appendix A. Key Function Index
   finalizeRPRPattern            rpr.c                 Finalization
   computeAbsorbability          rpr.c                 Absorption analysis
   update_reduced_frame          nodeWindowAgg.c       Execution main loop
-  nfa_evaluate_row              nodeWindowAgg.c       DEFINE evaluation
+  rpr_evaluate_row              nodeWindowAgg.c       DEFINE evaluation
   ExecRPRStartContext           execRPR.c             Context creation
   ExecRPRProcessRow             execRPR.c             3-phase processing
   nfa_match                     execRPR.c             Phase 1
