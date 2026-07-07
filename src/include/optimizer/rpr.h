@@ -40,7 +40,6 @@
 #define RPR_ELEMIDX_INVALID	((RPRElemIdx) -1)	/* invalid index */
 #define RPR_DEPTH_MAX		(PG_UINT8_MAX - 1)	/* max pattern nesting depth:
 												 * 254 */
-#define RPR_DEPTH_NONE		PG_UINT8_MAX	/* no enclosing group (top-level) */
 
 /* Reserved control-element varIds (high nibble 0xF; 0xF0-0xFB spare) */
 #define RPR_VARID_BEGIN		((RPRVarId) 0xFC)	/* group begin */
