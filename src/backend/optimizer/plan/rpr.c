@@ -1090,20 +1090,20 @@ makeRPRPattern(int numVars, int numElements, RPRDepth maxDepth,
 	result = makeNode(RPRPattern);
 	result->numVars = numVars;
 
-	/* depth < RPR_DEPTH_MAX, so maxDepth+1 never aliases RPR_DEPTH_NONE. */
+	/* depth < RPR_DEPTH_MAX, so maxDepth + 1 does not exceed RPR_DEPTH_MAX. */
 	Assert(maxDepth < RPR_DEPTH_MAX);
 	result->maxDepth = maxDepth + 1;	/* +1: depth is 0-based */
 	result->numElements = numElements;
 
 	/* Copy varNames (pattern must have at least one variable) */
 	Assert(numVars > 0);
-	result->varNames = palloc(numVars * sizeof(char *));
+	result->varNames = palloc_array(char *, numVars);
 	for (i = 0; i < numVars; i++)
 		result->varNames[i] = pstrdup(varNamesStack[i]);
 
 	/* Allocate elements array (zero-init for reserved fields) */
 	Assert(numElements >= 2);
-	result->elements = palloc0(numElements * sizeof(RPRPatternElement));
+	result->elements = palloc0_array(RPRPatternElement, numElements);
 
 	return result;
 }
