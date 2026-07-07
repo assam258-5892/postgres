@@ -754,8 +754,9 @@ nfa_absorb_contexts(WindowAggState *winstate)
  * Evaluate if a VAR element matches the current row.
  *
  * varMatched is a pre-evaluated boolean array indexed by varId, computed
- * once per row by evaluating all DEFINE expressions.  NULL means no DEFINE
- * clauses exist (only possible during early development/testing).
+ * once per row by evaluating all DEFINE expressions.  A NULL varMatched makes
+ * every VAR not match; nfa_match() is called that way to force a mismatch at a
+ * frame boundary and at partition-end finalization.
  *
  * Per ISO/IEC 19075-5 Feature R020, pattern variables not listed in DEFINE
  * are implicitly TRUE -- they match every row.  This is checked via
@@ -808,11 +809,7 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, bool *varMatched,
 	RPRNFAState *state;
 	RPRNFAState *nextState;
 
-	/*
-	 * Evaluate VAR elements against current row. For VARs that reach max
-	 * count with END next, advance through the chain of END elements inline
-	 * so absorb phase can compare states at comparison points.
-	 */
+	/* Evaluate VAR elements against current row. */
 	for (state = ctx->states; state != NULL; state = nextState)
 	{
 		RPRPatternElement *elem = &elements[state->elemIdx];

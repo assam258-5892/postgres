@@ -1209,13 +1209,6 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
-    The SQL standard defines more subclauses: <literal>MEASURES</literal>
-    and <literal>SUBSET</literal>. They are not currently supported
-    in <productname>PostgreSQL</productname>. Also in the standard there are
-    more variations in <literal>AFTER MATCH</literal> clause.
-   </para>
-
-   <para>
     The purpose of a <literal>WINDOW</literal> clause is to specify the
     behavior of <firstterm>window functions</firstterm> appearing in the query's
     <link linkend="sql-select-list"><command>SELECT</command> list</link> or
@@ -2325,6 +2318,19 @@ SELECT 2+2;
     <command>UPDATE</command>, <command>DELETE</command>, and
     <command>MERGE</command> to be used as <literal>WITH</literal>
     queries.  This is not found in the SQL standard.
+   </para>
+  </refsect2>
+
+  <refsect2>
+   <title>Row Pattern Recognition</title>
+
+   <para>
+    <productname>PostgreSQL</productname> supports row pattern recognition
+    within the <literal>WINDOW</literal> clause.  The SQL standard defines
+    more subclauses: <literal>MEASURES</literal> and
+    <literal>SUBSET</literal>.  They are not currently supported
+    in <productname>PostgreSQL</productname>.  Also in the standard there are
+    more variations in the <literal>AFTER MATCH</literal> clause.
    </para>
   </refsect2>
 
