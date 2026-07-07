@@ -245,8 +245,8 @@ static void advance_reduced_frame_nfa(WindowObject winobj,
 									  bool hasLimitedFrame, int64 frameOffset);
 static void update_reduced_frame(WindowObject winobj, int64 pos);
 
-/* Forward declarations - NFA row evaluation */
-static bool nfa_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched);
+/* Forward declarations - DEFINE row evaluation */
+static bool rpr_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched);
 
 /* Forward declarations - navigation offset evaluation */
 static void eval_define_offsets(WindowAggState *winstate, List *defineClause);
@@ -4470,7 +4470,7 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 		 * when matchStartRow differs.
 		 */
 		winstate->nav_match_start = targetCtx->matchStartRow;
-		rowExists = nfa_evaluate_row(winobj, currentPos, winstate->nfaVarMatched);
+		rowExists = rpr_evaluate_row(winobj, currentPos, winstate->nfaVarMatched);
 
 		/* No more rows in partition? Finalize all contexts */
 		if (!rowExists)
@@ -4641,7 +4641,7 @@ register_result:
 }
 
 /*
- * nfa_evaluate_row
+ * rpr_evaluate_row
  *
  * Evaluate all DEFINE variables for current row.
  * Returns true if the row exists, false if out of partition.
@@ -4653,7 +4653,7 @@ register_result:
  * opcodes during expression evaluation, which temporarily swap the slot.
  */
 static bool
-nfa_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched)
+rpr_evaluate_row(WindowObject winobj, int64 pos, bool *varMatched)
 {
 	WindowAggState *winstate = winobj->winstate;
 	ExprContext *econtext = winstate->rprContext;

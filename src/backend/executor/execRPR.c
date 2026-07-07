@@ -82,7 +82,7 @@ static void nfa_absorb_contexts(WindowAggState *winstate);
 static bool nfa_eval_var_match(WindowAggState *winstate,
 							   RPRPatternElement *elem, bool *varMatched);
 static void nfa_match(WindowAggState *winstate, RPRNFAContext *ctx,
-					  bool *varMatched);
+					  bool *varMatched, int64 currentPos);
 static void nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 							  RPRNFAState *state, RPRPatternElement *nextElem,
 							  int64 currentPos);
@@ -793,9 +793,14 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
  *   - Chains through END elements while count >= max (must-exit path)
  *
  * Non-VAR elements (ALT, END, FIN) are kept as-is for advance phase.
+ *
+ * currentPos is threaded in only for debugging visibility (nfa_match is the
+ * one NFA helper that otherwise lacks the row index); it has no runtime
+ * consumer yet.
  */
 static void
-nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, bool *varMatched)
+nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, bool *varMatched,
+		  int64 currentPos)
 {
 	RPRPattern *pattern = winstate->rpPattern;
 	RPRPatternElement *elements = pattern->elements;
@@ -1595,7 +1600,7 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
  *
  * Only variables in defineMatchStartDependent are re-evaluated.  The
  * current row's slot (ecxt_outertuple) must already be set up by
- * nfa_evaluate_row().
+ * rpr_evaluate_row().
  */
 static void
 nfa_reevaluate_dependent_vars(WindowAggState *winstate, RPRNFAContext *ctx,
@@ -1842,7 +1847,7 @@ ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos,
 			if (currentPos == ctxFrameEnd)
 			{
 				/* Frame boundary reached: force mismatch */
-				nfa_match(winstate, ctx, NULL);
+				nfa_match(winstate, ctx, NULL, currentPos);
 				continue;
 			}
 		}
@@ -1854,7 +1859,7 @@ ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos,
 		 */
 		if (hasDependent && ctx->matchStartRow != winstate->nav_match_start)
 			nfa_reevaluate_dependent_vars(winstate, ctx, currentPos);
-		nfa_match(winstate, ctx, varMatched);
+		nfa_match(winstate, ctx, varMatched, currentPos);
 		ctx->lastProcessedRow = currentPos;
 	}
 
@@ -1987,7 +1992,7 @@ ExecRPRFinalizeAllContexts(WindowAggState *winstate, int64 lastPos)
 
 		if (ctx->states != NULL)
 		{
-			nfa_match(winstate, ctx, NULL);
+			nfa_match(winstate, ctx, NULL, lastPos);
 			nfa_advance(winstate, ctx, lastPos);
 		}
 	}
