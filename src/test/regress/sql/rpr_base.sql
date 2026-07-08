@@ -3557,6 +3557,67 @@ WINDOW w AS (
 )
 ORDER BY id;
 
+-- ALT Non-Absorbable Branch Match: A+ B | C
+-- C match on the non-absorbable branch (id=2, id=5) must survive absorption of
+-- the dominating A+ run, which never completes a match (B is never present)
+
+WITH test_nonabsorbable_branch AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A', 'C']),
+        (3, ARRAY['A']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A', 'C']),
+        (6, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nonabsorbable_branch
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B | C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- ALT Both Branches Absorbable: A+ C | B+
+-- A+ C never completes (C absent) so its A+ run keeps expanding and dominates;
+-- a finalized B+ match on the other branch (id=1, id=6) must survive absorption
+
+WITH test_absorbable_branches AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A', 'B']),
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['A', 'B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A']),
+        (6, ARRAY['A', 'B']),
+        (7, ARRAY['A', 'B']),
+        (8, ARRAY['A', 'B']),
+        (9, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_absorbable_branches
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ C | B+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
 -- ============================================================
 -- Edge Case Tests
 -- ============================================================

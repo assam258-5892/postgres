@@ -548,6 +548,52 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
+-- Bare unbounded quantifier: A+ absorbs redundant contexts
+-- min=1 commits no match until the run ends, so newer contexts absorb in-progress
+CREATE VIEW rpr_ev_ctx_absorb_plus AS
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+)
+    DEFINE A AS v > 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_plus'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+)
+    DEFINE A AS v > 0
+);');
+
+-- Bare min=0 quantifier: A* is skipped, not absorbed
+-- min=0 commits an empty match at creation, so SKIP (not absorption) removes them
+CREATE VIEW rpr_ev_ctx_absorb_star AS
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A*)
+    DEFINE A AS v > 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_star'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A*)
+    DEFINE A AS v > 0
+);');
+
 -- No absorption - bounded quantifier
 CREATE VIEW rpr_ev_ctx_no_absorb AS
 SELECT count(*) OVER w
@@ -796,6 +842,72 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+ B)
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0 AND PREV(FIRST(v), 1) IS NOT NULL
+);');
+
+-- Alternation, non-absorbable branch match survives absorption: A+ B | C
+-- The dominating A+ run absorbs redundant contexts, but the recorded C matches
+-- are not absorbable, so they survive (2 matched, not 0)
+CREATE VIEW rpr_ev_ctx_absorb_alt_nonabsorb AS
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY['A']), (2, ARRAY['A', 'C']), (3, ARRAY['A']),
+           (4, ARRAY['A']), (5, ARRAY['A', 'C']), (6, ARRAY['A']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B | C)
+    DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags), C AS 'C' = ANY(flags)
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_alt_nonabsorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY[''A'']), (2, ARRAY[''A'', ''C'']), (3, ARRAY[''A'']),
+           (4, ARRAY[''A'']), (5, ARRAY[''A'', ''C'']), (6, ARRAY[''A'']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B | C)
+    DEFINE A AS ''A'' = ANY(flags), B AS ''B'' = ANY(flags), C AS ''C'' = ANY(flags)
+);');
+
+-- Alternation, both branches absorbable: A+ C | B+
+-- A+ C never completes (C absent) so its A+ run absorbs redundant contexts; the
+-- finalized B+ matches on the other branch survive (2 matched, not 0)
+CREATE VIEW rpr_ev_ctx_absorb_alt_both AS
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY['A', 'B']), (2, ARRAY['A', 'B']), (3, ARRAY['A', 'B']),
+           (4, ARRAY['A']), (5, ARRAY['A']), (6, ARRAY['A', 'B']),
+           (7, ARRAY['A', 'B']), (8, ARRAY['A', 'B']), (9, ARRAY['A']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ C | B+)
+    DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags), C AS 'C' = ANY(flags)
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_alt_both'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY[''A'', ''B'']), (2, ARRAY[''A'', ''B'']), (3, ARRAY[''A'', ''B'']),
+           (4, ARRAY[''A'']), (5, ARRAY[''A'']), (6, ARRAY[''A'', ''B'']),
+           (7, ARRAY[''A'', ''B'']), (8, ARRAY[''A'', ''B'']), (9, ARRAY[''A'']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ C | B+)
+    DEFINE A AS ''A'' = ANY(flags), B AS ''B'' = ANY(flags), C AS ''C'' = ANY(flags)
 );');
 
 -- ============================================================
