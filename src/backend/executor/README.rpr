@@ -794,6 +794,14 @@ Worked example for PATTERN (A+) over 3 rows (each matches A):
 
 Total active contexts stays at O(1) instead of growing with N.
 
+The monotonicity argument covers only a context's future (in-progress)
+matches, not a match it has already recorded (matchedState) -- e.g., one
+on a non-absorbable branch, which an absorbing context cannot reproduce.
+Absorption therefore excludes any context holding a recorded match (see
+nfa_update_absorption_flags()).  This costs no efficiency: SKIP PAST LAST
+ROW still prunes such redundant contexts once the covering match is
+recorded (nfa_add_matched_state()).
+
 VIII-3. Absorption Conditions
 
 Planner-time prerequisites (all must hold for absorption to be enabled):
