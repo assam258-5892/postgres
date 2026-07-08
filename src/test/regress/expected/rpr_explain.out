@@ -816,10 +816,10 @@ WINDOW w AS (
    Pattern: (a{2,}")*
    Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
-   NFA States: 5 peak, 18 total, 0 merged
+   NFA States: 6 peak, 18 total, 0 merged
    NFA Contexts: 3 peak, 7 total, 2 pruned
    NFA: 2 matched (len 2/2/2.0), 0 mismatched
-   NFA: 2 absorbed (len 1/1/1.0), 0 skipped
+   NFA: 0 absorbed, 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=6.00 loops=1)
 (10 rows)
 
@@ -864,6 +864,88 @@ WINDOW w AS (
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 30 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
+(10 rows)
+
+-- Bare unbounded quantifier: A+ absorbs redundant contexts
+-- min=1 commits no match until the run ends, so newer contexts absorb in-progress
+CREATE VIEW rpr_ev_ctx_absorb_plus AS
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+)
+    DEFINE A AS v > 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_plus'), E'\n')) AS line WHERE line ~ 'PATTERN';
+      line       
+-----------------
+   PATTERN (a+) 
+(1 row)
+
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+)
+    DEFINE A AS v > 0
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=10.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+"
+   Nav Mark Lookback: 0
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 3 peak, 21 total, 0 merged
+   NFA Contexts: 2 peak, 11 total, 0 pruned
+   NFA: 1 matched (len 10/10/10.0), 0 mismatched
+   NFA: 9 absorbed (len 1/1/1.0), 0 skipped
+   ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
+(10 rows)
+
+-- Bare min=0 quantifier: A* is skipped, not absorbed
+-- min=0 commits an empty match at creation, so SKIP (not absorption) removes them
+CREATE VIEW rpr_ev_ctx_absorb_star AS
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A*)
+    DEFINE A AS v > 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_star'), E'\n')) AS line WHERE line ~ 'PATTERN';
+      line       
+-----------------
+   PATTERN (a*) 
+(1 row)
+
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 10) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A*)
+    DEFINE A AS v > 0
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=10.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a*"
+   Nav Mark Lookback: 0
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 5 peak, 32 total, 0 merged
+   NFA Contexts: 2 peak, 11 total, 0 pruned
+   NFA: 1 matched (len 10/10/10.0), 0 mismatched
+   NFA: 0 absorbed, 9 skipped (len 1/1/1.0)
+   ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
 (10 rows)
 
 -- No absorption - bounded quantifier
@@ -1292,6 +1374,114 @@ WINDOW w AS (
    NFA: 0 absorbed, 39 skipped (len 1/4/2.5)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
 (11 rows)
+
+-- Alternation, non-absorbable branch match survives absorption: A+ B | C
+-- The dominating A+ run absorbs redundant contexts, but the recorded C matches
+-- are not absorbable, so they survive (2 matched, not 0)
+CREATE VIEW rpr_ev_ctx_absorb_alt_nonabsorb AS
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY['A']), (2, ARRAY['A', 'C']), (3, ARRAY['A']),
+           (4, ARRAY['A']), (5, ARRAY['A', 'C']), (6, ARRAY['A']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B | C)
+    DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags), C AS 'C' = ANY(flags)
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_alt_nonabsorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
+         line          
+-----------------------
+   PATTERN (a+ b | c) 
+(1 row)
+
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY[''A'']), (2, ARRAY[''A'', ''C'']), (3, ARRAY[''A'']),
+           (4, ARRAY[''A'']), (5, ARRAY[''A'', ''C'']), (6, ARRAY[''A'']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B | C)
+    DEFINE A AS ''A'' = ANY(flags), B AS ''B'' = ANY(flags), C AS ''C'' = ANY(flags)
+);');
+                                      rpr_explain_filter                                       
+-----------------------------------------------------------------------------------------------
+ WindowAgg (actual rows=6.00 loops=1)
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a+" b | c)
+   Nav Mark Lookback: 0
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 11 peak, 34 total, 0 merged
+   NFA Contexts: 4 peak, 7 total, 0 pruned
+   NFA: 2 matched (len 1/1/1.0), 1 mismatched (len 6/6/6.0)
+   NFA: 3 absorbed (len 1/1/1.0), 0 skipped
+   ->  Sort (actual rows=6.00 loops=1)
+         Sort Key: "*VALUES*".column1
+         Sort Method: quicksort  Memory: NkB
+         ->  Values Scan on "*VALUES*" (actual rows=6.00 loops=1)
+(13 rows)
+
+-- Alternation, both branches absorbable: A+ C | B+
+-- A+ C never completes (C absent) so its A+ run absorbs redundant contexts; the
+-- finalized B+ matches on the other branch survive (2 matched, not 0)
+CREATE VIEW rpr_ev_ctx_absorb_alt_both AS
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY['A', 'B']), (2, ARRAY['A', 'B']), (3, ARRAY['A', 'B']),
+           (4, ARRAY['A']), (5, ARRAY['A']), (6, ARRAY['A', 'B']),
+           (7, ARRAY['A', 'B']), (8, ARRAY['A', 'B']), (9, ARRAY['A']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ C | B+)
+    DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags), C AS 'C' = ANY(flags)
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_alt_both'), E'\n')) AS line WHERE line ~ 'PATTERN';
+          line          
+------------------------
+   PATTERN (a+ c | b+) 
+(1 row)
+
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+WITH d(id, flags) AS (
+    VALUES (1, ARRAY[''A'', ''B'']), (2, ARRAY[''A'', ''B'']), (3, ARRAY[''A'', ''B'']),
+           (4, ARRAY[''A'']), (5, ARRAY[''A'']), (6, ARRAY[''A'', ''B'']),
+           (7, ARRAY[''A'', ''B'']), (8, ARRAY[''A'', ''B'']), (9, ARRAY[''A'']))
+SELECT id, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM d
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ C | B+)
+    DEFINE A AS ''A'' = ANY(flags), B AS ''B'' = ANY(flags), C AS ''C'' = ANY(flags)
+);');
+                                      rpr_explain_filter                                       
+-----------------------------------------------------------------------------------------------
+ WindowAgg (actual rows=9.00 loops=1)
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a+" c | b+")
+   Nav Mark Lookback: 0
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 10 peak, 49 total, 0 merged
+   NFA Contexts: 3 peak, 10 total, 0 pruned
+   NFA: 2 matched (len 3/3/3.0), 0 mismatched
+   NFA: 7 absorbed (len 1/1/1.0), 0 skipped
+   ->  Sort (actual rows=9.00 loops=1)
+         Sort Key: "*VALUES*".column1
+         Sort Method: quicksort  Memory: NkB
+         ->  Values Scan on "*VALUES*" (actual rows=9.00 loops=1)
+(13 rows)
 
 -- ============================================================
 -- Match Length Statistics Tests
