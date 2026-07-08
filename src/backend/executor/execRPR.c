@@ -596,6 +596,13 @@ nfa_update_absorption_flags(RPRNFAContext *ctx)
 			allAbsorbable = false;
 	}
 
+	/*
+	 * A recorded match makes this context non-absorbable: absorption would
+	 * free the match, which no absorbing context can reproduce.
+	 */
+	if (ctx->matchedState != NULL)
+		allAbsorbable = false;
+
 	ctx->hasAbsorbableState = hasAbsorbable;
 	ctx->allStatesAbsorbable = allAbsorbable;
 }
