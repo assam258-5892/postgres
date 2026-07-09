@@ -227,6 +227,30 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 1, B AS v % 5 = 2, C AS v % 5 = 3, D AS v % 5 = 4, E AS v % 5 = 0
 );');
 
+-- Regression test: ALT branch whose tail is a group
+-- (A | (B C)+ (D E)+) means A | ((B C)+ (D E)+) by precedence, so the two
+-- trailing groups must deparse inside one branch, not as separate branches.
+CREATE VIEW rpr_ev_basic_deparse_alttail AS
+SELECT count(*) OVER w
+FROM generate_series(1, 30) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A | (B C)+ (D E)+)
+    DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_deparse_alttail'), E'\n')) AS line WHERE line ~ 'PATTERN';
+-- The viewdef above deparses the parse tree; this one deparses the compiled
+-- element array, which enumerates ALT branches via the SEP terminators.
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 30) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A | (B C)+ (D E)+)
+    DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
+);');
+
 -- Regression test: Quoted identifiers in EXPLAIN pattern deparse
 -- Mixed case names must be quoted to preserve round-trip safety
 SELECT rpr_explain_filter('
@@ -2504,7 +2528,7 @@ WINDOW w AS (
 );');
 
 -- Group mid-branch followed by a sequence element needs no separator before it
--- Pattern: (C | (A B)+ D) - relative-next blocks a spurious separator at D
+-- Pattern: (C | (A B)+ D) - only the branch end takes a SEP, not D
 CREATE VIEW rpr_ev_alt_grp_then_seq AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)

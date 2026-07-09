@@ -3324,6 +3324,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A+ B) | C) D | A B C)
              DEFINE A AS val <= 30, B AS val <= 60, C AS val <= 80, D AS val > 80);
 
+-- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b' c')+" (d e)+)
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             AFTER MATCH SKIP PAST LAST ROW PATTERN (A | (B C)+ (D E)+)
+             DEFINE A AS val <= 20, B AS val <= 40, C AS val <= 60, D AS val <= 80, E AS val > 80);
+
 -- Nested unbounded: (A+ | B)+ -> (a+" | b)+ (first iteration absorbable)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
