@@ -1039,6 +1039,8 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 			/* Recurse into children at increased depth */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
+				/* Each branch is terminated by a SEP branch-separator marker */
+				(*numElements)++;
 				scanRPRPatternRecursive(child, varNames,
 										numVars, numElements, depth + 1, maxDepth);
 			}
@@ -1250,8 +1252,21 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
  * fillRPRPatternAlt
  *		Fill an ALT pattern and its alternatives.
  *
- * Creates the ALT marker, fills each alternative at increased depth,
- * sets jump pointers for backtracking, and next pointers for successful paths.
+ * Creates the ALT marker and fills each alternative at increased depth,
+ * terminating every alternative (including the last) with a SEP
+ * branch-separator marker.  The branch link lives on the SEP markers, so it
+ * never collides with a branch content BEGIN's skip-past-END path, and each
+ * alternative's extent is bounded by its own trailing SEP without consulting
+ * depth.
+ *
+ *   ALT.next  -> first branch content      SEP.next -> next branch content
+ *   ALT.jump  -> first SEP                            (post-ALT on the last)
+ *   SEP.jump  -> next SEP (-1 on the last)
+ *
+ * A branch's tail (and a branch-terminal group's BEGIN skip path, whose jump
+ * would otherwise point at the branch's SEP) is redirected to the post-ALT
+ * element, so SEP markers are compile-time boundaries only and are never a
+ * runtime state position.
  *
  * Returns true if any branch is nullable (OR semantics: one nullable
  * branch suffices for the alternation to produce an empty match).
@@ -1261,9 +1276,12 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 {
 	ListCell   *lc;
 	ListCell   *lc2;
+	ListCell   *lc3;
 	RPRPatternElement *elem;
+	int			altIdx = *idx;
 	List	   *altBranchStarts = NIL;
 	List	   *altEndPositions = NIL;
+	List	   *altSepIdxs = NIL;
 	int			afterAltIdx;
 	bool		anyNullable = false;
 
@@ -1274,47 +1292,78 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 	elem->depth = depth;
 	elem->min = 1;
 	elem->max = 1;
-	elem->next = RPR_ELEMIDX_INVALID;
-	elem->jump = RPR_ELEMIDX_INVALID;
+	elem->next = RPR_ELEMIDX_INVALID;	/* set to first branch content below */
+	elem->jump = RPR_ELEMIDX_INVALID;	/* set to first SEP below */
 	(*idx)++;
 
-	/* Fill each alternative */
+	/* ALT enters the first branch's content (the contiguous next element) */
+	pat->elements[altIdx].next = *idx;
+
+	/* Fill each alternative, terminated by a SEP branch-separator marker */
 	foreach_node(RPRPatternNode, alt, node->children)
 	{
 		int			branchStart = *idx;
+		int			sepIdx;
+		RPRPatternElement *sep;
 
 		altBranchStarts = lappend_int(altBranchStarts, branchStart);
 		if (fillRPRPattern(alt, pat, idx, depth + 1))
 			anyNullable = true;
 		altEndPositions = lappend_int(altEndPositions, *idx - 1);
+
+		/* SEP terminates this branch */
+		sepIdx = *idx;
+		sep = &pat->elements[sepIdx];
+		memset(sep, 0, sizeof(RPRPatternElement));
+		sep->varId = RPR_VARID_SEP;
+		sep->depth = depth;		/* ALT-level boundary, not branch-level */
+		sep->min = 1;
+		sep->max = 1;
+		sep->next = RPR_ELEMIDX_INVALID;	/* set below */
+		sep->jump = RPR_ELEMIDX_INVALID;	/* branch link, set below */
+		altSepIdxs = lappend_int(altSepIdxs, sepIdx);
+		(*idx)++;
 	}
 
-	/* Set jump on first element of each alternative to next alternative */
-	foreach(lc, altBranchStarts)
-	{
-		int			firstElemIdx = lfirst_int(lc);
-
-		if (lnext(altBranchStarts, lc) != NULL)
-			pat->elements[firstElemIdx].jump = lfirst_int(lnext(altBranchStarts, lc));
-	}
-
-	/* Set next on last element of each alternative to after the alternation */
 	afterAltIdx = *idx;
 
-	forboth(lc, altEndPositions, lc2, altBranchStarts)
-	{
-		int			endPos = lfirst_int(lc);
-		int			branchStart = lfirst_int(lc2);
+	/* ALT reaches the first branch's terminating SEP */
+	pat->elements[altIdx].jump = linitial_int(altSepIdxs);
 
+	/*
+	 * Wire the SEP chain, and redirect each branch's exits past the
+	 * alternation.
+	 */
+	forthree(lc, altSepIdxs, lc2, altBranchStarts, lc3, altEndPositions)
+	{
+		int			sepIdx = lfirst_int(lc);
+		int			branchStart = lfirst_int(lc2);
+		int			endPos = lfirst_int(lc3);
+		ListCell   *nextSep = lnext(altSepIdxs, lc);
+		int			j;
+
+		/* SEP.jump -> next SEP; SEP.next -> next branch content */
+		if (nextSep != NULL)
+		{
+			pat->elements[sepIdx].jump = lfirst_int(nextSep);
+			pat->elements[sepIdx].next = lfirst_int(lnext(altBranchStarts, lc2));
+		}
+		else
+		{
+			pat->elements[sepIdx].jump = RPR_ELEMIDX_INVALID;
+			pat->elements[sepIdx].next = afterAltIdx;
+		}
+
+		/*
+		 * Redirect the branch's fall-through exit to after the alternation.
+		 * The natural exit is the element past the branch content, which is
+		 * now this branch's SEP; a simple tail leaves next unset (finalize
+		 * would fall it through to the SEP), while an inner ALT already set
+		 * next to that position.
+		 */
 		if (pat->elements[endPos].next != RPR_ELEMIDX_INVALID)
 		{
-			/*
-			 * An inner ALT already set next on this element.  Redirect all
-			 * elements in this branch that share the same target to point to
-			 * after this ALT instead.
-			 */
 			int			oldTarget = pat->elements[endPos].next;
-			int			j;
 
 			for (j = branchStart; j <= endPos; j++)
 			{
@@ -1326,8 +1375,20 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		{
 			pat->elements[endPos].next = afterAltIdx;
 		}
+
+		/*
+		 * A branch-terminal group's BEGIN skip-past-END path points at the
+		 * element following the group, which is this branch's SEP; redirect
+		 * it past the alternation too so the skip never lands on a SEP.
+		 */
+		for (j = branchStart; j <= endPos; j++)
+		{
+			if (pat->elements[j].jump == sepIdx)
+				pat->elements[j].jump = afterAltIdx;
+		}
 	}
 
+	list_free(altSepIdxs);
 	list_free(altBranchStarts);
 	list_free(altEndPositions);
 
@@ -1681,30 +1742,28 @@ computeAbsorbabilityRecursive(RPRPattern *pattern, RPRElemIdx startIdx,
 
 	if (RPRElemIsAlt(elem))
 	{
-		/* ALT: recursively check each branch */
-		RPRElemIdx	branchIdx = elem->next;
-		RPRPatternElement *branchFirst;
+		/* ALT: recursively check each branch via the SEP chain */
+		RPRElemIdx	brStart = elem->next;
+		RPRElemIdx	sepIdx = elem->jump;
+		RPRPatternElement *sepElem;
 		bool		branchAbsorbable;
 
-		while (branchIdx != RPR_ELEMIDX_INVALID)
+		for (;;)
 		{
 			branchAbsorbable = false;
 
-			Assert(branchIdx < pattern->numElements);
-			branchFirst = &pattern->elements[branchIdx];
-
-			/* Stop if element is outside ALT scope (not a branch) */
-			if (branchFirst->depth <= elem->depth)
-				break;
-
-			/* Recursively check this branch */
-			computeAbsorbabilityRecursive(pattern, branchIdx, &branchAbsorbable);
+			/* Recursively check this branch's content */
+			computeAbsorbabilityRecursive(pattern, brStart, &branchAbsorbable);
 			if (branchAbsorbable)
-			{
 				*hasAbsorbable = true;
-			}
 
-			branchIdx = branchFirst->jump;
+			Assert(sepIdx >= 0 && sepIdx < pattern->numElements);
+			sepElem = &pattern->elements[sepIdx];
+			Assert(RPRElemIsSep(sepElem));
+			if (sepElem->jump == RPR_ELEMIDX_INVALID)
+				break;
+			brStart = sepElem->next;
+			sepIdx = sepElem->jump;
 		}
 
 		/* Mark ALT element if any branch is absorbable */
@@ -1740,9 +1799,7 @@ computeAbsorbabilityRecursive(RPRPattern *pattern, RPRElemIdx startIdx,
 
 		/* Non-ALT, non-BEGIN: check if unbounded start */
 		if (isUnboundedStart(pattern, startIdx))
-		{
 			*hasAbsorbable = true;
-		}
 	}
 }
 
