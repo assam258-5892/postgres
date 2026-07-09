@@ -128,7 +128,6 @@ static int	deparse_rpr_node(RPRPattern *pattern, int idx, int limit,
 							 StringInfo buf);
 static int	rpr_match_end(RPRPattern *pattern, int beginIdx);
 static int	rpr_alt_scope_end(RPRPattern *pattern, int idx);
-static int	rpr_next_branch(RPRPattern *pattern, int bno, int altEnd);
 static void show_storage_info(char *maxStorageType, int64 maxSpaceUsed,
 							  ExplainState *es);
 static void show_tablesample(TableSampleClause *tsc, PlanState *planstate,
@@ -2955,17 +2954,17 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
  * passes the boundary down, so each construct's extent is fixed by its caller.
  * Three signals drive the walk:
  *
- *   - scope ends (where an ALT or GROUP body finishes) come from depth, via
- *     rpr_alt_scope_end() and rpr_match_end().
- *   - branch boundaries (where a "|" goes) come from a branch-start jump,
- *     confirmed by the relative test elem[j-1].next != j, via
- *     rpr_next_branch().
+ *   - a GROUP body's end comes from depth, via rpr_match_end(); an ALT's
+ *     scope end comes from its SEP chain, via rpr_alt_scope_end().
+ *   - branch boundaries (where a "|" goes) come from the ALT's SEP chain: each
+ *     branch is terminated by a SEP whose jump links to the next branch's SEP
+ *     (-1 on the last), so a branch runs from its content start up to its SEP.
  *   - parentheses come from structure (a BEGIN group, an ALT) plus a one-step
  *     lookahead for a group that wraps a lone ALT.
  *
- * depth and the relative next test are stable across the next/jump values the
- * compiler assigns to branch tails and nested alternations, which is what makes
- * them suitable to anchor scope and branch boundaries.
+ * depth and the SEP chain are stable across the next/jump values the compiler
+ * assigns to branch tails and nested alternations, which is what makes them
+ * suitable to anchor scope and branch boundaries.
  *
  * EXPLAIN parenthesizes every ALT on its own, so a top-level "A | B" deparses
  * as "(a | b)".  This self-consistent EXPLAIN form is the correctness oracle
@@ -3021,9 +3020,9 @@ deparse_rpr_seq(RPRPattern *pattern, int start, int limit, StringInfo buf)
  * matching END (rpr_match_end); when the group's sole child is an ALT that
  * runs to the END, the ALT supplies the parentheses and the group only adds
  * the quantifier, otherwise the group body is wrapped in its own "( )".  An
- * ALT runs to its depth-determined scope end (capped by the inherited limit)
- * and emits "( b1 | b2 | ... )", each branch deparsed within the boundary
- * handed down by rpr_next_branch.
+ * ALT runs to its SEP-chain scope end (capped by the inherited limit) and
+ * emits "( b1 | b2 | ... )", each branch deparsed within the boundary handed
+ * down by its SEP chain.
  */
 static int
 deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
@@ -3067,22 +3066,30 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 	{
 		int			altEnd = rpr_alt_scope_end(pattern, idx);
 		int			b;
+		int			sepIdx;
 		bool		first = true;
 
-		/* an alternation's depth-derived scope end never exceeds the limit */
+		/* an alternation's SEP-chain scope end never exceeds the limit */
 		Assert(altEnd <= limit);
 
 		appendStringInfoChar(buf, '(');
-		b = idx + 1;
-		while (b < altEnd)
+		b = elem->next;			/* first branch's content */
+		sepIdx = elem->jump;	/* first branch's terminating SEP */
+		for (;;)
 		{
-			int			nb = rpr_next_branch(pattern, b, altEnd);
+			RPRPatternElement *sep = &pattern->elements[sepIdx];
 
+			/* The branch runs up to its terminating SEP */
+			Assert(RPRElemIsSep(sep));
 			if (!first)
 				appendStringInfoString(buf, " | ");
 			first = false;
-			(void) deparse_rpr_seq(pattern, b, nb, buf);
-			b = nb;
+			(void) deparse_rpr_seq(pattern, b, sepIdx, buf);
+
+			if (sep->jump == RPR_ELEMIDX_INVALID)
+				break;
+			b = sep->next;
+			sepIdx = sep->jump;
 		}
 		appendStringInfoChar(buf, ')');
 		return altEnd;
@@ -3110,44 +3117,27 @@ rpr_match_end(RPRPattern *pattern, int beginIdx)
 }
 
 /*
- * Scope end of the construct at index idx: the first following element whose
- * depth is no greater than idx's own.  For an ALT marker this is the index
- * just past its last branch, since depth stays constant across branch
- * boundaries.  FIN sits at depth 0, so a top-level ALT stops there.
+ * Scope end of the alternation marker at idx: the element just past its last
+ * branch.  Walk the SEP chain from ALT.jump to the last SEP (jump invalid);
+ * the element right after that SEP is the post-ALT element.  Only ever called
+ * on an ALT.
+ *
+ * Use "last SEP index + 1", not the SEP's next: for a nested ALT the last
+ * SEP's next is redirected past the *enclosing* alternation by the branch-exit
+ * fixup in fillRPRPatternAlt, whereas SEPs are laid out contiguously, so the
+ * index after the last SEP is always this ALT's own post-ALT element.
  */
 static int
 rpr_alt_scope_end(RPRPattern *pattern, int idx)
 {
-	RPRDepth	d = pattern->elements[idx].depth;
-	int			i;
+	int			sepIdx;
 
-	for (i = idx + 1; i < pattern->numElements; i++)
-	{
-		if (pattern->elements[i].depth <= d)
-			return i;
-	}
-	return pattern->numElements;
-}
+	Assert(RPRElemIsAlt(&pattern->elements[idx]));
 
-/*
- * Boundary of the alternation branch starting at bno (i.e. the start of the
- * next branch, or altEnd if bno is the last branch).
- *
- * The branch-start element's jump points at the next branch when this is not
- * the last branch.  jump is overloaded (a group BEGIN also uses it for its
- * skip path), so confirm a real branch boundary with the relative test
- * elem[j-1].next != j: at a true boundary the preceding branch's tail has its
- * next redirected past the alternation, so it does not point at j.
- */
-static int
-rpr_next_branch(RPRPattern *pattern, int bno, int altEnd)
-{
-	int			j = pattern->elements[bno].jump;
-
-	if (j != RPR_ELEMIDX_INVALID && j < altEnd &&
-		pattern->elements[j - 1].next != j)
-		return j;
-	return altEnd;
+	sepIdx = pattern->elements[idx].jump;
+	while (pattern->elements[sepIdx].jump != RPR_ELEMIDX_INVALID)
+		sepIdx = pattern->elements[sepIdx].jump;
+	return sepIdx + 1;
 }
 
 /*
