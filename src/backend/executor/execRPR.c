@@ -1019,6 +1019,12 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
  * nfa_advance_alt
  *
  * Handle ALT element: expand all branches in lexical order via DFS.
+ *
+ * ALT.next is the first branch's content and ALT.jump is that branch's
+ * terminating SEP.  Each SEP.jump links to the next branch's SEP (-1 on the
+ * last) and each SEP.next is the next branch's content.  The branch link runs
+ * from ALT through the SEP chain, so it never collides with a branch content
+ * BEGIN's skip-past-END path.
  */
 static void
 nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
@@ -1027,37 +1033,28 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
 {
 	RPRPattern *pattern = winstate->rpPattern;
 	RPRPatternElement *elements = pattern->elements;
-	RPRElemIdx	altIdx = elem->next;
+	RPRElemIdx	branchStart = elem->next;
+	RPRElemIdx	sepIdx = elem->jump;
 
-	while (altIdx >= 0)
+	while (sepIdx != RPR_ELEMIDX_INVALID)
 	{
-		RPRPatternElement *altElem;
+		RPRPatternElement *sepElem;
 		RPRNFAState *newState;
 
-		/* Branch jump/next links are always -1 or a valid index */
-		Assert(altIdx < pattern->numElements);
-		altElem = &elements[altIdx];
-
-		/*
-		 * Stop if element is outside ALT scope (not a branch).  The check
-		 * fires when the last branch is a quantified group whose BEGIN.jump
-		 * (set by fillRPRPatternGroup) is preserved -- not overridden by
-		 * fillRPRPatternAlt, which only links non-last branch heads -- and
-		 * leads to a post-ALT element.  Other branch shapes terminate the
-		 * walk earlier via altIdx = RPR_ELEMIDX_INVALID.  Use <=, not <: the
-		 * post-ALT element may sit at the same depth as the ALT when the ALT
-		 * has a sibling at that level.
-		 */
-		if (altElem->depth <= elem->depth)
-			break;
-
-		/* Create independent state for each branch */
-		newState = nfa_state_clone(winstate, altIdx,
+		/* Create independent state at this branch's content */
+		newState = nfa_state_clone(winstate, branchStart,
 								   state->counts, state->isAbsorbable);
 
-		/* Recursively process this branch before next */
+		/* Recursively process this branch before the next */
 		nfa_advance_state(winstate, ctx, newState, currentPos);
-		altIdx = altElem->jump;
+
+		Assert(sepIdx >= 0 && sepIdx < pattern->numElements);
+		sepElem = &elements[sepIdx];
+		Assert(RPRElemIsSep(sepElem));
+
+		/* The last branch's SEP has no link, ending the walk */
+		branchStart = sepElem->next;
+		sepIdx = sepElem->jump;
 	}
 
 	nfa_state_free(winstate, state);
@@ -1520,7 +1517,8 @@ nfa_advance_state(WindowAggState *winstate, RPRNFAContext *ctx,
 			break;
 
 		default:
-			/* VAR element */
+			/* VAR element; a SEP would land here, so see fillRPRPatternAlt */
+			Assert(!RPRElemIsSep(elem) && RPRElemIsVar(elem));
 			nfa_advance_var(winstate, ctx, state, elem, currentPos);
 			break;
 	}
