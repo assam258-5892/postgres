@@ -41,10 +41,12 @@
 #define RPR_DEPTH_MAX		(PG_UINT8_MAX - 1)	/* max pattern nesting depth:
 												 * 254 */
 
-/* Reserved control-element varIds (high nibble 0xF; 0xF0-0xFB spare) */
-#define RPR_VARID_BEGIN		((RPRVarId) 0xFC)	/* group begin */
-#define RPR_VARID_END		((RPRVarId) 0xFD)	/* group end */
-#define RPR_VARID_ALT		((RPRVarId) 0xFE)	/* alternation start */
+/* Reserved control-element varIds (high nibble 0xF; 0xF0-0xFA spare) */
+#define RPR_VARID_BEGIN		((RPRVarId) 0xFB)	/* group begin */
+#define RPR_VARID_END		((RPRVarId) 0xFC)	/* group end */
+#define RPR_VARID_ALT		((RPRVarId) 0xFD)	/* alternation start */
+#define RPR_VARID_SEP		((RPRVarId) 0xFE)	/* alternation branch
+												 * separator */
 #define RPR_VARID_FIN		((RPRVarId) 0xFF)	/* pattern finish */
 
 /* Element flags */
@@ -70,6 +72,7 @@
 #define RPRElemIsBegin(e)		((e)->varId == RPR_VARID_BEGIN)
 #define RPRElemIsEnd(e)			((e)->varId == RPR_VARID_END)
 #define RPRElemIsAlt(e)			((e)->varId == RPR_VARID_ALT)
+#define RPRElemIsSep(e)			((e)->varId == RPR_VARID_SEP)
 #define RPRElemIsFin(e)			((e)->varId == RPR_VARID_FIN)
 #define RPRElemCanSkip(e)		((e)->min == 0)
 
