@@ -2278,6 +2278,113 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
+-- (A | (B C)+ (D E)+): the last branch is (B C)+ (D E)+, so with no A/B/C the
+-- rows D E D E match nothing -- the trailing (D E)+ is not its own branch.
+WITH test_alt_concat_groups AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['D']),
+        (2, ARRAY['E']),
+        (3, ARRAY['D']),
+        (4, ARRAY['E'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_concat_groups
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (A | (B C)+ (D E)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags),
+        E AS 'E' = ANY(flags)
+);
+
+-- (A | (B C)*): optional group as the last ALT branch.  When (B C)* matches
+-- zero the branch ends with an empty match (NULL bounds), consuming no row.
+WITH test_alt_tail_optgroup AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['_']),
+        (2, ARRAY['B']),
+        (3, ARRAY['C']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_tail_optgroup
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A | (B C)*)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (((B C)* | A) D): the ALT is followed by D, so a zero-match (B C)* must
+-- continue into D.  Row 4 (a lone D) exercises that; row 1 is the B C D match.
+WITH test_alt_optgroup_then_elem AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['C']),
+        (3, ARRAY['D']),
+        (4, ARRAY['D']),
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_optgroup_then_elem
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((B C)* | A) D)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
+-- ((B C)* D | A): the same group inside a non-last branch, with D following it
+-- in that branch.  A zero-match (B C)* must continue into D, not fall through
+-- into the A branch; row 4 (a lone D) is the row that tells the two apart.
+WITH test_alt_nonlast_grp_then_elem AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['C']),
+        (3, ARRAY['D']),
+        (4, ARRAY['D']),
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_nonlast_grp_then_elem
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((B C)* D | A)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
 -- ============================================================
 -- Deep Nested Groups
 -- ============================================================
