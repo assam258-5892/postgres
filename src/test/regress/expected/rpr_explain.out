@@ -307,6 +307,48 @@ WINDOW w AS (
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
 (9 rows)
 
+-- Regression test: ALT branch whose tail is a group
+-- (A | (B C)+ (D E)+) means A | ((B C)+ (D E)+) by precedence, so the two
+-- trailing groups must deparse inside one branch, not as separate branches.
+CREATE VIEW rpr_ev_basic_deparse_alttail AS
+SELECT count(*) OVER w
+FROM generate_series(1, 30) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A | (B C)+ (D E)+)
+    DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_deparse_alttail'), E'\n')) AS line WHERE line ~ 'PATTERN';
+              line              
+--------------------------------
+   PATTERN (a | (b c)+ (d e)+) 
+(1 row)
+
+-- The viewdef above deparses the parse tree; this one deparses the compiled
+-- element array, which enumerates ALT branches via the SEP terminators.
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 30) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A | (B C)+ (D E)+)
+    DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=30.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a | (b' c')+" (d e)+)
+   Nav Mark Lookback: 0
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 5 peak, 103 total, 0 merged
+   NFA Contexts: 3 peak, 31 total, 15 pruned
+   NFA: 10 matched (len 1/4/2.5), 0 mismatched
+   NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
+   ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
+(10 rows)
+
 -- Regression test: Quoted identifiers in EXPLAIN pattern deparse
 -- Mixed case names must be quoted to preserve round-trip safety
 SELECT rpr_explain_filter('
@@ -4486,9 +4528,9 @@ WINDOW w AS (
    Pattern: (c | (a' b')+" d)
    Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
-   NFA States: 6 peak, 88 total, 0 merged
-   NFA Contexts: 3 peak, 21 total, 6 pruned
-   NFA: 10 matched (len 1/1/1.0), 4 mismatched (len 3/3/3.0)
+   NFA States: 5 peak, 67 total, 0 merged
+   NFA Contexts: 3 peak, 21 total, 11 pruned
+   NFA: 5 matched (len 1/1/1.0), 4 mismatched (len 3/3/3.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
 (9 rows)
 
