@@ -2625,7 +2625,6 @@ set_upper_references(PlannerInfo *root, Plan *plan, int rtoffset)
 								   subplan_itlist,
 								   OUTER_VAR,
 								   rtoffset,
-								   NRM_EQUAL,
 								   NUM_EXEC_QUAL(plan));
 				lfirst(l) = tle;
 			}
