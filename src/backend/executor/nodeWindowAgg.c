@@ -4115,6 +4115,7 @@ compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 			 * -PG_INT64_MAX, which cannot underflow int64.
 			 */
 			reach = inner - outer;
+			context->minFirstOffset = Min(context->minFirstOffset, reach);
 		}
 		else
 		{
@@ -4125,8 +4126,9 @@ compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 			 */
 			if (pg_add_s64_overflow(inner, outer, &reach))
 				reach = PG_INT64_MAX;
+
+			context->minFirstOffset = Min(context->minFirstOffset, reach);
 		}
-		context->minFirstOffset = Min(context->minFirstOffset, reach);
 	}
 }
 
