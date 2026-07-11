@@ -2754,6 +2754,8 @@ RowMarkClause
 RowMarkType
 RowSecurityDesc
 RowSecurityPolicy
+RprNavOffsets
+RprNavState
 RtlGetLastNtStatus_t
 RtlNtStatusToDosError_t
 RuleInfo

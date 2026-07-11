@@ -690,18 +690,6 @@ typedef struct RPRNavExpr
 	/* outer offset for compound navigation */
 	Expr	   *compound_offset_arg;
 
-	/*
-	 * The computed offset value, for default value see RPRNavKind comments
-	 * above. The value will be set in visit_nav_exec.
-	 */
-	int64		offset;
-
-	/*
-	 * The computeed compound_offset offset value, for default value see
-	 * RPRNavKind comments above. The value will be set in visit_nav_exec.
-	 */
-	int64		compound_offset;
-
 	/* result type (same as arg's type) */
 	Oid			resulttype pg_node_attr(query_jumble_ignore);
 	/* OID of collation of result */
