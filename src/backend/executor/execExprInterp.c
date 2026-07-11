@@ -6169,10 +6169,29 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	 * EEOP_RPR_NAV_RESTORE is a harmless no-op.
 	 */
 	if (target_pos == winstate->currentpos)
+	{
+		/* target row trivially exists; see comment below */
+		*op->resnull = false;
 		return;
+	}
 
 	/* Fetch target row slot (returns nav_null_slot if out of range) */
 	target_slot = ExecRPRNavGetSlot(winstate, target_pos);
+
+	/*
+	 * Report whether the target row exists through resnull, which the jump
+	 * step tests before the argument expression gets to overwrite it: null
+	 * when the row is out of range, so the jump skips the argument, and a
+	 * definitive false otherwise, since resnull may still hold a stale value
+	 * from a previous evaluation.
+	 */
+	if (target_slot == winstate->nav_null_slot)
+	{
+		*op->resvalue = (Datum) 0;
+		*op->resnull = true;
+		return;
+	}
+	*op->resnull = false;
 
 	/*
 	 * Update econtext to point to the target slot.  Also decompress the new
