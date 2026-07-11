@@ -4043,6 +4043,7 @@ compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 {
 	int64		inner;
 	int64		outer;
+	RprNavOffsets *entry = palloc_object(RprNavOffsets);
 
 	/*
 	 * Parser guarantee (mirrors compute_matchStartDependent): nav's direct
@@ -4068,8 +4069,12 @@ compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 	else
 		outer = 1;
 
-	nav->offset = inner;
-	nav->compound_offset = outer;
+	entry->nav = nav;
+	entry->offset = inner;
+	entry->compound_offset = outer;
+
+	context->winstate->rprNavOffsets =
+		lappend(context->winstate->rprNavOffsets, entry);
 
 	/* Backward reach: PREV, LAST-with-offset */
 	if (!context->maxOverflow)
@@ -4156,6 +4161,7 @@ eval_define_offsets(WindowAggState *winstate, List *defineClause)
 	winstate->navMaxOffset = 0;
 	winstate->hasFirstNav = false;
 	winstate->navFirstOffset = 0;
+	winstate->rprNavOffsets = NIL;
 
 	if (defineClause == NIL)
 		return;

@@ -36,6 +36,7 @@
 #include "catalog/pg_type.h"
 #include "executor/execExpr.h"
 #include "executor/nodeSubplan.h"
+#include "executor/nodeWindowAgg.h"
 #include "funcapi.h"
 #include "jit/jit.h"
 #include "miscadmin.h"
@@ -1199,19 +1200,45 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				 * expression is compiled normally (reads from the swapped
 				 * slot), and the RESTORE opcode restores the original slot.
 				 */
+				RprNavState *rprnavstate = makeNode(RprNavState);
 				RPRNavExpr *nav = (RPRNavExpr *) node;
 				WindowAggState *winstate;
 				int			skip_arg_step;
+				bool		find_navexpr = false;
 
 				Assert(state->parent && IsA(state->parent, WindowAggState));
 				winstate = (WindowAggState *) state->parent;
 
+				rprnavstate->winstate = winstate;
+				rprnavstate->rprnavexpr = nav;
+
+				/*
+				 * Fetch the resolved navigation offsets for a given
+				 * RPRNavExpr, as computed by eval_define_offsets() at
+				 * executor startup.  Called from ExecInitExprRec when
+				 * compiling a navigation expression; the values are captured
+				 * into its RprNavState.
+				 *
+				 * The offsets live in executor state rather than on the
+				 * RPRNavExpr because the plan tree is read-only and may be
+				 * shared by concurrent executions.
+				 */
+				foreach_ptr(RprNavOffsets, entry, winstate->rprNavOffsets)
+				{
+					if (entry->nav == nav && find_navexpr)
+						elog(ERROR, "RPRNavExpr occruence more than once");
+
+					if (entry->nav == nav)
+					{
+						rprnavstate->offset = entry->offset;
+						rprnavstate->compound_offset = entry->compound_offset;
+						find_navexpr = true;
+					}
+				}
+
 				/* Emit SET opcode: swap slot to target row */
 				scratch.opcode = EEOP_RPR_NAV_SET;
-				scratch.d.rpr_nav.winstate = winstate;
-				scratch.d.rpr_nav.kind = nav->kind;
-				scratch.d.rpr_nav.offset = nav->offset;
-				scratch.d.rpr_nav.compound_offset = nav->compound_offset;
+				scratch.d.rpr_nav.rprnavstate = rprnavstate;
 
 				ExprEvalPushStep(state, &scratch);
 
@@ -1240,10 +1267,10 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				scratch.opcode = EEOP_RPR_NAV_RESTORE;
 				scratch.resvalue = resv;
 				scratch.resnull = resnull;
-				scratch.d.rpr_nav.winstate = winstate;
+				scratch.d.rpr_nav.rprnavstate = rprnavstate;
 				get_typlenbyval(nav->resulttype,
-								&scratch.d.rpr_nav.resulttyplen,
-								&scratch.d.rpr_nav.resulttypbyval);
+								&rprnavstate->resulttyplen,
+								&rprnavstate->resulttypbyval);
 				ExprEvalPushStep(state, &scratch);
 				break;
 			}

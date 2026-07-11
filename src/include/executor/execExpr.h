@@ -702,13 +702,7 @@ typedef struct ExprEvalStep
 		/* for EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE */
 		struct
 		{
-			WindowAggState *winstate;
-			RPRNavKind	kind;
-			int64		offset;
-			int64		compound_offset;
-			/* For compound nav: offset_value[0] = inner, [1] = outer */
-			int16		resulttyplen;	/* RESTORE: result type length */
-			bool		resulttypbyval; /* RESTORE: result pass-by-value? */
+			RprNavState *rprnavstate;
 		}			rpr_nav;
 
 		/* for EEOP_AGG_*DESERIALIZE */
