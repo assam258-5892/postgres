@@ -6024,23 +6024,26 @@ ExecAggPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
 void
 ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
-	WindowAggState *winstate = op->d.rpr_nav.winstate;
+	WindowAggState *winstate;
 	int64		offset;
 	int64		compound_offset;
 	int64		target_pos;
 	TupleTableSlot *target_slot;
+	RprNavState *rprnavstate = op->d.rpr_nav.rprnavstate;
+
+	winstate = rprnavstate->winstate;
 
 	/* Save current slot for later restore */
 	winstate->nav_saved_outertuple = econtext->ecxt_outertuple;
 
-	offset = op->d.rpr_nav.offset;
-	compound_offset = op->d.rpr_nav.compound_offset;
+	offset = rprnavstate->offset;
+	compound_offset = rprnavstate->compound_offset;
 
 	/*
 	 * Calculate target position based on navigation direction.  On overflow,
 	 * use -1 so that ExecRPRNavGetSlot treats it as out of range.
 	 */
-	switch (op->d.rpr_nav.kind)
+	switch (rprnavstate->rprnavexpr->kind)
 	{
 		case RPR_NAV_PREV:
 
@@ -6089,7 +6092,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 				}
 
 				/* Apply outer: PREV subtracts, NEXT adds */
-				if (op->d.rpr_nav.kind == RPR_NAV_PREV_FIRST)
+				if (rprnavstate->rprnavexpr->kind == RPR_NAV_PREV_FIRST)
 				{
 					/*
 					 * inner_pos is in [0, currentpos] and compound_offset is
@@ -6124,7 +6127,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 				}
 
 				/* Apply outer: PREV subtracts, NEXT adds */
-				if (op->d.rpr_nav.kind == RPR_NAV_PREV_LAST)
+				if (rprnavstate->rprnavexpr->kind == RPR_NAV_PREV_LAST)
 				{
 					/*
 					 * inner_pos is in [nav_match_start, currentpos] (>= 0)
@@ -6143,7 +6146,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 			break;
 		default:
 			elog(ERROR, "unrecognized RPR navigation kind: %d",
-				 (int) op->d.rpr_nav.kind);
+				 (int) rprnavstate->rprnavexpr->kind);
 			break;
 	}
 
@@ -6168,8 +6171,8 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	/*
 	 * If the target row does exist, resnull must still be set to a definitive
 	 * false, since it may hold a stale value from a previous evaluation and
-	 * the jump step tests it before the argument expression overwrites it.
-1	 */
+	 * the jump step tests it before the argument expression overwrites it. 1
+	 */
 	if (target_slot == winstate->nav_null_slot)
 	{
 		*op->resvalue = (Datum) 0;
@@ -6205,7 +6208,7 @@ void
 ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
 					  ExprContext *econtext)
 {
-	WindowAggState *winstate = op->d.rpr_nav.winstate;
+	WindowAggState *winstate = op->d.rpr_nav.rprnavstate->winstate;
 
 	/*
 	 * When slot swap was elided (target == currentpos), this is a harmless
@@ -6217,7 +6220,7 @@ ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
 	econtext->ecxt_outertuple = winstate->nav_saved_outertuple;
 
 	/* Stabilize pass-by-ref result against nav_slot re-fetch */
-	if (!op->d.rpr_nav.resulttypbyval &&
+	if (!op->d.rpr_nav.rprnavstate->resulttypbyval &&
 		!*op->resnull)
 	{
 		MemoryContext oldContext;
@@ -6225,7 +6228,7 @@ ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
 		oldContext = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
 		*op->resvalue = datumCopy(*op->resvalue,
 								  false,
-								  op->d.rpr_nav.resulttyplen);
+								  op->d.rpr_nav.rprnavstate->resulttyplen);
 		MemoryContextSwitchTo(oldContext);
 	}
 }

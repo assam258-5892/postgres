@@ -2868,8 +2868,6 @@ eval_const_expressions_mutator(Node *node,
 				newexpr->arg = arg;
 				newexpr->offset_arg = offset_arg;
 				newexpr->compound_offset_arg = compound_offset_arg;
-				newexpr->offset = expr->offset;
-				newexpr->compound_offset = expr->compound_offset;
 				newexpr->resulttype = expr->resulttype;
 				newexpr->resultcollid = expr->resultcollid;
 				newexpr->location = expr->location;

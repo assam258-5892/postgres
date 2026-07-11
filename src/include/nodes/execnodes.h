@@ -70,6 +70,7 @@ typedef struct TupleTableSlot TupleTableSlot;
 typedef struct TupleTableSlotOps TupleTableSlotOps;
 typedef struct WalUsage WalUsage;
 typedef struct WorkerNodeInstrumentation WorkerNodeInstrumentation;
+typedef struct WindowAggState WindowAggState;
 
 
 /* ----------------
@@ -1073,6 +1074,41 @@ typedef struct SubPlanState
 	FmgrInfo   *cur_eq_funcs;	/* equality functions for LHS vs. table */
 	ExprState  *cur_eq_comp;	/* equality comparator for LHS vs. table */
 } SubPlanState;
+
+typedef struct RprNavState
+{
+	NodeTag		type;
+
+	WindowAggState *winstate;
+	RPRNavExpr *rprnavexpr;
+
+	/*
+	 * Resolved navigation offsets for this execution, captured from
+	 * winstate->rprNavOffsets at expression compile time.  These live in
+	 * executor state (not on the RPRNavExpr) because plan trees are read-only
+	 * and may be shared by concurrent executions.
+	 */
+	int64		offset;			/* inner offset */
+	int64		compound_offset;	/* outer offset for compound nav */
+
+	int16		resulttyplen;	/* RESTORE: result type length */
+	bool		resulttypbyval; /* RESTORE: result pass-by-value? */
+} RprNavState;
+
+/*
+ * RprNavOffsets - one entry of WindowAggState.rprNavOffsets
+ *
+ * Associates an RPRNavExpr from the (read-only) plan tree with its offsets
+ * as resolved by eval_define_offsets() at executor startup.  The plan node
+ * pointer serves as lookup key; ExecInitExprRec copies the values into the
+ * RprNavState of each compiled navigation expression.
+ */
+typedef struct RprNavOffsets
+{
+	RPRNavExpr *nav;			/* plan-tree node (lookup key) */
+	int64		offset;			/* resolved inner offset */
+	int64		compound_offset;	/* resolved outer offset */
+} RprNavOffsets;
 
 /*
  * DomainConstraintState - one item to check during CoerceToDomain
@@ -2727,6 +2763,12 @@ typedef struct WindowAggState
 	TupleTableSlot *temp_slot_2;
 
 	/* RPR navigation */
+
+	/*
+	 * per-execution resolved nav offsets: list of RprNavOffsets, keyed by
+	 * RPRNavExpr pointer; built by eval_define_offsets()
+	 */
+	List	   *rprNavOffsets;
 	int64		navMaxOffset;	/* max backward nav offset, -1 means infinite
 								 * offset, retain all */
 	bool		hasFirstNav;	/* FIRST() present in DEFINE */
