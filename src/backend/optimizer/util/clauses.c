@@ -2848,6 +2848,40 @@ eval_const_expressions_mutator(Node *node,
 
 				return (Node *) newexpr;
 			}
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *expr = (RPRNavExpr *) node;
+				Expr	   *arg;
+				Expr	   *offset_arg;
+				Expr	   *compound_offset_arg;
+				RPRNavExpr *newexpr;
+
+				/* Now, recursively simplify the arg */
+				arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->arg, context);
+
+				/* ... and the offset_arg expression */
+				offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->offset_arg,
+												   context);
+
+				/* ... and the compound_offset_arg expression */
+				compound_offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->compound_offset_arg,
+												   context);
+
+				/* And build the replacement RPRNavExpr node */
+				newexpr = makeNode(RPRNavExpr);
+				newexpr->kind = expr->kind;
+				newexpr->arg = arg;
+				newexpr->offset_arg = offset_arg;
+				newexpr->compound_offset_arg = compound_offset_arg;
+				newexpr->resulttype = expr->resulttype;
+				newexpr->resultcollid = expr->resultcollid;
+				newexpr->location = expr->location;
+
+				return (Node *) newexpr;
+			}
 		case T_FuncExpr:
 			{
 				FuncExpr   *expr = (FuncExpr *) node;

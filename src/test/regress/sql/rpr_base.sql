@@ -1330,6 +1330,39 @@ CREATE TABLE rpr_nav (id INT, val INT);
 INSERT INTO rpr_nav VALUES
     (1, 10), (2, 20), (3, 15), (4, 25), (5, 30);
 
+-- Avoid evaluating the inner argument expression when the previous row is out
+-- of range or does not exist
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is not null) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val is not null) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS FIRST(val is not null) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val is not null) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is null) is null);
+
+WITH t(id, v) AS (VALUES (1, 10), (2, 20))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+
+-- test DEFINE clause expression constant folding.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+
 -- PREV function - reference previous row in pattern
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
