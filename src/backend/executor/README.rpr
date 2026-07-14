@@ -202,7 +202,14 @@ IV-2. The 6 Phases of buildRPRPattern()
 IV-3. Phase 1: Parse Tree Optimization
 
 After copying the parser-generated parse tree, the following optimizations are
-applied:
+applied.
+
+A rewrite must keep not only the set of matchable lengths but also which
+match is preferred.  Several of them can move a repetition's exit decision
+past a choice point inside the body, which leftmost-choice-first (7.2) makes
+observable, so they are gated on the body consuming a fixed number of rows.
+Alternatives of equal length count as fixed: they pick different variables,
+never different rows.
 
   (a) SEQ flattening: Unwrap nested SEQ nodes
       SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
@@ -212,24 +219,34 @@ applied:
       A A -> A{2}
       A{2,3} A{1,2} -> A{3,5}
 
-  (c) Consecutive group merging: Merge repeated identical groups
+  (c) Consecutive group merging: Merge repeated identical groups whose
+      body consumes a fixed number of rows
       (A B)+ (A B)+ -> (A B){2,INF}
+      (A | B B)+ (A | B B)+ stays as-is (how the iterations split between
+      the two groups is a choice the merged form does not have)
 
   (d) Consecutive ALT merging: Merge repeated identical ALT nodes
       (A | B) (A | B) (A | B) -> (A | B){3}
 
-  (e) Prefix/suffix merging: Merge identical sequences before/after
-      a group
+  (e) Prefix/suffix merging: Merge an identical sequence before or after
+      a group.  A prefix copy is mandatory and comes before the group, so
+      it always merges; a suffix copy merges only when the body consumes a
+      fixed number of rows.
       A B (A B)+ -> (A B){2,INF}
 
   (f) ALT flattening and deduplication
       (A | (B | C)) -> (A | B | C)
       (A | B | A) -> (A | B)
 
-  (g) Quantifier multiplication: Collapse nested quantifiers when safe
+  (g) Quantifier multiplication: Collapse nested quantifiers when the
+      achievable counts are contiguous and the preferred match does not
+      move
       (A+)+ -> A+
       (A{2,3}){5} -> A{10,15}
       (A{2,})* stays as-is (count 1 unreachable; A* would be wrong)
+      (A{2,3}){1,2} stays as-is (counts contiguous, but the nested form
+      settles the first iteration first and prefers three rows where
+      A{2,6} takes four)
 
   (h) Single-child unwrap
       SEQ(A) -> A,  (A){1,1} -> A
