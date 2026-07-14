@@ -1790,6 +1790,107 @@ WINDOW w AS (
     DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags)
 );
 
+-- Optional VAR at the head of the body, re-entered across iterations:
+-- (B? A+){2} with no B rows.  Both iterations skip B and re-enter A.
+WITH test_optvar_quant_reentry AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_optvar_quant_reentry
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    INITIAL
+    PATTERN ((B? A+){2})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- A skip path that lands on the group's END still counts that iteration:
+-- (UP DOWN?)+ over a rising run, where DOWN never matches.
+WITH test_skip_lands_on_end AS (
+    SELECT * FROM (VALUES
+        (1, 100),
+        (2, 110),
+        (3, 120)
+    ) AS t(id, price)
+)
+SELECT id, price,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_skip_lands_on_end
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    INITIAL
+    PATTERN ((UP DOWN?)+)
+    DEFINE
+        UP AS price > PREV(price),
+        DOWN AS price < PREV(price)
+);
+
+-- Deep giveback: A+ swallows every overlapping row, then B{3} fails and
+-- A+ must surrender three rows in a row.  The failure is discovered five
+-- rows away from the branch point, not adjacent to it.
+WITH test_quant_deep_giveback AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['A','B']),
+        (5, ARRAY['A','B']),
+        (6, ARRAY['A','B']),
+        (7, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_deep_giveback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B{3} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- A+ B+ A+ over rows that are all A and B: three quantifiers draw from one
+-- pool, so shrinking the first changes what the other two can take.  They
+-- must renegotiate jointly, not one at a time.
+WITH test_quant_coupled_spans AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['A','B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_coupled_spans
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B+ A+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
 -- ============================================================
 -- Pathological Pattern Runtime Protection
 -- ============================================================
@@ -2085,6 +2186,50 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
+-- Preference beats length even when the preferred branch matches empty: the
+-- A* branch reaches FIN with no rows consumed and nfa_advance_alt stops there,
+-- so B is never expanded on a row where it would have matched.
+WITH test_alt_empty_pref AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A', 'B']),
+        (2, ARRAY['_', 'B']),
+        (3, ARRAY['A', 'B']),
+        (4, ARRAY['_', 'B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags, count(*) OVER w AS n
+FROM test_alt_empty_pref
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (A* | B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Swapping the branches makes B preferred, so every row matches one row.
+WITH test_alt_empty_pref AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A', 'B']),
+        (2, ARRAY['_', 'B']),
+        (3, ARRAY['A', 'B']),
+        (4, ARRAY['_', 'B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags, count(*) OVER w AS n
+FROM test_alt_empty_pref
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (B | A*)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
 -- ALT with reluctant: (A+? | B+) - A branch is reluctant, B is greedy.
 -- Row 1 matches both A and B. A+? exits immediately (match 1-1).
 WITH test_alt_reluctant AS (
@@ -2110,7 +2255,8 @@ WINDOW w AS (
 
 -- Optional first branch in ALT with quantifier: (A? | B){1,2}
 -- First branch A? exit path may loop back to ALT and trigger cycle
--- detection during DFS.  All branches must receive correct counts.
+-- detection during DFS.  On a B row the A? branch still succeeds with an
+-- empty match, which outranks the B branch, so the match is empty.
 WITH test_alt_opt_first AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -2433,6 +2579,32 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
+-- ((B C)* | A): optional group as a non-last branch.  Where B C does start
+-- the group consumes it (row 2); elsewhere the branch still succeeds with a
+-- zero match, and that outranks the A branch, so A never fires (row 4).
+WITH test_alt_nonlast_optgroup AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['_']),
+        (2, ARRAY['B']),
+        (3, ARRAY['C']),
+        (4, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_nonlast_optgroup
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((B C)* | A)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
 -- (((B C)* | A) D): the ALT is followed by D, so a zero-match (B C)* must
 -- continue into D.  Row 4 (a lone D) exercises that; row 1 is the B C D match.
 WITH test_alt_optgroup_then_elem AS (
@@ -2481,6 +2653,159 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((B C)* D | A)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
+-- ((B C)*? | A): a reluctant optional group as a branch prefers zero
+-- iterations, so the first branch matches empty on every row and the A
+-- branch never fires.
+WITH test_alt_reluctant_optgroup AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['C']),
+        (3, ARRAY['A']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_reluctant_optgroup
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((B C)*? | A)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- Same variable re-entered across iterations: (A+ | B){2} on an all-A
+-- partition.  Both iterations take the A+ branch, so the second one re-enters
+-- VAR A with a higher iteration count -- a new state, not a cycle.
+WITH test_alt_quant_reentry AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_quant_reentry
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    INITIAL
+    PATTERN ((A+ | B){2})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Branch order does not change the match: (B | A+){2} is the same.
+WITH test_alt_quant_reentry_order AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_quant_reentry_order
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    INITIAL
+    PATTERN ((B | A+){2})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Hand-unrolled form.  mergeConsecutiveAlts rolls it back up to {2}, so the
+-- match must be the same as the two above.
+WITH test_alt_quant_unrolled AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_quant_unrolled
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    INITIAL
+    PATTERN ((A+ | B) (A+ | B))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- ((A B) | (C D))+ with both branches two rows wide and every row shared:
+-- the branch taken at one iteration decides which rows remain for the next.
+WITH test_alt_multirow_branches AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','C']),
+        (2, ARRAY['B','D']),
+        (3, ARRAY['A','C']),
+        (4, ARRAY['B','D']),
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_multirow_branches
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (((A B) | (C D))+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
+-- Same rows, branches written in the other order.  Both branches match the
+-- same rows here, so the result must not change: the classification does,
+-- but the frame does not.
+WITH test_alt_multirow_swapped AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','C']),
+        (2, ARRAY['B','D']),
+        (3, ARRAY['A','C']),
+        (4, ARRAY['B','D']),
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_multirow_swapped
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (((C D) | (A B))+)
     DEFINE
         A AS 'A' = ANY(flags),
         B AS 'B' = ANY(flags),
@@ -2682,13 +3007,10 @@ WINDOW w AS (
 );
 
 -- Exact outer quantifier over a variable-length body
--- ((A | B B){1,2}){2} is by definition (A | B B){1,2} (A | B B){1,2}, so the
--- two must prefer the same match.  The optimizer must not collapse the nested
--- form to (A | B B){2,4}: the alternation branches consume a different number
--- of rows, so moving an iteration across the outer block boundary changes
--- which rows are matched.  The collapsed form stops at A A (rows 1-2), while
--- the nested form, whose second block must still take an iteration, prefers
--- A (B B) A A (rows 1-5).
+-- (X{1,2}){2} is by definition X{1,2} X{1,2}, so the two must prefer the same
+-- match.  Collapsing to (A | B B){2,4} does not: the branches consume unequal
+-- rows, so moving an iteration across the block boundary changes which rows
+-- match.  The third query below shows the collapsed form's own preference.
 WITH test_nested_alt_body AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -2736,9 +3058,8 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- The collapsed form, written by hand.  It admits the same iteration counts as
--- the two above, but it is a different pattern and prefers a different match:
--- with no block boundary to force a second iteration it stops at rows 1-2.
+-- The collapsed form, written by hand: same iteration counts as the two above,
+-- but with no block boundary forcing a second iteration it stops at rows 1-2.
 -- That difference is why the two above must not be rewritten into this one.
 WITH test_nested_alt_body AS (
     SELECT * FROM (VALUES
@@ -2761,6 +3082,248 @@ WINDOW w AS (
     DEFINE
         A AS 'A' = ANY(flags),
         B AS 'B' = ANY(flags)
+);
+
+-- Re-entry into a group whose body always consumes rows
+-- A body that cannot match empty consumes a row on every derivation, so a
+-- loop-back into it is progress, not a cycle.  Both forms must find the same
+-- match: (X){3} is by definition X X X.
+WITH test_reentry_consuming AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A']),
+        (6, ARRAY['A','B']),
+        (7, ARRAY['B']),
+        (8, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_reentry_consuming
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((A | B B){1,3}){3})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- The same pattern written out.  Must give the same match as the nested form.
+WITH test_reentry_consuming AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A']),
+        (6, ARRAY['A','B']),
+        (7, ARRAY['B']),
+        (8, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_reentry_consuming
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B B){1,3} (A | B B){1,3} (A | B B){1,3})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Empty iteration followed by a consuming one, below min
+-- A? is tried before B, so on row 1 the first two iterations go empty and the
+-- third takes B, matching rows 1-2.  The longer A B C match ranks lower: it
+-- abandons A? in the first iteration (7.2.4 -- length breaks prefix ties only).
+WITH test_empty_then_consume AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_empty_then_consume
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A? | B){3} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- The same pattern written out, with the copies renamed so that no rewrite
+-- can fold them back into a loop.  Must give the same match.
+WITH test_empty_then_consume AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_empty_then_consume
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A? | B) (D? | E) (F? | G) C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'A' = ANY(flags),
+        E AS 'B' = ANY(flags),
+        F AS 'A' = ANY(flags),
+        G AS 'B' = ANY(flags)
+);
+
+-- Bound above the empty-then-consume cases above.  The rows are the same at
+-- every bound from 2 up while the derivation shifts, so a shortcut through
+-- the below-min counts first shows here, where they are not adjacent.
+WITH test_empty_then_consume_bound AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A','C']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_empty_then_consume_bound
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A? | B){4} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- Recursion depth of the same below-min path: the fall-through advances the
+-- count by one empty iteration at a time, so the depth follows the bound.
+-- Reduced stack so the limit is reached quickly.
+SET max_stack_depth = '100kB';
+WITH test_below_min_depth AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_below_min_depth
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A? | B){10000} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+RESET max_stack_depth;
+
+-- (A+)+ B with an overlap row: the inner A+ must take row 3 as A, leaving
+-- row 4 for B.  Nested unbounded quantifiers over a row that satisfies both
+-- the quantified variable and its successor.
+WITH test_nest_unbounded_overlap AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nest_unbounded_overlap
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A+)+ B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- ((A+ B)+ C)+ D: three unbounded quantifiers at three depths, every row
+-- shared with its successor.  Iteration boundaries at each level can be
+-- drawn several ways over the same rows.
+WITH test_nest_three_levels AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B','C']),
+        (4, ARRAY['C','D']),
+        (5, ARRAY['D'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nest_three_levels
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (((A+ B)+ C)+ D)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
+-- ((A | B)+)+ C: alternation nested inside two unbounded quantifiers, with
+-- rows satisfying both alternatives.
+WITH test_nest_alt_unbounded AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B','C']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nest_alt_unbounded
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (((A | B)+)+ C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
 );
 
 -- ============================================================
@@ -2886,6 +3449,54 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 )
 ORDER BY mode, id;
+
+-- A* under SKIP PAST LAST ROW: row 1 matches empty, which consumes nothing
+-- and so must not move the skip landing.  Row 2 still starts its own match.
+WITH test_skip_past_after_empty AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['_']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_skip_past_after_empty
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A*)
+    DEFINE
+        A AS 'A' = ANY(flags)
+);
+
+-- (A B)* C: row 1 matches C alone with the group taken zero times, so the
+-- landing is row 2 and the A B C match at rows 2-4 is still found.
+WITH test_skip_past_zero_iterations AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['C']),
+        (2, ARRAY['A']),
+        (3, ARRAY['B']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_skip_past_zero_iterations
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B)* C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
 
 -- ============================================================
 -- INITIAL Mode (Runtime)
@@ -3500,6 +4111,217 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
+-- (A (B*?)+?)+ : a reluctant unbounded quantifier over a nullable group,
+-- inside an outer quantifier.  The empty iteration ends the inner loop.
+WITH test_cycle_reluctant_nullable AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_cycle_reluctant_nullable
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)+?)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Same body under a bounded outer quantifier with lower bound zero.
+WITH test_cycle_reluctant_bounded AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_cycle_reluctant_bounded
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)+?){0,2})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Greedy inner over the same nullable group: the preferred path consumes a
+-- row and parks in the frontier, so it cannot recurse through epsilon.
+WITH test_cycle_greedy_nullable AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_cycle_greedy_nullable
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)+){2,})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Non-nullable inner body: every derivation consumes a row, so no empty
+-- iteration exists and the guard has nothing to do.
+WITH test_cycle_nonnullable_inner AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['A']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_cycle_nonnullable_inner
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B+)+?){2,})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Reluctant unbounded quantifier over a nullable group, inside an outer
+-- quantifier whose lower bound is above one.  Below the bound the guard
+-- must keep looping without unbounded epsilon recursion: each empty inner
+-- iteration advances the count until the bound is met.  Two iterations
+-- (one A each, inner empty) satisfy min=2 and match rows 1-2.
+WITH test_cycle_reluctant_below_min AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_cycle_reluctant_below_min
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)+?){2,})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Same shape with a reluctant outer bound: stops at exactly two iterations
+-- even though a third A row is available.
+WITH test_cycle_reluctant_outer_min AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_cycle_reluctant_outer_min
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)+?){2,}?)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- ------------------------------------------------------------
+-- Preferment guards: the path explored second must not record
+-- over a match the first one already made
+-- ------------------------------------------------------------
+--
+-- Where two paths leave the same element the first is the preferred one, so
+-- once it has recorded a match the second must not run.  Both derivations
+-- cover the same rows below, so the output is the same either way; what
+-- fails when a guard is removed is an assertion, in a cassert build.
+
+-- Entering a group before skipping it.
+WITH test_guard_begin_enter AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_guard_begin_enter
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)*){1,3})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Below the lower bound, looping back before the fast-forward.
+WITH test_guard_end_below_min AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_guard_end_below_min
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? B?){3,4})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Between the bounds, looping before the exit.  Here the second path parks
+-- a state instead of reaching FIN.
+WITH test_guard_end_loop_exit AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_guard_end_loop_exit
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A (B*?)+){2,3})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
 -- ============================================================
 -- Standard Clause 7: Formal Pattern Matching Rules
 -- ISO/IEC 19075-5, Clause 7
@@ -3556,6 +4378,106 @@ WINDOW w AS (
     DEFINE
         A AS 'A' = ANY(flags),
         B AS 'B' = ANY(flags)
+);
+
+-- (A | B B | C C C): three alternatives, all viable on every row.
+-- Preferment order is A, BB, CCC: the first alternative wins even though
+-- the later ones would match longer.
+WITH test_alt_three_way AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B','C']),
+        (2, ARRAY['A','B','C']),
+        (3, ARRAY['A','B','C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_three_way
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A | B B | C C C))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- ((A | B | C)+): three alternatives ranked on every iteration, not just
+-- once.  Each row carries all three flags.
+WITH test_alt_three_way_loop AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B','C']),
+        (2, ARRAY['A','B','C']),
+        (3, ARRAY['A','B','C']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_three_way_loop
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A | B | C)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (A B | A C): branches share the prefix A, so the choice is only decided
+-- at row 2, which carries both B and C.  The first alternative wins there.
+WITH test_alt_shared_prefix AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B','C']),
+        (3, ARRAY['C']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_shared_prefix
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A B | A C))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (A B C | A B): the first alternative is the longer one and it fits, so
+-- length and written order agree.  Compare with the reverse below.
+WITH test_alt_shared_prefix_long_first AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['C']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_alt_shared_prefix_long_first
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A B C | A B))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
 );
 
 -- ------------------------------------------------------------
@@ -3701,6 +4623,156 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (((A | B){1,2}?))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- A+? B where every row is both A and B: stopping and continuing are both
+-- viable at every step, so reluctance is actually contested.  Without the
+-- overlap the reluctant path is never tested against a live alternative.
+WITH test_quant_reluctant_contested AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_reluctant_contested
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+? B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- A+ B over the same rows: greedy takes as many as it can while still
+-- leaving a B behind.  Contrast with the reluctant case above.
+WITH test_quant_greedy_contested AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A','B']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_greedy_contested
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- (A+ B)+? C: the outer quantifier is reluctant, so it stops after one
+-- iteration and takes the C available at row 3.  Row 3 is also an A, which
+-- would let a second iteration run; reluctance declines it.
+WITH test_quant_reluctant_outer AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['A','C']),
+        (4, ARRAY['B']),
+        (5, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_reluctant_outer
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B)+? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (A+ B)+ C over the same rows: outer greed takes the second iteration and
+-- lands on the C at row 5 instead.  Contrast with the reluctant outer above.
+WITH test_quant_greedy_outer AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['A','C']),
+        (4, ARRAY['B']),
+        (5, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_greedy_outer
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B)+ C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- A{2}? B: an exact bound leaves no choice, so the reluctant mark must not
+-- change anything.  Overlap on rows 2-3 would expose a bound lowered to
+-- {0,2}? or {1,2}?.
+WITH test_quant_reluctant_exact AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_reluctant_exact
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A{2}? B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- A{2} B: the greedy spelling of the same bound, for contrast.
+WITH test_quant_exact AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['A','B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_quant_exact
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A{2} B)
     DEFINE
         A AS 'A' = ANY(flags),
         B AS 'B' = ANY(flags)
@@ -3854,6 +4926,58 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
+-- (A? | B){3}: an empty iteration below min fills the lower bound (STR06),
+-- and it must outrank the later branch.  Row 2 is B only, so A? derives empty
+-- there; repeating that derivation fills the remaining iterations and the
+-- match ends at row 1.  Taking branch B instead would consume rows 2-3.
+WITH test_728_empty_fills_min AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A', 'B']),
+        (2, ARRAY['B']),
+        (3, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_empty_fills_min
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B){3})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- The same pattern unrolled.  Consecutive identical alternations are merged
+-- into the rolled form above, so the two must agree.
+WITH test_728_empty_fills_min_unrolled AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A', 'B']),
+        (2, ARRAY['B']),
+        (3, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_empty_fills_min_unrolled
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B) (C? | D) (E? | F))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'A' = ANY(flags),
+        D AS 'B' = ANY(flags),
+        E AS 'A' = ANY(flags),
+        F AS 'B' = ANY(flags)
+);
+
 -- (A? B?){2,3}: multi-element nullable body with real matches
 -- Body A? B? is nullable (both optional), but A and B DO match rows.
 -- Real (non-empty) iterations loop back normally; fast-forward only
@@ -3931,6 +5055,211 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN ((A? B?){2,3})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+
+-- The stopping rule also governs an alternation body.  On A,B the greedy
+-- (A? | B)* takes A in iteration 1; in iteration 2 the preferred branch A?
+-- matches empty, so the quantifier stops and B never consumes row 2.
+WITH test_empty_stop_alt_body AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_empty_stop_alt_body
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B)*)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- With min = max the group's own greed says nothing, so the body decides
+-- whether the empty match is preferred: {n}? must equal {n}.  A? prefers to
+-- consume (both forms take two rows); A?? prefers empty (both match empty).
+WITH test_fixed_quant_body_greed AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       count(*) OVER g  AS greedy_body,      -- ((A?){2})
+       count(*) OVER gr AS greedy_body_rel,  -- ((A?){2}?)
+       count(*) OVER r  AS rel_body,         -- ((A??){2})
+       count(*) OVER rr AS rel_body_rel      -- ((A??){2}?)
+FROM test_fixed_quant_body_greed
+WINDOW g  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A?){2}))
+              DEFINE A AS 'A' = ANY(flags)),
+       gr AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A?){2}?))
+              DEFINE A AS 'A' = ANY(flags)),
+       r  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A??){2}))
+              DEFINE A AS 'A' = ANY(flags)),
+       rr AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A??){2}?))
+              DEFINE A AS 'A' = ANY(flags))
+ORDER BY id;
+-- (A* | B)*: A* is the preferred alternative and matches empty at row 3,
+-- which ends the loop by the lower-bound stopping rule.  B is never tried,
+-- so the match stops short of the B rows even though taking them would be
+-- longer.  Perl agrees: (a*|b)* against "aabb" matches "aa".
+WITH test_728_nullable_alt_first AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_nullable_alt_first
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A* | B)*)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- (B | A*)*: same body, alternatives swapped.  B is preferred and consumes,
+-- so no empty iteration arises and the loop reaches the B rows.
+WITH test_728_nullable_alt_second AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_nullable_alt_second
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((B | A*)*)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- (A+ | B)*: the first alternative is not nullable, so it cannot produce an
+-- empty iteration and the loop reaches the B rows.  Compare with (A* | B)*.
+WITH test_728_nonnullable_alt_first AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_nonnullable_alt_first
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A+ | B)*)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- (A? | B){2,3}: the stop rule binds at the lower bound even when the
+-- upper bound could still admit more iterations.  Iterations one and two
+-- go empty via A?, which stops the loop at min; C then fails at row 1 and
+-- backtracking REPLACES iteration two with B instead of extending, so the
+-- match runs B, A, C = rows 1-3.  Perl agrees: (?:a?|b){2,3}c backtracks
+-- the same way.  An engine that keeps iterating after the empty stop
+-- returns rows 1-2 via the shorter empty-empty-B derivation instead.
+WITH test_728_stop_binds_at_min AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_stop_binds_at_min
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B){2,3} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (A? | B){3} C over the same rows: with an exact bound the two empty
+-- iterations sit below min, so the loop must continue; the third takes B
+-- and the match is rows 1-2.  Contrast with the {2,3} case above.
+WITH test_728_exact_below_min AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_exact_below_min
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B){3} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (A? | B){2,}: the stopping rule applies above the lower bound as well.
+-- Two iterations consume the A rows and satisfy min=2; the third matches
+-- empty via A? and ends the loop before any B is taken.
+WITH test_728_nullable_alt_min2 AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['B']),
+        (4, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_nullable_alt_min2
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B){2,})
     DEFINE
         A AS 'A' = ANY(flags),
         B AS 'B' = ANY(flags)

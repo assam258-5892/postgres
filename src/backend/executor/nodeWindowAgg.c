@@ -3068,8 +3068,8 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 			sizeof(int32) * node->rpPattern->maxDepth;
 		nfaVisitedNWords =
 			(node->rpPattern->numElements - 1) / BITS_PER_BITMAPWORD + 1;
-		winstate->nfaVisitedElems = palloc0(sizeof(bitmapword) *
-											nfaVisitedNWords);
+		winstate->nfaVisitedEnds = palloc0(sizeof(bitmapword) *
+										   nfaVisitedNWords);
 		/* High-water mark sentinels: no bits set yet. */
 		winstate->nfaVisitedMinWord = PG_INT16_MAX;
 		winstate->nfaVisitedMaxWord = -1;
