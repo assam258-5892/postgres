@@ -2365,11 +2365,12 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_struct'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_struct;
 -- Execution semantics (deparse cannot show reluctant shortest-match).  The
--- rpr_glue rows -- an A-run followed by B rows -- make the '|B' alternative
--- reachable: with "*" the greedy form matches the whole run while the
--- reluctant form matches empty; with "+" the greedy form matches the run and
--- the reluctant form matches one row, and on a B row (where "A+" fails) the B
--- alternative fires.
+-- rpr_glue rows -- an A-run followed by B rows -- show when the '|B'
+-- alternative is reachable.  With "*" the first branch always succeeds, so B
+-- never fires: the greedy form matches the whole run and the reluctant form
+-- matches empty, and on a B row the empty match still outranks B.  With "+"
+-- the first branch fails on a B row, so there the B alternative fires; on an
+-- A row the greedy form matches the run and the reluctant form one row.
 SELECT id, val,
        count(*) OVER gs AS gstar, count(*) OVER rs AS rstar,
        count(*) OVER gp AS gplus, count(*) OVER rp AS rplus

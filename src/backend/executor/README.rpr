@@ -295,14 +295,19 @@ Element flags (1 byte, bitmask):
         loop-back so cycle detection doesn't kill legitimate
         matches. (IV-4b)
 
-  0x04  RPR_ELEM_ABSORBABLE_BRANCH  (VAR, BEGIN, END, ALT)
+  0x04  RPR_ELEM_EMPTY_PREFERRED    (END)
+        Group body prefers the empty match over a consuming one.
+        Orders the fast-forward ahead of the loop-back below min,
+        where the group's own greed says nothing. (IV-4b)
+
+  0x08  RPR_ELEM_ABSORBABLE_BRANCH  (VAR, BEGIN, END, ALT)
         Element lies within an absorbable region.  Used at runtime to
         track whether the current NFA state is in an absorbable
         context. See "IV-5. Absorbability Analysis" and
         "VIII-2. Solution: Context Absorption" for more details about
         absorption.
 
-  0x08  RPR_ELEM_ABSORBABLE         (VAR, END)
+  0x10  RPR_ELEM_ABSORBABLE         (VAR, END)
         Absorption comparison point.  Where to compare consecutive
         iterations for absorption.
           - Simple unbounded VAR (A+): set on the VAR itself
@@ -311,8 +316,9 @@ Element flags (1 byte, bitmask):
   Accessor macros:
     RPRElemIsReluctant(e)        (e)->flags & 0x01
     RPRElemCanEmptyLoop(e)       (e)->flags & 0x02
-    RPRElemIsAbsorbableBranch(e) (e)->flags & 0x04
-    RPRElemIsAbsorbable(e)       (e)->flags & 0x08
+    RPRElemIsEmptyPreferred(e)   (e)->flags & 0x04
+    RPRElemIsAbsorbableBranch(e) (e)->flags & 0x08
+    RPRElemIsAbsorbable(e)       (e)->flags & 0x10
 
 Roles of next and jump:
 
@@ -440,31 +446,36 @@ At runtime (nfa_advance), the flag controls Depth-First Search
 The absorption optimization requires greedy quantifiers. Reluctant
 quantifiers are excluded from absorbability analysis (see IV-5).
 
-IV-4b. Empty Loop Flag (RPR_ELEM_EMPTY_LOOP)
+IV-4b. Empty Match Flags (RPR_ELEM_EMPTY_LOOP, RPR_ELEM_EMPTY_PREFERRED)
 
-The empty-loop flag is set during Phase 4 (fillRPRPatternGroup) on the END
-element when the group body is nullable -- i.e., every path through the
-body can match zero rows (all children are nullable).
+Both flags are set during Phase 4 (fillRPRPatternGroup) on the END element
+and describe the group's body, not the group itself.  fillRPRPattern*
+returns them for every node and the END inherits the body's pair: a
+concatenation carries a bit only when every child does (AND), an
+alternation is nullable when any branch is (OR) but takes its preference
+from the first branch alone, since leftmost-choice-first makes that the
+preferred one.
 
-Example patterns that trigger this flag:
+RPR_ELEM_EMPTY_LOOP -- the body is nullable, i.e. every path through it
+can match zero rows:
 
   (A?)*    A is nullable (min=0), so group body is nullable -> END gets flag
   (A? B?)+ Both children nullable -> body nullable -> END gets flag
   (A | B*) B* is nullable, making the ALT nullable -> END gets flag
 
-The flag works in conjunction with the empty match cycle detection
-(elemIdx visited bitmap). Without this flag, cycle detection alone would
-cause legitimate matches to fail.
+It marks the END for the cycle detection of IX-6, which only ever tests a
+nullable END, and it lets nfa_advance_end offer a fast-forward exit beside
+the loop-back below min.  Without it, (A*){2,3} could not reach its lower
+bound: iteration 1 consumes every available row, iteration 2 derives an
+empty match, and nothing would carry the count to min(2).
 
-Problem example: (A*){2,3}
-  - Iteration 1: A* consumes all available rows -> count=1, END reached
-  - Loop-back for iteration 2: A* matches zero rows -> END reached again
-  - Cycle detection sees the same elemIdx on the same row -> state killed
-  - count never reaches min(2) -> match fails (incorrect)
-
-With the RPR_ELEM_EMPTY_LOOP flag, nfa_advance_end creates two paths:
-the normal loop-back (which cycle detection will eventually kill) and
-a fast-forward exit clone that bypasses the loop entirely.
+RPR_ELEM_EMPTY_PREFERRED -- the body's preferred derivation is the empty
+one, which is what orders those two paths.  A bare variable consumes a
+row; only a reluctant quantifier that may take zero repetitions prefers to
+skip it.  The group's own greed cannot decide this: in ((A?){2}?) min
+equals max, so the group has no choice of iteration count left to be
+greedy or reluctant about, while the body A? still prefers to consume a
+row.  The flag is what distinguishes ((A?){2}?) from ((A??){2}).
 (See IX-4(c) for detailed runtime behavior.)
 
 IV-5. Absorbability Analysis (RPR_ELEM_ABSORBABLE)
@@ -589,7 +600,7 @@ V-3. RPR Fields of WindowAggState
   nfaContextFree                Reuse pool for contexts
   nfaStateFree                  Reuse pool for states
   nfaVarMatched                 Per-row cache: varMatched[varId]
-  nfaVisitedElems               Bitmap for cycle detection
+  nfaVisitedEnds                Nullable ENDs reached in this DFS (cycle detection)
   nfaVisitedMinWord             Lowest bitmapword index touched since last reset
   nfaVisitedMaxWord             Highest bitmapword index touched since last reset
   nfaStateSize                  Precomputed size of RPRNFAState
@@ -663,8 +674,16 @@ the pattern. For example, the initial advance for PATTERN ((A | B) C):
 
   Result: Two states in the context {waiting for A, waiting for B}
 
-During the initial advance, reaching FIN is not recorded as a match.
-This is to prevent empty matches.
+Reaching FIN during the initial advance is recorded like any other
+match.  Since currentPos is pos - 1, the record has matchEndRow <
+matchStartRow: an empty match (RF_EMPTY_MATCH) if matchedState is set,
+otherwise unmatched (RF_UNMATCHED).
+
+The quantifier flavors reach it differently.  Reluctant min=0 (A*?, A??):
+the skip path reaches FIN first and early termination prunes the enter
+paths, so the empty match is final.  Greedy (A*): the enter path adds its
+VAR states before the skip path records FIN, so those states survive and
+may match a longer span on a later row.
 
 VI-3. Row Evaluation: rpr_evaluate_row()
 
@@ -1001,9 +1020,15 @@ so the state added first (= from the preferred branch) is retained.
 
 IX-3. Routing Function: nfa_route_to_elem()
 
-All inter-element transitions in the advance phase go through
-nfa_route_to_elem().
-This function branches its behavior based on the type of the next element:
+Most inter-element transitions in the advance phase go through
+nfa_route_to_elem(), but three callers reach nfa_advance_state()
+directly: nfa_advance() (each state it pops), nfa_advance_alt() (its
+per-branch clone), and nfa_route_to_elem()'s own skip path.  The result
+matches either way -- for a bypassed VAR, nfa_advance_var()'s count-zero
+handling produces what park-and-skip would -- so "a VAR not yet matched"
+is handled in two places.
+
+nfa_route_to_elem() branches on the type of the next element:
 
   If the next element is VAR:
     (1) Add the state to the context (nfa_add_state_unique)
@@ -1036,8 +1061,13 @@ IX-4. Per-Element advance Behavior
   Handles group entry.
   jump points to the element after END (= first element outside the group).
 
+  BEGIN does not reset the count at its depth; it only asserts the slot
+  is already zero.  Under the count-clear policy the previous occupant
+  of a depth slot clears it on the way out, so entry finds it clean.
+  See IX-4(c) and V-1.
+
   Greedy (default):
-    (1) Enter the group body (move via next, reset the count at that depth)
+    (1) Enter the group body (move via next)
     (2) If min=0, also add a group skip path (move via jump)
 
   Reluctant:
@@ -1060,6 +1090,11 @@ IX-4. Per-Element advance Behavior
       to never reach min. fast-forward resets counts[depth] to 0
       and exits via next (treating the remaining required iterations
       as empty matches).
+
+      The body decides which of the two comes first, not the group's own
+      greed: the fast-forward is explored first exactly when
+      RPR_ELEM_EMPTY_PREFERRED is set (IV-4b).  If it then reaches FIN,
+      the loop-back is dropped, as in the min <= count < max arm below.
 
   min <= count < max:
     Greedy: loop-back first, exit second
@@ -1117,7 +1152,7 @@ explosion.
 Because DFS order causes preferred-branch states to be added first,
 identical states from lower-priority branches are automatically discarded.
 
-IX-6. Cycle Detection: nfaVisitedElems
+IX-6. Cycle Detection: nfaVisitedEnds
 
 When a group body can produce an empty match,
 looping back from END may cause an infinite loop.
@@ -1136,22 +1171,58 @@ To prevent this:
       resolving the deadlock where count cannot increase due to empty
       matches.
 
-  (2) At runtime: initialize the nfaVisitedElems bitmap immediately before
+  (2) At runtime: initialize the nfaVisitedEnds bitmap immediately before
       DFS expansion of each state within advance (once per state).
-      During DFS, epsilon elements (END, ALT, BEGIN) are marked in the
-      bitmap at nfa_advance_state entry.  VAR elements are marked later
-      when added to the state list (nfa_add_state_unique), so that
-      legitimate loop-back to the same VAR in a new group iteration
-      (e.g., END -> ALT -> same VAR) is not blocked.
-      If a previously visited elemIdx is revisited, that path is terminated.
+      During DFS, nfa_advance_state marks an END carrying
+      RPR_ELEM_EMPTY_LOOP on entry, and nothing else.  Reaching a marked
+      END means the body derived an empty match for this iteration -- a
+      DFS takes only epsilon transitions, so no row was consumed since
+      the last visit.  The state is not discarded: it leaves the group
+      there, so that "leave the group" keeps its rank among the
+      alternatives (see IX-4(c)).
 
-  Note: the bitmap tracks only elemIdx and does not consider counts.
-  Therefore, legitimate revisits to the same elemIdx but with different
-  counts may also be blocked.  This only occurs when the group body is
-  nullable (all paths can match empty), causing END -> loop-back ->
-  skip -> END within a single DFS.  In such cases the END element has
-  the RPR_ELEM_EMPTY_LOOP flag, so the fast-forward exit (IX-4(c))
-  provides an alternative path that bypasses the cycle.
+  Nothing else is marked, because nothing else can cycle.  A revisit is
+  a cycle only when it carries no progress, and a state is really
+  (elemIdx, counts) -- the identity nfa_add_state_unique() compares.
+  A VAR consumes a row, and so does every derivation of a body that
+  cannot match empty; a loop-back into either is progress, not a cycle.
+  Marking them would discard legitimate re-entry and lose the match
+  outright: ((A | B B){1,3}){3} would then find no match at all.
+
+  The guard is min-aware: a marked END exits only at count >= min (an
+  empty iteration at or above the lower bound stops the quantifier,
+  TR 19075-5 7.2.8).  Below min the guard falls through to the normal
+  must-loop path instead, so the next iteration still runs and its
+  consuming branches park as usual -- a derivation that goes empty
+  first and consumes later stays reachable, and it is the preferred
+  one: ((A? | B){3} C) over rows {B},{A,C},{C} matches rows 1-2 by
+  going empty twice and taking B on the third iteration, not rows 1-3
+  by taking B on the first.  This terminates because every arrival at
+  an END increments its count, so the fall-through reaches min in
+  bounded steps and then exits through the guard.
+
+  The count advances one empty iteration at a time, and each step is a
+  recursion, so the cost follows the lower bound -- which the grammar
+  caps only at RPR_QUANTITY_INF.  The steps cannot be collapsed by
+  setting the count to the bound directly: the intermediate counts are
+  the enumeration order, and each one parks the body's consuming
+  branches at a rank of its own.  ((A? | B){4} C) over rows
+  {B},{A},{A,C},{C} matches rows 1-3, which needs the loop-back at
+  count 3 specifically.
+
+  That bound is on the count, not on the expansion.  Within one
+  expansion only a nullable END is marked, so ALT and BEGIN may be
+  re-entered any number of times; where several alternations in a row
+  have nullable branches, the expansion enumerates paths instead of
+  states and costs 2^k for k such alternations.  See the XXX at the
+  marking site in nfa_advance_state().
+
+  Marks are never cleared during a DFS.  Clearing the body's marks on a
+  below-min loop-back would disarm the guard for any nested reluctant
+  unbounded quantifier inside the body, whose empty iterations then
+  recurse without bound: (A (B*?)+?){2,} on a single matching row.  The
+  outer count does not advance while the inner one spins, so "the count
+  stops at min" is not on its own a termination argument.
 
 Chapter X  Match Result Processing
 ============================================================================
@@ -1486,8 +1557,8 @@ XII-5. Execution Optimization Summary
     the END -> BEGIN loop-back can continue indefinitely.
 
     Two mechanisms resolve this:
-    - A visited bitmap (nfaVisitedElems) blocks revisitation of the
-      same element, preventing infinite loops (safety)
+    - A visited bitmap (nfaVisitedEnds) blocks revisitation of the
+      same nullable END, preventing infinite empty loops (safety)
     - At an END with the RPR_ELEM_EMPTY_LOOP flag set, when
       count < min, the remaining required iterations are treated as
       empty matches and a fast-forward exit path out of the group is
@@ -1615,7 +1686,7 @@ Appendix B. Data Structure Relationship Diagram
     |--- nfaVarMatched: bool[] (per-row cache)
     |--- defineMatchStartDependent: Bitmapset* (match_start_dependent
     |        DEFINE vars; see VI-4)
-    |--- nfaVisitedElems: bitmapword* (cycle detection)
+    |--- nfaVisitedEnds: bitmapword* (cycle detection)
     |--- nfaVisitedMinWord / nfaVisitedMaxWord: int16
     |        (touched-word range for fast reset)
     |--- nfaLastProcessedRow: int64 (-1 = none)

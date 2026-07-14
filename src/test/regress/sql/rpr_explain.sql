@@ -546,6 +546,30 @@ WINDOW w AS (
     DEFINE A AS v % 3 <> 0
 );');
 
+-- Overlapping DEFINEs let two branches reach the same state, so this is the
+-- only case here with a nonzero merged count; the alt_merge names above mean
+-- the optimizer's merge of consecutive ALTs, not this counter.
+CREATE VIEW rpr_ev_state_dedup AS
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B){2,4})
+    DEFINE A AS v % 2 = 1, B AS v % 3 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_dedup'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B){2,4})
+    DEFINE A AS v % 2 = 1, B AS v % 3 = 0
+);');
+
 -- ============================================================
 -- Context Statistics Tests (peak, total, pruned + absorbed/skipped)
 -- ============================================================

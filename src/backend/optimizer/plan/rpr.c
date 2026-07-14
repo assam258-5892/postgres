@@ -75,14 +75,14 @@ static void scanRPRPattern(RPRPatternNode *node, char **varNames, int *numVars,
 static RPRPattern *makeRPRPattern(int numVars, int numElements,
 								  RPRDepth maxDepth, char **varNamesStack);
 static RPRVarId getVarIdFromPattern(RPRPattern *pat, const char *varName);
-static bool fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat,
-							  int *idx, RPRDepth depth);
-static bool fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat,
-								int *idx, RPRDepth depth);
-static bool fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat,
-							  int *idx, RPRDepth depth);
-static bool fillRPRPattern(RPRPatternNode *node, RPRPattern *pat,
-						   int *idx, RPRDepth depth);
+static RPRElemFlags fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat,
+									  int *idx, RPRDepth depth);
+static RPRElemFlags fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat,
+										int *idx, RPRDepth depth);
+static RPRElemFlags fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat,
+									  int *idx, RPRDepth depth);
+static RPRElemFlags fillRPRPattern(RPRPatternNode *node, RPRPattern *pat,
+								   int *idx, RPRDepth depth);
 static void finalizeRPRPattern(RPRPattern *result);
 
 static bool isFixedLengthChildren(RPRPattern *pattern, RPRElemIdx idx,
@@ -1269,12 +1269,16 @@ getVarIdFromPattern(RPRPattern *pat, const char *varName)
  * fillRPRPatternVar
  *		Fill a VAR pattern element.
  *
- * Returns true if this VAR is nullable (can match zero rows).
+ * Returns the empty-match flags for this VAR: RPR_ELEM_EMPTY_LOOP when it is
+ * nullable (min 0, can match zero rows), plus RPR_ELEM_EMPTY_PREFERRED when its
+ * preferred derivation is the empty one.  A bare variable consumes a row; only
+ * a reluctant quantifier that may take zero repetitions prefers to skip it.
  */
-static bool
+static RPRElemFlags
 fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 {
 	RPRPatternElement *elem = &pat->elements[*idx];
+	RPRElemFlags flags = 0;
 
 	memset(elem, 0, sizeof(RPRPatternElement));
 	elem->varId = getVarIdFromPattern(pat, node->varName);
@@ -1289,7 +1293,14 @@ fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		elem->flags |= RPR_ELEM_RELUCTANT;
 	(*idx)++;
 
-	return (node->min == 0);
+	if (node->min == 0)
+	{
+		/* nullable; a reluctant quantifier also prefers the empty match */
+		flags |= RPR_ELEM_EMPTY_LOOP;
+		if (node->reluctant)
+			flags |= RPR_ELEM_EMPTY_PREFERRED;
+	}
+	return flags;
 }
 
 /*
@@ -1310,16 +1321,20 @@ fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
  * END.jump points to the first child (loop-back path).
  * BEGIN.next and END.next are set later by finalizeRPRPattern().
  *
- * Returns true if this group is nullable.  A group is nullable when its
- * min is 0 (can be skipped entirely) or its body is nullable (every path
- * through the body can match zero rows).
+ * Returns the group's empty-match flags.  RPR_ELEM_EMPTY_LOOP is set when the
+ * group is nullable -- its min is 0 (can be skipped entirely) or its body is
+ * nullable (every path through the body can match zero rows).
+ * RPR_ELEM_EMPTY_PREFERRED is set when the group's preferred derivation is
+ * empty: a reluctant min-0 group prefers to take no iteration, and otherwise
+ * the group follows its body.  The END element inherits the body's bits.
  */
-static bool
+static RPRElemFlags
 fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 {
 	int			groupStartIdx = *idx;
 	int			beginIdx = -1;
-	bool		bodyNullable = true;
+	RPRElemFlags bodyFlags = RPR_ELEM_EMPTY_LOOP | RPR_ELEM_EMPTY_PREFERRED;
+	RPRElemFlags result;
 
 	/* Add BEGIN marker if group has non-trivial quantifier (not {1,1}) */
 	if (node->min != 1 || node->max != 1)
@@ -1342,11 +1357,9 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		groupStartIdx = *idx;	/* children start after BEGIN */
 	}
 
+	/* A concatenation is nullable / empty-preferred iff every child is (AND) */
 	foreach_node(RPRPatternNode, child, node->children)
-	{
-		if (!fillRPRPattern(child, pat, idx, depth + 1))
-			bodyNullable = false;
-	}
+		bodyFlags &= fillRPRPattern(child, pat, idx, depth + 1);
 
 	/* Add group end marker if group has non-trivial quantifier (not {1,1}) */
 	if (node->min != 1 || node->max != 1)
@@ -1366,13 +1379,8 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		if (node->reluctant)
 			endElem->flags |= RPR_ELEM_RELUCTANT;
 
-		/*
-		 * If the group body is nullable, mark the END element so that
-		 * nfa_advance_end can fast-forward the iteration count to min when
-		 * reached via empty-match skip paths.
-		 */
-		if (bodyNullable)
-			endElem->flags |= RPR_ELEM_EMPTY_LOOP;
+		/* The END carries the body's bits, not the group's; see README IV-4b */
+		endElem->flags |= bodyFlags;
 
 		(*idx)++;
 
@@ -1380,7 +1388,15 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		beginElem->jump = *idx; /* skip: go to after END */
 	}
 
-	return (node->min == 0 || bodyNullable);
+	result = bodyFlags;
+	if (node->min == 0)
+	{
+		/* skippable entirely; if reluctant, the group prefers to skip */
+		result |= RPR_ELEM_EMPTY_LOOP;
+		if (node->reluctant)
+			result |= RPR_ELEM_EMPTY_PREFERRED;
+	}
+	return result;
 }
 
 /*
@@ -1400,10 +1416,13 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
  * SEP is a marker, never a state: a branch's tail and a branch-terminal
  * group's BEGIN skip are redirected past the alternation.
  *
- * Returns true if any branch is nullable (OR semantics: one nullable
- * branch suffices for the alternation to produce an empty match).
+ * Returns the alternation's empty-match flags.  RPR_ELEM_EMPTY_LOOP is set if
+ * any branch is nullable (OR: one nullable branch suffices).
+ * RPR_ELEM_EMPTY_PREFERRED follows the first branch alone: lexicographic order
+ * makes it the preferred one, so whether the later branches prefer empty does
+ * not matter.
  */
-static bool
+static RPRElemFlags
 fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 {
 	ListCell   *lc;
@@ -1413,7 +1432,10 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 	List	   *altBranchStarts = NIL;
 	List	   *altEndPositions = NIL;
 	int			afterAltIdx;
-	bool		anyNullable = false;
+	RPRElemFlags altFlags = 0;	/* OR of branch EMPTY_LOOP bits */
+	RPRElemFlags firstFlags = 0;	/* first branch's flags (for
+									 * EMPTY_PREFERRED) */
+	bool		firstBranch = true;
 
 	/* Add alternation start marker */
 	elem = &pat->elements[*idx];
@@ -1434,10 +1456,18 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 	{
 		int			branchStart = *idx;
 		RPRPatternElement *sep;
+		RPRElemFlags branchFlags;
 
 		altBranchStarts = lappend_int(altBranchStarts, branchStart);
-		if (fillRPRPattern(alt, pat, idx, depth + 1))
-			anyNullable = true;
+		branchFlags = fillRPRPattern(alt, pat, idx, depth + 1);
+
+		/* nullable if ANY branch is; empty-preferred per the FIRST branch */
+		altFlags |= (branchFlags & RPR_ELEM_EMPTY_LOOP);
+		if (firstBranch)
+		{
+			firstFlags = branchFlags;
+			firstBranch = false;
+		}
 		altEndPositions = lappend_int(altEndPositions, *idx - 1);
 
 		/* SEP terminates this branch, so it sits at branch end + 1 */
@@ -1518,7 +1548,7 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 	list_free(altBranchStarts);
 	list_free(altEndPositions);
 
-	return anyNullable;
+	return altFlags | (firstFlags & RPR_ELEM_EMPTY_PREFERRED);
 }
 
 /*
@@ -1529,14 +1559,14 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
  * array.
  * Dispatches to type-specific fill functions.
  *
- * Returns true if the pattern is nullable (can match zero rows).
- * For SEQ nodes, all children must be nullable (AND).
+ * Returns the pattern's empty-match flags (RPR_ELEM_EMPTY_LOOP for nullable,
+ * RPR_ELEM_EMPTY_PREFERRED for empty-preferred).  For a SEQ, a concatenation is
+ * nullable / empty-preferred only when every child is, so the children's flags
+ * are AND-ed together.
  */
-static bool
+static RPRElemFlags
 fillRPRPattern(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 {
-	bool		allNullable = true;
-
 	/* Pattern nodes from parser are never NULL */
 	Assert(node != NULL);
 
@@ -1545,12 +1575,13 @@ fillRPRPattern(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 	switch (node->nodeType)
 	{
 		case RPR_PATTERN_SEQ:
-			foreach_node(RPRPatternNode, child, node->children)
 			{
-				if (!fillRPRPattern(child, pat, idx, depth))
-					allNullable = false;
+				RPRElemFlags flags = RPR_ELEM_EMPTY_LOOP | RPR_ELEM_EMPTY_PREFERRED;
+
+				foreach_node(RPRPatternNode, child, node->children)
+					flags &= fillRPRPattern(child, pat, idx, depth);
+				return flags;
 			}
-			return allNullable;
 
 		case RPR_PATTERN_VAR:
 			return fillRPRPatternVar(node, pat, idx, depth);
@@ -1563,7 +1594,7 @@ fillRPRPattern(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 	}
 
 	pg_unreachable();
-	return false;
+	return 0;
 }
 
 /*
