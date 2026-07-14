@@ -4711,8 +4711,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
          ->  Seq Scan on rpr_plan
 (7 rows)
 
--- Quantifier multiply: (A{2,3}){2,3} -> a{4,9}
--- outer range, child range: counts [4,6] U [6,9] = [4,9] are contiguous, so it folds
+-- Quantifier multiply refused: (A{2,3}){2,3} stays nested.
+-- The counts [4,6] U [6,9] = [4,9] are contiguous, but a bounded child with a
+-- lower bound to fall short of makes the nested form prefer a shorter match
+-- than a{4,9} would.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4721,7 +4723,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{4,9}
+   Pattern: (a{2,3}){2,3}
    Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
@@ -4843,8 +4845,8 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
          ->  Seq Scan on rpr_plan
 (7 rows)
 
--- (A{2,3}){2,4} -> a{4,12}  (outer range x child range, contiguous:
--- [4,6] U [6,9] U [8,12] = [4,12])
+-- (A{2,3}){2,4} stays nested for the same reason, even though the counts
+-- [4,6] U [6,9] U [8,12] = [4,12] are contiguous.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4853,7 +4855,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{4,12}
+   Pattern: (a{2,3}){2,4}
    Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
@@ -5148,7 +5150,11 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
          ->  Seq Scan on rpr_plan
 (7 rows)
 
--- SUFFIX merge with quantifiers: (A B*)+ A B* -> (a b*){2,}
+-- SUFFIX merge refused: (A B*)+ A B* stays as written.  The body A B* has no
+-- fixed row count, so folding the trailing copy into the group would move the
+-- group's stop decision ahead of that copy's own choices.  The PREFIX merge
+-- just above keeps working on the same kind of body -- a leading copy is
+-- mandatory, so it merges without reordering anything.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -5158,7 +5164,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a b*){2,}
+   Pattern: (a b*)+ a b*
    Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
