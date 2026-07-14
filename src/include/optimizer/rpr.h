@@ -54,18 +54,21 @@
 											 * quantifier */
 #define RPR_ELEM_EMPTY_LOOP			0x02	/* END: group body can produce
 											 * empty match */
+#define RPR_ELEM_EMPTY_PREFERRED	0x04	/* END: group body prefers the
+											 * empty match */
 /*
  * The two absorption flags below are explained in README.rpr IV-5
  * ("Absorbability Analysis"), with worked examples in Appendix C; the
  * analysis that sets them is computeAbsorbability() in
  * optimizer/plan/rpr.c.
  */
-#define RPR_ELEM_ABSORBABLE_BRANCH	0x04	/* element in absorbable region */
-#define RPR_ELEM_ABSORBABLE			0x08	/* absorption comparison point */
+#define RPR_ELEM_ABSORBABLE_BRANCH	0x08	/* element in absorbable region */
+#define RPR_ELEM_ABSORBABLE			0x10	/* absorption comparison point */
 
 /* Accessor macros for RPRPatternElement */
 #define RPRElemIsReluctant(e)			(((e)->flags & RPR_ELEM_RELUCTANT) != 0)
 #define RPRElemCanEmptyLoop(e)			(((e)->flags & RPR_ELEM_EMPTY_LOOP) != 0)
+#define RPRElemIsEmptyPreferred(e)		(((e)->flags & RPR_ELEM_EMPTY_PREFERRED) != 0)
 #define RPRElemIsAbsorbableBranch(e)	(((e)->flags & RPR_ELEM_ABSORBABLE_BRANCH) != 0)
 #define RPRElemIsAbsorbable(e)			(((e)->flags & RPR_ELEM_ABSORBABLE) != 0)
 #define RPRElemIsVar(e)			((e)->varId <= RPR_VARID_MAX)
