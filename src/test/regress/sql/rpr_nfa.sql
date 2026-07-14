@@ -1864,6 +1864,109 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
+-- Consecutive groups are merged only when the body has a fixed row count.
+-- (A | B B)+ (A | B B)+ keeps both groups: the merged (A | B B){2,} would
+-- stop after two rows, because two iterations already meet its lower bound,
+-- while the second group here still demands an iteration of its own.
+WITH test_group_merge_uneven_alt AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_group_merge_uneven_alt
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B B)+ (A | B B)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Same guard, reached through a reluctant quantifier in the body: B A+? has no
+-- fixed row count either, so (B A+?)+ (B A+?)+ is left alone.
+WITH test_group_merge_reluctant_body AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A']),
+        (6, ARRAY['B']),
+        (7, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_group_merge_reluctant_body
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((B A+?)+ (B A+?)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- The trailing copy in (A | B B){1,2} (A | B B) is not folded into the group
+-- for the same reason.  A leading copy would be, since it is mandatory.
+WITH test_suffix_merge_uneven_alt AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_suffix_merge_uneven_alt
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B B){1,2} (A | B B))
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- Nested bounded quantifiers ((A{2,3}){1,2}) are not flattened into A{2,6}:
+-- the first iteration's count is settled before the group decides whether to
+-- iterate again, so with four A rows it takes three and leaves the group
+-- rather than taking two and two.  A{2,6} would take all four.
+WITH test_nested_bounded_quantifier AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A']),
+        (4, ARRAY['A']),
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nested_bounded_quantifier
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2,3}){1,2})
+    DEFINE
+        A AS 'A' = ANY(flags)
+);
+
 -- ============================================================
 -- Alternation Runtime Behavior
 -- ============================================================
@@ -2576,6 +2679,88 @@ WINDOW w AS (
     PATTERN (((A?){2,3}){2,3})
     DEFINE
         A AS 'A' = ANY(flags)
+);
+
+-- Exact outer quantifier over a variable-length body
+-- ((A | B B){1,2}){2} is by definition (A | B B){1,2} (A | B B){1,2}, so the
+-- two must prefer the same match.  The optimizer must not collapse the nested
+-- form to (A | B B){2,4}: the alternation branches consume a different number
+-- of rows, so moving an iteration across the outer block boundary changes
+-- which rows are matched.  The collapsed form stops at A A (rows 1-2), while
+-- the nested form, whose second block must still take an iteration, prefers
+-- A (B B) A A (rows 1-5).
+WITH test_nested_alt_body AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nested_alt_body
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((A | B B){1,2}){2})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- The same pattern written out.  Must give the same match as the nested form.
+WITH test_nested_alt_body AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nested_alt_body
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B B){1,2} (A | B B){1,2})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+-- The collapsed form, written by hand.  It admits the same iteration counts as
+-- the two above, but it is a different pattern and prefers a different match:
+-- with no block boundary to force a second iteration it stops at rows 1-2.
+-- That difference is why the two above must not be rewritten into this one.
+WITH test_nested_alt_body AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A','B']),
+        (3, ARRAY['B']),
+        (4, ARRAY['A']),
+        (5, ARRAY['A'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_nested_alt_body
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B B){2,4})
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
 );
 
 -- ============================================================

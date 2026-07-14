@@ -48,6 +48,9 @@
 /* Forward declarations */
 static bool rprPatternEqual(RPRPatternNode *a, RPRPatternNode *b);
 static bool rprPatternChildrenEqual(List *a, List *b);
+static int64 rprNodeRowCount(RPRPatternNode *node);
+static int64 rprBodyRowCount(List *children);
+static bool rprBodyHasUniformLength(List *children);
 static List *flattenSeqChildren(List *children);
 static List *mergeConsecutiveVars(List *children);
 static List *mergeConsecutiveGroups(List *children);
@@ -148,6 +151,91 @@ rprPatternChildrenEqual(List *a, List *b)
 	}
 
 	return true;
+}
+
+/*
+ * rprNodeRowCount
+ *		Rows the node always consumes, or -1 if that varies.
+ *
+ * Alternatives of equal length count as fixed: they may pick different
+ * variables, but never different rows.
+ */
+static int64
+rprNodeRowCount(RPRPatternNode *node)
+{
+	int64		len;
+
+	check_stack_depth();
+
+	switch (node->nodeType)
+	{
+		case RPR_PATTERN_VAR:
+			if (node->min != node->max)
+				return -1;
+			return node->min;
+
+		case RPR_PATTERN_ALT:
+			len = -1;
+			foreach_node(RPRPatternNode, branch, node->children)
+			{
+				int64		branchLen = rprNodeRowCount(branch);
+
+				if (branchLen < 0 || (len >= 0 && branchLen != len))
+					return -1;
+				len = branchLen;
+			}
+			return len;
+
+		case RPR_PATTERN_SEQ:
+		case RPR_PATTERN_GROUP:
+			len = rprBodyRowCount(node->children);
+			if (len < 0)
+				return -1;
+			if (node->nodeType == RPR_PATTERN_SEQ)
+				return len;
+			if (node->min != node->max)
+				return -1;
+			len *= node->min;
+			/* A count this large cannot arise from real rows anyway */
+			if (len >= RPR_QUANTITY_INF)
+				return -1;
+			return len;
+	}
+	return -1;
+}
+
+/*
+ * rprBodyRowCount
+ *		Rows the children always consume in sequence, or -1 if that varies.
+ */
+static int64
+rprBodyRowCount(List *children)
+{
+	int64		total = 0;
+
+	foreach_node(RPRPatternNode, child, children)
+	{
+		int64		len = rprNodeRowCount(child);
+
+		if (len < 0)
+			return -1;
+		total += len;
+
+		/* A count this large cannot arise from real rows anyway */
+		if (total >= RPR_QUANTITY_INF)
+			return -1;
+	}
+	return total;
+}
+
+/*
+ * rprBodyHasUniformLength
+ *		Do the children always consume the same number of rows?
+ */
+static bool
+rprBodyHasUniformLength(List *children)
+{
+	return rprBodyRowCount(children) >= 0;
 }
 
 /*
@@ -269,6 +357,13 @@ mergeConsecutiveVars(List *children)
  *   (A B)+ (A B)+ -> (A B){2,}
  *
  * Only merges non-reluctant GROUP nodes with identical children.
+ *
+ * The body must consume a fixed number of rows.  Otherwise the merge changes
+ * which match is preferred: the two groups split the iterations between them,
+ * and that split is a choice point the merged form does not have.  With a
+ * fixed body, rows consumed rise in step with the iteration count, so both
+ * forms reach the same rows in the same order; without one, they need not --
+ * (A | B B)+ (A | B B)+ prefers a four-row match where (A | B B){2,} takes two.
  */
 static List *
 mergeConsecutiveGroups(List *children)
@@ -291,6 +386,7 @@ mergeConsecutiveGroups(List *children)
 			 */
 			if (prev != NULL &&
 				rprPatternChildrenEqual(prev->children, child->children) &&
+				rprBodyHasUniformLength(child->children) &&
 				prev->min < RPR_QUANTITY_INF - child->min &&
 				(prev->max < RPR_QUANTITY_INF - child->max ||
 				 prev->max == RPR_QUANTITY_INF ||
@@ -457,6 +553,14 @@ mergeConsecutiveAlts(List *children)
  *   A B (A B)+ -> (A B){2,}
  *   (A B)+ A B -> (A B){2,}
  *   A B (A B)+ A B -> (A B){3,}
+ *
+ * The two phases are not equally safe.  A prefix copy is mandatory and comes
+ * before the group, exactly like the leading mandatory iterations it becomes,
+ * so the decision trees stay isomorphic for any content.  A suffix copy comes
+ * after the group has already decided to stop, which the merged form defers
+ * until after the last iteration's own choices.  Merge a suffix only when the
+ * content consumes a fixed number of rows, which leaves it nothing to decide;
+ * see mergeConsecutiveGroups for why that condition is the right one.
  */
 static List *
 mergeGroupPrefixSuffix(List *children)
@@ -579,6 +683,7 @@ mergeGroupPrefixSuffix(List *children)
 				/* Compare with GROUP's children */
 				if (list_length(suffixElements) == groupChildCount &&
 					rprPatternChildrenEqual(suffixElements, groupContent) &&
+					rprBodyHasUniformLength(groupContent) &&
 					child->min < RPR_QUANTITY_INF - 1 &&
 					(child->max == RPR_QUANTITY_INF ||
 					 child->max < RPR_QUANTITY_INF - 1))
@@ -760,6 +865,9 @@ optimizeAltPattern(RPRPatternNode *pattern)
  * yields {4,6} (not 4..6), and (A{2,})* yields {0} UNION [2,INF) (not
  * [0,INF), so A* would wrongly admit a single A).
  *
+ * Contiguity settles the set of counts, not which count is preferred, so a
+ * further condition is needed; see the comment on safe below.
+ *
  * Returns the child node with multiplied quantifiers if successful,
  * otherwise returns the original pattern unchanged.
  */
@@ -785,6 +893,22 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		return pattern;
 
 	/*
+	 * Flattening erases the outer block boundaries, so how the child's
+	 * iterations split across blocks must not matter.  A fixed-length body
+	 * ensures that -- splits with the same total span the same rows -- as
+	 * does an exact child quantifier, which admits only one split.  Otherwise
+	 * preferment shifts: ((A | B B){1,2}){2} would become (A | B B){2,4},
+	 * which stops at two A's where the nested form prefers A (B B) A A.
+	 *
+	 * A VAR child has no body to measure, and its own quantifier already
+	 * settles this, so the test applies to a GROUP child only.
+	 */
+	if (child->min != child->max &&
+		child->nodeType == RPR_PATTERN_GROUP &&
+		!rprBodyHasUniformLength(child->children))
+		return pattern;
+
+	/*
 	 * Decide whether the achievable counts form one contiguous interval.  The
 	 * child quantifier is {child->min, child->max} and the outer one is
 	 * {pattern->min, pattern->max}; either max may be RPR_QUANTITY_INF.
@@ -795,6 +919,7 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 	{
 		bool		touch;
 		bool		zero_ok;
+		bool		order_ok;
 
 		/*
 		 * Consecutive intervals [t*min, t*max] and [(t+1)*min, (t+1)*max]
@@ -815,7 +940,17 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		 */
 		zero_ok = (pattern->min >= 1 || child->min <= 1);
 
-		safe = touch && zero_ok;
+		/*
+		 * Contiguity is necessary but not sufficient: the flattened form must
+		 * prefer the same match too.  The nested form settles the first
+		 * iteration's count before iterating again, so it stops early when
+		 * the tail cannot reach the child's lower bound -- (A{2,3}){1,2}
+		 * prefers three rows where the flattened A{2,6} takes four.  Only a
+		 * bounded lower bound >= 2 can be undershot.
+		 */
+		order_ok = (child->min <= 1 || child->max == RPR_QUANTITY_INF);
+
+		safe = touch && zero_ok && order_ok;
 	}
 
 	if (!safe)
