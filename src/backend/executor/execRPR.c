@@ -41,14 +41,14 @@
 /*
  * Set the visited bit for elemIdx and update the high-water marks
  * (nfaVisitedMin/MaxWord) so that the next reset only has to clear
- * the touched range instead of the full nfaVisitedElems bitmap.
+ * the touched range instead of the full nfaVisitedEnds bitmap.
  */
 static inline void
 nfa_mark_visited(WindowAggState *winstate, int16 elemIdx)
 {
 	int16		w = WORDNUM(elemIdx);
 
-	winstate->nfaVisitedElems[w] |= ((bitmapword) 1 << BITNUM(elemIdx));
+	winstate->nfaVisitedEnds[w] |= ((bitmapword) 1 << BITNUM(elemIdx));
 	winstate->nfaVisitedMinWord = Min(winstate->nfaVisitedMinWord, w);
 	winstate->nfaVisitedMaxWord = Max(winstate->nfaVisitedMaxWord, w);
 }
@@ -303,6 +303,42 @@ nfa_state_clone(WindowAggState *winstate, int16 elemIdx,
 }
 
 /*
+ * nfa_exit_to
+ *
+ * Move state out of the construct owning depth and onto targetIdx, then
+ * return the target element.  Callers route from there.
+ *
+ * Centralizes three conventions whose violations are silent:
+ *
+ * - Count-clear: zero the exited depth slot so the next occupant enters at
+ *   zero (asserted on entry by nfa_advance_begin/nfa_route_to_elem).
+ * - Arrival increment: landing on an END completes one iteration
+ *   (saturating at RPR_COUNT_INF).
+ * - isAbsorbable is recomputed against the target and is monotonic.
+ *   Reapplying it is idempotent, so clone and in-place callers share this path.
+ */
+static RPRPatternElement *
+nfa_exit_to(WindowAggState *winstate, RPRNFAState *state, int depth,
+			int16 targetIdx)
+{
+	RPRPattern *pattern = winstate->rpPattern;
+	RPRPatternElement *nextElem;
+
+	state->counts[depth] = 0;
+	state->elemIdx = targetIdx;
+	nextElem = &pattern->elements[targetIdx];
+
+	state->isAbsorbable = state->isAbsorbable &&
+		RPRElemIsAbsorbableBranch(nextElem);
+
+	if (RPRElemIsEnd(nextElem) &&
+		state->counts[nextElem->depth] < RPR_COUNT_INF)
+		state->counts[nextElem->depth]++;
+
+	return nextElem;
+}
+
+/*
  * nfa_states_equal
  *
  * Check if two states are equivalent (same elemIdx and counts).
@@ -352,14 +388,6 @@ nfa_add_state_unique(WindowAggState *winstate, RPRNFAContext *ctx, RPRNFAState *
 	RPRNFAState *s;
 	RPRNFAState *tail = NULL;
 
-	/*
-	 * Mark VAR in visited before duplicate check to prevent DFS loops. This
-	 * is the deferred half of the asymmetric visited-marking scheme; see
-	 * nfa_advance_state for the non-VAR (END/ALT/BEGIN/FIN) half and the
-	 * rationale for the asymmetry.
-	 */
-	nfa_mark_visited(winstate, state->elemIdx);
-
 	/* Check for duplicate and find tail */
 	for (s = ctx->states; s != NULL; s = s->next)
 	{
@@ -405,6 +433,13 @@ nfa_add_matched_state(WindowAggState *winstate, RPRNFAContext *ctx,
 	state->next = NULL;
 	ctx->matchEndRow = matchEndRow;
 
+	/*
+	 * Guards compare generations, not ctx->matchedState: the free above
+	 * recycles that state, so a later replacement can reuse the address a
+	 * caller saved.
+	 */
+	ctx->matchGen++;
+
 	/* Prune contexts that started within this match's range */
 	if (winstate->rpSkipTo == ST_PAST_LAST_ROW)
 	{
@@ -415,6 +450,8 @@ nfa_add_matched_state(WindowAggState *winstate, RPRNFAContext *ctx,
 		{
 			RPRNFAContext *nextCtx = ctx->next;
 
+			/* Only later-starting contexts are freed; callers walk forward */
+			Assert(nextCtx->matchStartRow > ctx->matchStartRow);
 			Assert(nextCtx->lastProcessedRow >= nextCtx->matchStartRow);
 			skippedLen = nextCtx->lastProcessedRow - nextCtx->matchStartRow + 1;
 			nfa_record_context_skipped(winstate, skippedLen);
@@ -452,6 +489,7 @@ nfa_context_make(WindowAggState *winstate)
 	ctx->matchEndRow = -1;
 	ctx->lastProcessedRow = -1;
 	ctx->matchedState = NULL;
+	ctx->matchGen = 0;
 
 	/* Initialize two-flag absorption design based on pattern */
 	ctx->hasAbsorbableState = winstate->rpPattern->isAbsorbable;
@@ -797,7 +835,8 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
  * For VARs that reached max count followed by END:
  *   - Advance through the END-element chain to the absorption
  *     comparison point
- *   - Only deterministic exits (count >= max, max != INF) are handled
+ *   - Only deterministic exits (count >= max) are handled.  That test alone
+ *     excludes unbounded VARs: RPR_QUANTITY_INF is PG_INT32_MAX.
  *   - Chains through END elements while count >= max (must-exit path)
  *
  * Non-VAR elements (ALT, END, FIN) are kept as-is for advance phase.
@@ -976,12 +1015,27 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 
 		/* Create skip state before add_unique, which may free state */
 		if (RPRElemCanSkip(nextElem))
+		{
+			RPRPatternElement *landElem;
+
 			skipState = nfa_state_clone(winstate, nextElem->next,
 										state->counts, state->isAbsorbable);
 
+			/*
+			 * When the skip lands directly on an outer END, increment its
+			 * iteration count, just as the exit path in nfa_advance_var does.
+			 * Without this the skipped iteration is not counted, and the
+			 * group fails its min check even though it ran often enough.
+			 */
+			landElem = &winstate->rpPattern->elements[skipState->elemIdx];
+			if (RPRElemIsEnd(landElem) &&
+				skipState->counts[landElem->depth] < RPR_COUNT_INF)
+				skipState->counts[landElem->depth]++;
+		}
+
 		if (skipState != NULL && RPRElemIsReluctant(nextElem))
 		{
-			RPRNFAState *savedMatch = ctx->matchedState;
+			int64		savedGen = ctx->matchGen;
 
 			/*
 			 * Reluctant optional VAR: prefer skipping.  Explore the skip path
@@ -992,7 +1046,7 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 			 */
 			nfa_advance_state(winstate, ctx, skipState, currentPos);
 
-			if (ctx->matchedState != savedMatch)
+			if (ctx->matchGen != savedGen)
 			{
 				nfa_state_free(winstate, state);
 				return;
@@ -1040,6 +1094,7 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
 	{
 		RPRPatternElement *sepElem;
 		RPRNFAState *newState;
+		int64		savedGen = ctx->matchGen;
 
 		/* Create independent state at this branch's content */
 		newState = nfa_state_clone(winstate, brStart,
@@ -1047,6 +1102,15 @@ nfa_advance_alt(WindowAggState *winstate, RPRNFAContext *ctx,
 
 		/* Recursively process this branch before the next */
 		nfa_advance_state(winstate, ctx, newState, currentPos);
+
+		/*
+		 * Branches are enumerated in preference order, so once one of them
+		 * has recorded a match the later branches must not be explored: their
+		 * own FIN would replace the preferred match.  Same technique as the
+		 * reluctant paths in nfa_route_to_elem and nfa_advance_begin.
+		 */
+		if (ctx->matchGen != savedGen)
+			break;
 
 		/* The walk never lands on -1: the last SEP breaks the loop below */
 		Assert(sepIdx >= 0 && sepIdx < pattern->numElements);
@@ -1089,13 +1153,24 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	/* Optional group: create skip path (but don't route yet) */
 	if (elem->min == 0)
 	{
+		RPRPatternElement *landElem;
+
 		skipState = nfa_state_clone(winstate, elem->jump,
 									state->counts, state->isAbsorbable);
+
+		/*
+		 * As in nfa_route_to_elem, a skip that lands directly on an outer END
+		 * still counts as an iteration of that END's group.
+		 */
+		landElem = &elements[elem->jump];
+		if (RPRElemIsEnd(landElem) &&
+			skipState->counts[landElem->depth] < RPR_COUNT_INF)
+			skipState->counts[landElem->depth]++;
 	}
 
 	if (skipState != NULL && RPRElemIsReluctant(elem))
 	{
-		RPRNFAState *savedMatch = ctx->matchedState;
+		int64		savedGen = ctx->matchGen;
 
 		/* Reluctant: skip first (prefer fewer iterations), enter second */
 		nfa_route_to_elem(winstate, ctx, skipState,
@@ -1105,7 +1180,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 		 * If skip path reached FIN, shortest match is found. Skip group entry
 		 * to prevent longer matches.
 		 */
-		if (ctx->matchedState != savedMatch)
+		if (ctx->matchGen != savedGen)
 		{
 			nfa_state_free(winstate, state);
 			return;
@@ -1169,11 +1244,13 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		 *    Route to elem->next (not nfa_advance_end) to avoid creating
 		 *    competing greedy/reluctant loop states.
 		 *
-		 * Greedy prefers the loop-back first (more iterations); reluctant
-		 * prefers the fast-forward (exit) first and, if it reaches FIN, drops
-		 * the loop-back so a longer match cannot replace the shortest one --
-		 * mirroring the min<=count<max branch below.  The ffState snapshot is
-		 * taken BEFORE modifying state, since both paths diverge from here.
+		 * The body decides the order, not the group's own greed: the
+		 * fast-forward comes first exactly when the body prefers the empty
+		 * match (RPR_ELEM_EMPTY_PREFERRED).  If it then reaches FIN, the
+		 * loop-back is dropped so a longer match cannot replace the preferred
+		 * one -- mirroring the min<=count<max branch below.  The ffState
+		 * snapshot is taken BEFORE modifying state, since both paths diverge
+		 * from here.
 		 *----------
 		 */
 		if (RPRElemCanEmptyLoop(elem))
@@ -1181,33 +1258,28 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 			ffState = nfa_state_clone(winstate, state->elemIdx,
 									  state->counts, state->isAbsorbable);
 
-			/* Exit the group: clear its own count (count-clear policy) */
-			ffState->counts[depth] = 0;
-			ffState->elemIdx = elem->next;
-			nextElem = &elements[ffState->elemIdx];
-
 			/*
-			 * Unlike the must-exit path, no isAbsorbable update is needed:
-			 * the fast-forward path runs only for EMPTY_LOOP (nullable)
-			 * groups, which are never inside an absorbable region, so
-			 * isAbsorbable is already false here.
+			 * nfa_exit_to()'s isAbsorbable recompute is a no-op here:
+			 * EMPTY_LOOP groups are never in an absorbable region.
 			 */
-
-			/* END->END: increment outer END's count */
-			if (RPRElemIsEnd(nextElem) &&
-				ffState->counts[nextElem->depth] < RPR_COUNT_INF)
-				ffState->counts[nextElem->depth]++;
+			nextElem = nfa_exit_to(winstate, ffState, depth, elem->next);
 		}
 
-		/* Prepare the loop-back state */
+		/*
+		 * Prepare the loop-back state.  Visited marks are deliberately left
+		 * in place: the cycle guard falls through for a marked END below its
+		 * lower bound, so the next iteration still runs (and may consume),
+		 * while a cleared mark would re-arm nested reluctant loops into
+		 * unbounded epsilon recursion.
+		 */
 		state->elemIdx = elem->jump;
 		jumpElem = &elements[state->elemIdx];
 
-		if (ffState != NULL && RPRElemIsReluctant(elem))
+		if (ffState != NULL && RPRElemIsEmptyPreferred(elem))
 		{
-			RPRNFAState *savedMatch = ctx->matchedState;
+			int64		savedGen = ctx->matchGen;
 
-			/* Reluctant: take the fast-forward (exit) first */
+			/* Body prefers empty: take the fast-forward (exit) first */
 			nfa_route_to_elem(winstate, ctx, ffState, nextElem,
 							  currentPos);
 
@@ -1215,7 +1287,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 			 * If the exit reached FIN, the shortest match is found.  Skip the
 			 * loop-back to prevent longer matches from replacing it.
 			 */
-			if (ctx->matchedState != savedMatch)
+			if (ctx->matchGen != savedGen)
 			{
 				nfa_state_free(winstate, state);
 				return;
@@ -1240,18 +1312,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		/* Must exit: reached max iterations. */
 		RPRPatternElement *nextElem;
 
-		/* Exit: clear the group's own count (count-clear policy) */
-		state->counts[depth] = 0;
-		state->elemIdx = elem->next;
-		nextElem = &elements[state->elemIdx];
-
-		/* Update isAbsorbable for target element (monotonic) */
-		state->isAbsorbable = state->isAbsorbable &&
-			RPRElemIsAbsorbableBranch(nextElem);
-
-		/* END->END: increment outer END's count */
-		if (RPRElemIsEnd(nextElem) && state->counts[nextElem->depth] < RPR_COUNT_INF)
-			state->counts[nextElem->depth]++;
+		nextElem = nfa_exit_to(winstate, state, depth, elem->next);
 
 		nfa_route_to_elem(winstate, ctx, state, nextElem, currentPos);
 	}
@@ -1272,13 +1333,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 		 */
 		exitState = nfa_state_clone(winstate, elem->next,
 									state->counts, state->isAbsorbable);
-		/* Exit branch: clear the group's own count (count-clear policy) */
-		exitState->counts[depth] = 0;
-		nextElem = &elements[exitState->elemIdx];
-
-		/* END->END: increment outer END's count */
-		if (RPRElemIsEnd(nextElem) && exitState->counts[nextElem->depth] < RPR_COUNT_INF)
-			exitState->counts[nextElem->depth]++;
+		nextElem = nfa_exit_to(winstate, exitState, depth, elem->next);
 
 		/* Prepare loop state */
 		state->elemIdx = elem->jump;
@@ -1286,7 +1341,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 
 		if (RPRElemIsReluctant(elem))
 		{
-			RPRNFAState *savedMatch = ctx->matchedState;
+			int64		savedGen = ctx->matchGen;
 
 			/* Exit first (preferred for reluctant) */
 			nfa_route_to_elem(winstate, ctx, exitState, nextElem,
@@ -1296,7 +1351,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 			 * If exit path reached FIN, shortest match is found. Skip loop to
 			 * prevent longer matches from replacing it.
 			 */
-			if (ctx->matchedState != savedMatch)
+			if (ctx->matchGen != savedGen)
 			{
 				nfa_state_free(winstate, state);
 				return;
@@ -1330,7 +1385,6 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 				int64 currentPos)
 {
 	RPRPattern *pattern = winstate->rpPattern;
-	RPRPatternElement *elements = pattern->elements;
 	int			depth = elem->depth;
 	int32		count = state->counts[depth];
 	bool		canLoop = (elem->max == RPR_QUANTITY_INF || count < elem->max);
@@ -1358,21 +1412,12 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 		 */
 		if (reluctant)
 		{
-			RPRNFAState *savedMatch = ctx->matchedState;
+			int64		savedGen = ctx->matchGen;
 
 			/* Clone for exit, original stays for loop */
 			cloneState = nfa_state_clone(winstate, elem->next,
 										 state->counts, state->isAbsorbable);
-			/* Exit: clear the VAR's own count (count-clear policy) */
-			cloneState->counts[depth] = 0;
-			nextElem = &elements[cloneState->elemIdx];
-
-			/* When exiting directly to an outer END, increment its count */
-			if (RPRElemIsEnd(nextElem))
-			{
-				if (cloneState->counts[nextElem->depth] < RPR_COUNT_INF)
-					cloneState->counts[nextElem->depth]++;
-			}
+			nextElem = nfa_exit_to(winstate, cloneState, depth, elem->next);
 
 			/* Exit first (preferred for reluctant) */
 			nfa_route_to_elem(winstate, ctx, cloneState, nextElem,
@@ -1382,7 +1427,7 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 			 * If exit path reached FIN, the shortest match is found. Skip
 			 * loop state to prevent longer matches from replacing it.
 			 */
-			if (ctx->matchedState != savedMatch)
+			if (ctx->matchGen != savedGen)
 			{
 				nfa_state_free(winstate, state);
 				return;
@@ -1400,28 +1445,8 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 			/* Loop first (preferred for greedy) */
 			nfa_add_state_unique(winstate, ctx, cloneState);
 
-			/* Exit second: clear the VAR's own count (count-clear policy) */
-			state->counts[depth] = 0;
-			state->elemIdx = elem->next;
-			nextElem = &elements[state->elemIdx];
-
-			/*
-			 * Update isAbsorbable for target element (monotonic: AND
-			 * preserves false)
-			 */
-			state->isAbsorbable = state->isAbsorbable &&
-				RPRElemIsAbsorbableBranch(nextElem);
-
-			/*
-			 * When exiting directly to an outer END, increment its iteration
-			 * count.  Simple VARs (min=max=1) handle this via inline advance
-			 * in nfa_match, but quantified VARs bypass that path.
-			 */
-			if (RPRElemIsEnd(nextElem))
-			{
-				if (state->counts[nextElem->depth] < RPR_COUNT_INF)
-					state->counts[nextElem->depth]++;
-			}
+			/* Exit second: nfa_match handles only deterministic exits */
+			nextElem = nfa_exit_to(winstate, state, depth, elem->next);
 
 			nfa_route_to_elem(winstate, ctx, state, nextElem,
 							  currentPos);
@@ -1438,24 +1463,7 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 		RPRPatternElement *nextElem;
 
 		Assert(canExit);
-		/* Exit: clear the VAR's own count (count-clear policy) */
-		state->counts[depth] = 0;
-		state->elemIdx = elem->next;
-		nextElem = &elements[state->elemIdx];
-
-		/*
-		 * Update isAbsorbable for target element (monotonic: AND preserves
-		 * false)
-		 */
-		state->isAbsorbable = state->isAbsorbable &&
-			RPRElemIsAbsorbableBranch(nextElem);
-
-		/* See comment above: increment outer END count for quantified VARs */
-		if (RPRElemIsEnd(nextElem))
-		{
-			if (state->counts[nextElem->depth] < RPR_COUNT_INF)
-				state->counts[nextElem->depth]++;
-		}
+		nextElem = nfa_exit_to(winstate, state, depth, elem->next);
 
 		nfa_route_to_elem(winstate, ctx, state, nextElem, currentPos);
 	}
@@ -1479,23 +1487,61 @@ nfa_advance_state(WindowAggState *winstate, RPRNFAContext *ctx,
 	/* Protect against stack overflow for deeply complex patterns */
 	check_stack_depth();
 
-	/* Cycle detection: if this elemIdx was already visited in this DFS, bail */
-	if (winstate->nfaVisitedElems[WORDNUM(state->elemIdx)] &
+	/*
+	 * Cycle detection.  Only a nullable END is marked, so a set bit means the
+	 * body just derived an empty match for this iteration: a DFS takes only
+	 * epsilon transitions, so no row was consumed since the last visit.
+	 *
+	 * Nothing else needs guarding.  A revisit is a cycle only when it carries
+	 * no progress, and a state is really (elemIdx, counts) -- which is what
+	 * nfa_add_state_unique() compares.  Any other loop-back has consumed a
+	 * row, and dropping it would lose the match outright: ((A | B B){1,3}){3}
+	 * then finds nothing at all.
+	 */
+	if (winstate->nfaVisitedEnds[WORDNUM(state->elemIdx)] &
 		((bitmapword) 1 << BITNUM(state->elemIdx)))
 	{
-		nfa_state_free(winstate, state);
-		return;
+		RPRPatternElement *hitElem = &pattern->elements[state->elemIdx];
+
+		Assert(RPRElemIsEnd(hitElem) && RPRElemCanEmptyLoop(hitElem));
+
+		if (state->counts[hitElem->depth] >= hitElem->min)
+		{
+			RPRPatternElement *nextElem;
+
+			/* An END always has a valid exit target after finalization. */
+			Assert(hitElem->next != RPR_ELEMIDX_INVALID);
+
+			/*
+			 * Leave the group here, and enumerate that exit at this rank
+			 * rather than discarding the state: discarding demotes "leave the
+			 * group" below the remaining alternatives, and a less-preferred
+			 * branch then consumes rows the match should not have.  At or
+			 * above the lower bound an empty iteration stops the quantifier
+			 * (SQL/RPR follows Perl here).
+			 */
+
+			nextElem = nfa_exit_to(winstate, state, hitElem->depth,
+								   hitElem->next);
+
+			nfa_route_to_elem(winstate, ctx, state, nextElem, currentPos);
+			return;
+		}
+
+		/*
+		 * Below the lower bound the quantifier cannot exit, so fall through
+		 * to the normal must-loop path.  Each empty iteration's arrival
+		 * increment advances the count, so this reaches min and exits above.
+		 * Clearing the marks here instead would also disarm the guard for
+		 * nested reluctant loops, whose empty iterations then recurse without
+		 * bound: (A (B*?)+?){2,} on a single matching row.
+		 */
 	}
 
 	elem = &pattern->elements[state->elemIdx];
 
-	/*
-	 * Mark epsilon elements (END, ALT, BEGIN, FIN) in visited to prevent
-	 * infinite epsilon cycles.  VAR elements are marked later when added to
-	 * the state list (nfa_add_state_unique), allowing legitimate loop-back to
-	 * the same VAR in a new iteration.
-	 */
-	if (!RPRElemIsVar(elem))
+	/* Only a nullable END is ever tested; see the guard above. */
+	if (RPRElemCanEmptyLoop(elem))
 		nfa_mark_visited(winstate, state->elemIdx);
 
 	/*
@@ -1547,7 +1593,7 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 {
 	RPRNFAState *states = ctx->states;
 	RPRNFAState *state;
-	RPRNFAState *savedMatchedState;
+	int64		savedGen;
 
 	ctx->states = NULL;			/* Will rebuild */
 
@@ -1555,7 +1601,7 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 	while (states != NULL)
 	{
 		CHECK_FOR_INTERRUPTS();
-		savedMatchedState = ctx->matchedState;
+		savedGen = ctx->matchGen;
 
 		/*
 		 * Clear visited bitmap before each state's DFS expansion.  Only the
@@ -1567,7 +1613,7 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 		 */
 		if (winstate->nfaVisitedMaxWord >= winstate->nfaVisitedMinWord)
 		{
-			memset(&winstate->nfaVisitedElems[winstate->nfaVisitedMinWord], 0,
+			memset(&winstate->nfaVisitedEnds[winstate->nfaVisitedMinWord], 0,
 				   sizeof(bitmapword) *
 				   (winstate->nfaVisitedMaxWord -
 					winstate->nfaVisitedMinWord + 1));
@@ -1595,7 +1641,7 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 		 * remaining old states have worse lexical order and can be pruned.
 		 * Only check for new FIN arrivals (not ones from previous rows).
 		 */
-		if (ctx->matchedState != savedMatchedState && states != NULL)
+		if (ctx->matchGen != savedGen && states != NULL)
 		{
 			nfa_state_free_list(winstate, states);
 			break;
@@ -1709,8 +1755,8 @@ ExecRPRStartContext(WindowAggState *winstate, int64 startPos)
 	 * first row's match phase.
 	 *
 	 * Use startPos - 1 as currentPos since no row has been consumed yet. If
-	 * FIN is reached via epsilon transitions, matchEndRow = startPos - 1
-	 * which is less than matchStartRow, resulting in UNMATCHED treatment.
+	 * FIN is reached via epsilon transitions, matchEndRow = startPos - 1,
+	 * which is how an empty match is represented.
 	 */
 	nfa_advance(winstate, ctx, startPos - 1);
 
@@ -1867,7 +1913,14 @@ ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos,
 		 * If this context has a different matchStartRow than the one used in
 		 * the shared evaluation, re-evaluate match_start-dependent variables
 		 * with this context's matchStartRow.
+		 *
+		 * Re-evaluation overwrites nfaVarMatched without restoring it, so the
+		 * head context, which the shared values are keyed on, must be reached
+		 * before any other.
 		 */
+		Assert(ctx != winstate->nfaContext ||
+			   ctx->matchStartRow == winstate->nav_match_start);
+
 		if (hasDependent && ctx->matchStartRow != winstate->nav_match_start)
 			nfa_reevaluate_dependent_vars(winstate, ctx, currentPos);
 		nfa_match(winstate, ctx, varMatched, currentPos);
@@ -1946,8 +1999,13 @@ ExecRPRCleanupDeadContexts(WindowAggState *winstate, RPRNFAContext *excludeCtx)
 		if (ctx == excludeCtx || ctx->states != NULL)
 			continue;
 
-		/* Skip successfully matched contexts (will be handled by SKIP logic) */
-		if (ctx->matchEndRow >= ctx->matchStartRow)
+		/*
+		 * Skip contexts that recorded a match (handled by SKIP logic).  Test
+		 * matchedState, not matchEndRow: an empty match ends at matchStartRow
+		 * - 1, so a row-length test would take it for a failure and count it
+		 * as pruned or mismatched.
+		 */
+		if (ctx->matchedState != NULL)
 			continue;
 
 		/*
@@ -1984,10 +2042,12 @@ ExecRPRCleanupDeadContexts(WindowAggState *winstate, RPRNFAContext *excludeCtx)
  *     matchEndRow >= matchStartRow): a match has been recorded and VAR
  *     states are still looping for a longer one.
  *
- * Killing the VAR reclassifies the first two as failures in cleanup
- * (otherwise they linger without contributing to stats).  The third is
- * stat-neutral -- cleanup skips it either way -- but goes through the
- * same uniform path so partition-end classification stays centralized.
+ * Killing the VAR reclassifies pure pursuit as a failure in cleanup
+ * (otherwise it lingers without contributing to stats).  The other two both
+ * carry a recorded match, so cleanup skips them: an empty match is a
+ * length-0 success, not a failure, and update_reduced_frame registers it as
+ * such through its head-context path.  They still go through the same
+ * uniform path so partition-end classification stays centralized.
  *
  * Implementation: nfa_match with NULL forces VAR mismatch; nfa_advance
  * then drains any remaining epsilon transitions.
@@ -2004,6 +2064,8 @@ ExecRPRFinalizeAllContexts(WindowAggState *winstate, int64 lastPos)
 		if (ctx->states != NULL)
 		{
 			nfa_match(winstate, ctx, NULL, lastPos);
+
+			/* Defensive: advance leaves only VAR states, all removed above. */
 			nfa_advance(winstate, ctx, lastPos);
 		}
 	}
