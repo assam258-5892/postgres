@@ -1623,9 +1623,14 @@ isUnboundedStart(RPRPattern *pattern, RPRElemIdx idx)
 	if (!isFixedLengthChildren(pattern, idx, startDepth))
 		return false;
 
-	/* Find the END element at startDepth - 1 */
+	/*
+	 * Find the END that closes the group beginning at idx, at startDepth - 1.
+	 * FIN bounds the walk: depth alone cannot when startDepth is 0, and FIN's
+	 * next is RPR_ELEMIDX_INVALID, so the walk would read outside the array.
+	 * Only a tree optimizeRPRPattern() did not produce reaches it that way.
+	 */
 	e = &pattern->elements[idx];
-	while (e->depth >= startDepth)
+	while (e->depth >= startDepth && !RPRElemIsFin(e))
 		e = &pattern->elements[e->next];
 
 	/* END must be unbounded greedy */
