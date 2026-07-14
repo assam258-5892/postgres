@@ -2571,6 +2571,7 @@ typedef struct RPRNFAContext
 	int64		matchEndRow;	/* row where match ended (-1 = no match) */
 	int64		lastProcessedRow;	/* last row processed (for fail depth) */
 	RPRNFAState *matchedState;	/* FIN state for greedy fallback (cloned) */
+	int64		matchGen;		/* bumped on every matchedState replacement */
 
 	/* Two-flag absorption optimization */
 	bool		hasAbsorbableState; /* can absorb others (>=1 absorbable
@@ -2669,8 +2670,8 @@ typedef struct WindowAggState
 	Bitmapset  *defineMatchStartDependent;	/* DEFINE vars needing per-context
 											 * evaluation
 											 * (match_start-dependent) */
-	bitmapword *nfaVisitedElems;	/* elemIdx visited bitmap for cycle
-									 * detection */
+	bitmapword *nfaVisitedEnds; /* nullable ENDs reached in this DFS, indexed
+								 * by elemIdx (cycle detection) */
 	int16		nfaVisitedMinWord;	/* lowest bitmapword index touched since
 									 * last reset (PG_INT16_MAX = none) */
 	int16		nfaVisitedMaxWord;	/* highest bitmapword index touched since
