@@ -1623,9 +1623,21 @@ isUnboundedStart(RPRPattern *pattern, RPRElemIdx idx)
 	if (!isFixedLengthChildren(pattern, idx, startDepth))
 		return false;
 
-	/* Find the END element at startDepth - 1 */
+	/*
+	 * Find the END that closes the group beginning at idx, at startDepth - 1.
+	 *
+	 * This assumes idx is the first child of an unbounded group, so such an
+	 * END exists.  computeAbsorbability runs on the normalized tree, where a
+	 * {1,1} group has been unwrapped and the only fixed-length sequences left
+	 * are real group bodies -- but do not depend on that here.  A {1,1} group
+	 * in a non-leading position (START (UP DOWN)) reaches this walk with
+	 * startDepth 0, where no element is ever shallower than startDepth, so
+	 * stop at FIN or a missing link and let the END test below reject it
+	 * rather than walk off the end.
+	 */
 	e = &pattern->elements[idx];
-	while (e->depth >= startDepth)
+	while (e->depth >= startDepth && !RPRElemIsFin(e) &&
+		   e->next != RPR_ELEMIDX_INVALID)
 		e = &pattern->elements[e->next];
 
 	/* END must be unbounded greedy */
