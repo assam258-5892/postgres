@@ -2957,8 +2957,10 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){3,5}) DEFINE A AS val > 0);
 
--- Quantifier multiply: (A{2,3}){2,3} -> a{4,9}
--- outer range, child range: counts [4,6] U [6,9] = [4,9] are contiguous, so it folds
+-- Quantifier multiply refused: (A{2,3}){2,3} stays nested.
+-- The counts [4,6] U [6,9] = [4,9] are contiguous, but a bounded child with a
+-- lower bound to fall short of makes the nested form prefer a shorter match
+-- than a{4,9} would.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3009,8 +3011,8 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+){2,4}) DEFINE A AS val > 0);
 
--- (A{2,3}){2,4} -> a{4,12}  (outer range x child range, contiguous:
--- [4,6] U [6,9] U [8,12] = [4,12])
+-- (A{2,3}){2,4} stays nested for the same reason, even though the counts
+-- [4,6] U [6,9] U [8,12] = [4,12] are contiguous.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3134,7 +3136,11 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+ B* C? (A+ B* C?)+)
              DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60);
 
--- SUFFIX merge with quantifiers: (A B*)+ A B* -> (a b*){2,}
+-- SUFFIX merge refused: (A B*)+ A B* stays as written.  The body A B* has no
+-- fixed row count, so folding the trailing copy into the group would move the
+-- group's stop decision ahead of that copy's own choices.  The PREFIX merge
+-- just above keeps working on the same kind of body -- a leading copy is
+-- mandatory, so it merges without reordering anything.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
