@@ -1824,6 +1824,7 @@ MultirangeType
 NDBOX
 NDistinctParseState
 NDistinctSemanticState
+NFALengthStats
 NLSVERSIONINFOEX
 NODE
 NTSTATUS
@@ -1853,7 +1854,6 @@ NewConstraint
 NextSampleBlock_function
 NextSampleTuple_function
 NextValueExpr
-NFALengthStats
 Node
 NodeInstrumentation
 NodeTag

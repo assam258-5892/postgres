@@ -1168,27 +1168,6 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				break;
 			}
 
-		case T_MergeSupportFunc:
-			{
-				/* must be in a MERGE, else something messed up */
-				if (!state->parent ||
-					!IsA(state->parent, ModifyTableState) ||
-					((ModifyTableState *) state->parent)->operation != CMD_MERGE)
-					elog(ERROR, "MergeSupportFunc found in non-merge plan node");
-
-				scratch.opcode = EEOP_MERGE_SUPPORT_FUNC;
-				ExprEvalPushStep(state, &scratch);
-				break;
-			}
-
-		case T_SubscriptingRef:
-			{
-				SubscriptingRef *sbsref = (SubscriptingRef *) node;
-
-				ExecInitSubscriptingRef(&scratch, sbsref, state, resv, resnull);
-				break;
-			}
-
 		case T_RPRNavExpr:
 			{
 				/*
@@ -1278,6 +1257,27 @@ ExecInitExprRec(Expr *node, ExprState *state,
 								&scratch.d.rpr_nav.resulttyplen,
 								&scratch.d.rpr_nav.resulttypbyval);
 				ExprEvalPushStep(state, &scratch);
+				break;
+			}
+
+		case T_MergeSupportFunc:
+			{
+				/* must be in a MERGE, else something messed up */
+				if (!state->parent ||
+					!IsA(state->parent, ModifyTableState) ||
+					((ModifyTableState *) state->parent)->operation != CMD_MERGE)
+					elog(ERROR, "MergeSupportFunc found in non-merge plan node");
+
+				scratch.opcode = EEOP_MERGE_SUPPORT_FUNC;
+				ExprEvalPushStep(state, &scratch);
+				break;
+			}
+
+		case T_SubscriptingRef:
+			{
+				SubscriptingRef *sbsref = (SubscriptingRef *) node;
+
+				ExecInitSubscriptingRef(&scratch, sbsref, state, resv, resnull);
 				break;
 			}
 
