@@ -16,10 +16,10 @@
  */
 #include "postgres.h"
 
-#include "common/int.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
 #include "catalog/pg_class.h"
+#include "common/int.h"
 #include "foreign/fdwapi.h"
 #include "miscadmin.h"
 #include "nodes/extensible.h"
@@ -36,8 +36,8 @@
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
 #include "optimizer/restrictinfo.h"
-#include "optimizer/subselect.h"
 #include "optimizer/rpr.h"
+#include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
 #include "parser/parse_clause.h"
 #include "parser/parsetree.h"
