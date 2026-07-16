@@ -57,10 +57,10 @@
 #include "postgres.h"
 
 #include "access/heaptoast.h"
-#include "common/int.h"
 #include "access/tupconvert.h"
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
+#include "common/int.h"
 #include "executor/execExpr.h"
 #include "executor/nodeSubplan.h"
 #include "executor/nodeWindowAgg.h"

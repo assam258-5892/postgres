@@ -1292,9 +1292,11 @@ typedef struct RPRPattern
 	 * hand-written copy (custom_copy_equal).  It is never compared with
 	 * equal(): equal() routines are generated only for parse/rewrite-level
 	 * nodes, not for plan nodes, so there is nothing to compare it against
-	 * and equal support is suppressed with no_equal.
+	 * and equal support is suppressed with no_equal.  It is not reachable
+	 * from a Query either, so query jumbling has nothing to do here and is
+	 * suppressed with no_query_jumble.
 	 */
-	pg_node_attr(custom_copy_equal, custom_read_write, no_equal)
+	pg_node_attr(custom_copy_equal, custom_read_write, no_equal, no_query_jumble)
 
 	NodeTag		type;			/* T_RPRPattern */
 	int			numVars;		/* number of pattern variables */
