@@ -801,7 +801,7 @@ static const char *rpr_invalid_quantifier_token(const char *tok);
 	HANDLER HAVING HEADER_P HOLD HOUR_P
 
 	IDENTITY_P IF_P IGNORE_P ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IMPORT_P IN_P INCLUDE
-	INCLUDING INCREMENT INDENT INDEX INDEXES INHERIT INHERITS INITIAL INITIALLY INLINE_P
+	INCLUDING INCREMENT INDENT INDEX INDEXES INHERIT INHERITS INITIAL_P INITIALLY INLINE_P
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER
 	INTERSECT INTERVAL INTO INVOKER IS ISNULL ISOLATION
 
@@ -955,7 +955,7 @@ static const char *rpr_invalid_quantifier_token(const char *tok);
 %nonassoc	UNBOUNDED NESTED /* ideally would have same precedence as IDENT */
 %nonassoc	IDENT PARTITION RANGE ROWS GROUPS PRECEDING FOLLOWING CUBE ROLLUP
 			SET KEYS OBJECT_P SCALAR TO USING VALUE_P WITH WITHOUT PATH
-			AFTER INITIAL SEEK PATTERN_P
+			AFTER INITIAL_P SEEK PATTERN_P
 %left		Op OPERATOR RIGHT_ARROW '|'	/* multi-character ops and user-defined operators */
 %left		'+' '-'
 %left		'*' '/' '%'
@@ -17699,7 +17699,7 @@ opt_row_pattern_skip_to:
 		;
 
 opt_row_pattern_initial_or_seek:
-			INITIAL		{ $$ = true; }
+			INITIAL_P		{ $$ = true; }
 			| SEEK
 				{
 					ereport(ERROR,
@@ -19493,7 +19493,7 @@ unreserved_keyword:
 			| INDEXES
 			| INHERIT
 			| INHERITS
-			| INITIAL
+			| INITIAL_P
 			| INLINE_P
 			| INPUT_P
 			| INSENSITIVE
@@ -20104,7 +20104,7 @@ bare_label_keyword:
 			| INDEXES
 			| INHERIT
 			| INHERITS
-			| INITIAL
+			| INITIAL_P
 			| INITIALLY
 			| INLINE_P
 			| INNER_P
