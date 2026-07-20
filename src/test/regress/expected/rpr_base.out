@@ -433,6 +433,28 @@ ERROR:  DEFINE variable "b" is not used in PATTERN
 LINE 7:     DEFINE A AS id > 0, B AS id > 5  -- B not in pattern
                                 ^
 DROP TABLE rpr_unused;
+-- A DEFINE predicate is evaluated only when its variable is tentatively
+-- mapped.  A is false at every row, so B is never reached; B's condition
+-- (which would divide by zero) must never run, and every row is unmatched.
+CREATE TABLE rpr_lazy (id INT, v INT);
+INSERT INTO rpr_lazy VALUES (1, 1), (2, 2), (3, 3);
+SELECT id, v, count(*) OVER w AS cnt
+FROM rpr_lazy
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B)
+    DEFINE A AS v < 0, B AS 1 / (v - v) > 0
+)
+ORDER BY id;
+ id | v | cnt 
+----+---+-----
+  1 | 1 |   0
+  2 | 2 |   0
+  3 | 3 |   0
+(3 rows)
+
+DROP TABLE rpr_lazy;
 -- ============================================================
 -- FRAME Options Tests
 -- ============================================================

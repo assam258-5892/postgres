@@ -354,6 +354,23 @@ ORDER BY id;
 
 DROP TABLE rpr_unused;
 
+-- A DEFINE predicate is evaluated only when its variable is tentatively
+-- mapped.  A is false at every row, so B is never reached; B's condition
+-- (which would divide by zero) must never run, and every row is unmatched.
+CREATE TABLE rpr_lazy (id INT, v INT);
+INSERT INTO rpr_lazy VALUES (1, 1), (2, 2), (3, 3);
+SELECT id, v, count(*) OVER w AS cnt
+FROM rpr_lazy
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B)
+    DEFINE A AS v < 0, B AS 1 / (v - v) > 0
+)
+ORDER BY id;
+
+DROP TABLE rpr_lazy;
+
 -- ============================================================
 -- FRAME Options Tests
 -- ============================================================
