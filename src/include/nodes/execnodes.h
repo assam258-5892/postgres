@@ -2593,6 +2593,21 @@ typedef struct NFALengthStats
 	int64		total;			/* total length (for computing average) */
 } NFALengthStats;
 
+/*
+ * Tri-state result of a DEFINE predicate for one row pattern variable at the
+ * current row.  RPR_VAR_UNEVALUATED is the "not yet evaluated" sentinel and
+ * must be zero so palloc0 initializes the per-row cache to it; the DEFINE is
+ * evaluated lazily at the point the NFA first consumes the variable (see
+ * nfa_eval_var_match).  A NULL DEFINE result folds to RPR_VAR_FALSE
+ * (non-True = not mapped, per ISO/IEC 19075-5).
+ */
+typedef enum RPRVarMatch
+{
+	RPR_VAR_UNEVALUATED = 0,	/* not yet evaluated (sentinel) */
+	RPR_VAR_FALSE,				/* evaluated to non-True (FALSE or NULL) */
+	RPR_VAR_TRUE,				/* evaluated to True */
+} RPRVarMatch;
+
 typedef struct WindowAggState
 {
 	ScanState	ss;				/* its first field is NodeTag */
@@ -2655,18 +2670,17 @@ typedef struct WindowAggState
 	/* these fields are used in Row pattern recognition: */
 	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
 	struct RPRPattern *rpPattern;	/* compiled pattern for NFA execution */
-	List	   *defineVariableList; /* list of row pattern definition
-									 * variables (list of String) */
-	List	   *defineClauseExprs;	/* expression for row pattern definition
-									 * search conditions ExprState list */
+	List	   *defineClauseExprs;	/* row pattern DEFINE search conditions as
+									 * an ExprState list, in DEFINE order
+									 * (list index == varId) */
 	RPRNFAContext *nfaContext;	/* active matching contexts (head) */
 	RPRNFAContext *nfaContextTail;	/* tail of active contexts (for reverse
 									 * traversal) */
 	RPRNFAContext *nfaContextFree;	/* recycled NFA context nodes */
 	RPRNFAState *nfaStateFree;	/* recycled NFA state nodes */
 	Size		nfaStateSize;	/* pre-calculated RPRNFAState size */
-	bool	   *nfaVarMatched;	/* per-row cache: varMatched[varId] for varId
-								 * < numDefines */
+	RPRVarMatch *nfaVarMatched; /* per-row tri-state cache: varMatched[varId]
+								 * for varId < numDefines, evaluated lazily */
 	Bitmapset  *defineMatchStartDependent;	/* DEFINE vars needing per-context
 											 * evaluation
 											 * (match_start-dependent) */
@@ -2732,7 +2746,7 @@ typedef struct WindowAggState
 	bool		hasFirstNav;	/* FIRST() present in DEFINE */
 	RPRNavOffsetKind navFirstOffsetKind;	/* status of navFirstOffset */
 	int64		navFirstOffset; /* min FIRST() offset (when FIXED) */
-	struct WindowObjectData *nav_winobj;	/* winobj for RPR nav fetch */
+	struct WindowObjectData *nav_winobj;	/* winobj for RPR */
 	int64		nav_slot_pos;	/* position cached in nav_slot, or -1 */
 	TupleTableSlot *nav_slot;	/* slot for PREV/NEXT/FIRST/LAST target row */
 	TupleTableSlot *nav_saved_outertuple;	/* saved slot during nav swap */
@@ -2740,10 +2754,11 @@ typedef struct WindowAggState
 	int64		nav_match_start;	/* match_start for FIRST/LAST nav */
 
 	/* RPR current match result */
-	bool		rpr_match_valid;	/* true if a match result is set */
-	bool		rpr_match_matched;	/* true if the result was a match */
-	int64		rpr_match_start;	/* start position of the match result */
-	int64		rpr_match_length;	/* number of rows matched (0 = empty) */
+	int64		rpr_match_start;	/* start of the result; < 0 = not
+									 * determined */
+	int64		rpr_match_length;	/* result kind when start >= 0: -1
+									 * unmatched, 0 empty match, >= 1 real
+									 * match length */
 } WindowAggState;
 
 /* ----------------
