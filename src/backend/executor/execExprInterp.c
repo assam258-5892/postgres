@@ -6036,8 +6036,18 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	/* Save current slot for later restore */
 	winstate->nav_saved_outertuple = econtext->ecxt_outertuple;
 
-	offset = rprnavstate->offset;
-	compound_offset = rprnavstate->compound_offset;
+	if (rprnavstate->offset.isnull || rprnavstate->compound_offset.isnull)
+		ereport(ERROR,
+				errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+				errmsg("row pattern navigation offset must not be null"));
+
+	offset = DatumGetInt64(rprnavstate->offset.value);
+	compound_offset = DatumGetInt64(rprnavstate->compound_offset.value);
+
+	if (offset < 0 || compound_offset < 0)
+		ereport(ERROR,
+				errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("row pattern navigation offset must not be negative"));
 
 	/*
 	 * Calculate target position based on navigation direction.  On overflow,

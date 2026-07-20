@@ -1171,7 +1171,7 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_prev(1);
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
-   Nav Mark Lookback: 1
+   Nav Mark Lookback: retain all
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_integ

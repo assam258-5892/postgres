@@ -1088,9 +1088,8 @@ typedef struct RprNavState
 	 * executor state (not on the RPRNavExpr) because plan trees are read-only
 	 * and may be shared by concurrent executions.
 	 */
-	int64		offset;			/* inner offset */
-	int64		compound_offset;	/* outer offset for compound nav */
-
+	NullableDatum offset;		/* inner offset */
+	NullableDatum compound_offset;	/* outer offset for compound nav */
 	int16		resulttyplen;	/* RESTORE: result type length */
 	bool		resulttypbyval; /* RESTORE: result pass-by-value? */
 } RprNavState;
@@ -1107,7 +1106,9 @@ typedef struct RprNavOffsets
 {
 	RPRNavExpr *nav;			/* plan-tree node (lookup key) */
 	int64		offset;			/* resolved inner offset */
+	bool		offset_valid;
 	int64		compound_offset;	/* resolved outer offset */
+	bool		compound_offset_valid;
 } RprNavOffsets;
 
 /*

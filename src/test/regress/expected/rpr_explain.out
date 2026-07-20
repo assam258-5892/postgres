@@ -6007,7 +6007,7 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 2
+   Nav Mark Lookback: retain all
    ->  Function Scan on generate_series s
 (5 rows)
 
@@ -6264,14 +6264,13 @@ EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
  WindowAgg (actual rows=10.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
-   Nav Mark Lookahead: infinite
+   Nav Mark Lookback: retain all
    Storage: Memory  Maximum Storage: NkB
    NFA States: 1 peak, 11 total, 0 merged
    NFA Contexts: 2 peak, 11 total, 10 pruned
    NFA: 0 matched, 0 mismatched
    ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
-(10 rows)
+(9 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE test_overflow_lookahead;
@@ -6293,10 +6292,9 @@ EXPLAIN (COSTS OFF) EXECUTE p_first_runtime(1, 1);
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
-   Nav Mark Lookahead: 2
+   Nav Mark Lookback: retain all
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE p_first_runtime;

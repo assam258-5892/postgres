@@ -4036,8 +4036,8 @@ eval_nav_offset(WindowAggState *winstate, Expr *offset_expr)
 static void
 compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 {
-	int64		inner;
-	int64		outer;
+	int64		inner = 1;
+	int64		outer = 0;
 	RprNavOffsets *entry = palloc_object(RprNavOffsets);
 
 	/*
@@ -4050,17 +4050,30 @@ compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 	Assert(nav->compound_offset_arg == NULL ||
 		   !IsA(nav->compound_offset_arg, RPRNavExpr));
 
+	entry->offset_valid = true;
+	entry->compound_offset_valid = true;
+
 	if (nav->offset_arg != NULL)
-		inner = eval_nav_offset(context->winstate,
-								nav->offset_arg);
+	{
+		if (IsA((Node *) nav->offset_arg, Const))
+			inner = eval_nav_offset(context->winstate,
+									nav->offset_arg);
+		else
+			entry->offset_valid = false;
+	}
 	else if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_NEXT)
 		inner = 1;
 	else
 		inner = 0;
 
 	if (nav->compound_offset_arg != NULL)
-		outer = eval_nav_offset(context->winstate,
-								nav->compound_offset_arg);
+	{
+		if (IsA((Node *) nav->compound_offset_arg, Const))
+			outer = eval_nav_offset(context->winstate,
+									nav->compound_offset_arg);
+		else
+			entry->compound_offset_valid = false;
+	}
 	else
 		outer = 1;
 
@@ -4070,6 +4083,12 @@ compute_nav_offsets(RPRNavExpr *nav, EvalDefineOffsetsContext *context)
 
 	context->winstate->rprNavOffsets =
 		lappend(context->winstate->rprNavOffsets, entry);
+
+	if (!entry->offset_valid || !entry->compound_offset_valid)
+	{
+		context->maxOverflow = true;
+		return;
+	}
 
 	/* Backward reach: PREV, LAST-with-offset */
 	if (!context->maxOverflow)

@@ -1209,8 +1209,26 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 					if (entry->nav == nav)
 					{
-						rprnavstate->offset = entry->offset;
-						rprnavstate->compound_offset = entry->compound_offset;
+						if (entry->offset_valid)
+						{
+							rprnavstate->offset.isnull = false;
+							rprnavstate->offset.value = Int64GetDatum(entry->offset);
+						}
+						else
+							ExecInitExprRec(entry->nav->offset_arg, state,
+											&rprnavstate->offset.value,
+											&rprnavstate->offset.isnull);
+
+						if (entry->compound_offset_valid)
+						{
+							rprnavstate->compound_offset.isnull = false;
+							rprnavstate->compound_offset.value = Int64GetDatum(entry->compound_offset);
+						}
+						else
+							ExecInitExprRec(entry->nav->compound_offset_arg, state,
+											&rprnavstate->compound_offset.value,
+											&rprnavstate->compound_offset.isnull);
+
 						find_navexpr = true;
 					}
 				}
