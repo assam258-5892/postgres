@@ -1130,8 +1130,8 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 			/*
 			 * Variable not in DEFINE clause - this is valid per ISO/IEC
 			 * 19075-5 Feature R020.  Such variables are implicitly TRUE. Add
-			 * to varNames so they get a varId >= defineVariableList length,
-			 * which executor treats as TRUE.
+			 * to varNames so they get a varId >= the number of DEFINE clause
+			 * expressions, which executor treats as TRUE.
 			 */
 			Assert(*numVars <= RPR_VARID_MAX);
 			varNames[(*numVars)++] = node->varName;
