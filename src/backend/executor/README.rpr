@@ -571,7 +571,7 @@ V-3. RPR Fields of WindowAggState
   nfaContext / nfaContextTail   Doubly-linked list of active contexts
   nfaContextFree                Reuse pool for contexts
   nfaStateFree                  Reuse pool for states
-  nfaVarMatched                 Per-row cache: varMatched[varId]
+  nfaVarMatched                 Per-row tri-state cache: varMatched[varId] (lazy)
   nfaVisitedEnds                Nullable ENDs reached in this DFS (cycle detection)
   nfaVisitedMinWord             Lowest bitmapword index touched since last reset
   nfaVisitedMaxWord             Highest bitmapword index touched since last reset
@@ -612,7 +612,7 @@ Pseudocode of the row processing loop:
       targetCtx = ExecRPRStartContext(pos)
 
   for currentPos = startPos; targetCtx->states != NULL; currentPos++:
-      if not rpr_evaluate_row(currentPos):  -- row does not exist
+      if not rpr_prepare_row(currentPos):   -- row does not exist
           ExecRPRFinalizeAllContexts()      -- finalize all contexts
           ExecRPRCleanupDeadContexts()      -- clean up after finalization
           break
@@ -657,14 +657,25 @@ paths, so the empty match is final.  Greedy (A*): the enter path adds its
 VAR states before the skip path records FIN, so those states survive and
 may match a longer span on a later row.
 
-VI-3. Row Evaluation: rpr_evaluate_row()
+VI-3. Row Preparation: rpr_prepare_row()
 
-Evaluates all variable conditions in the DEFINE clause at once for
-the current row.
+Prepares the DEFINE evaluation context for the current row.  DEFINE
+predicates are NOT evaluated here; each variable is evaluated lazily the
+first time the NFA consumes it (Phase 1 / nfa_eval_var_match), so a
+variable that no active state tests at this row is never evaluated.
 
-  for each defineClause[i]:
-      result = ExecEvalExpr(defineClause[i])
-      varMatched[i] = (not null and true)
+  fetch current row into temp_slot_1  -- return false if out of partition
+  set ecxt_outertuple = current row
+  invalidate nav_slot_pos
+  reset nfaVarMatched[] to RPR_VAR_UNEVALUATED
+
+nfaVarMatched is a tri-state array (RPRVarMatch): RPR_VAR_UNEVALUATED,
+RPR_VAR_TRUE, or RPR_VAR_FALSE.  nfa_eval_var_match() evaluates a
+variable's DEFINE on first consumption and caches the result; a NULL
+result folds to RPR_VAR_FALSE (non-True is not mapped).  The caller
+(advance_reduced_frame_nfa) holds winstate->currentpos at the scan
+position for the whole row (restored after the loop) because the deferred
+navigation opcodes read currentpos.
 
 To support row navigation operators (PREV, NEXT, FIRST, LAST),
 a 1-slot model is used: only ecxt_outertuple is set to the current
@@ -687,33 +698,44 @@ nav_slot caches the last fetched position (nav_slot_pos) to avoid
 redundant tuplestore lookups when multiple navigation calls target
 the same row.
 
-The varMatched array is referenced later in Phase 1 (Match).
+The nfaVarMatched entries are filled lazily during Phase 1 (Match) as
+variables are consumed.
 
-VI-4. Per-Context Re-evaluation (match_start_dependent variables)
+VI-4. Per-Context Invalidation (match_start_dependent variables)
 
 DEFINE variables that depend on match_start (those containing FIRST,
 LAST-with-offset, or compound PREV_FIRST/NEXT_FIRST/PREV_LAST/NEXT_LAST)
-are identified at plan time via defineMatchStartDependent.  The shared
-evaluation in rpr_evaluate_row() uses the head context's matchStartRow
-for FIRST/LAST base position.
+are identified at plan time via defineMatchStartDependent.  For the head
+context, advance_reduced_frame_nfa sets nav_match_start to its
+matchStartRow before matching, so lazy evaluation uses the correct
+FIRST/LAST base position.
 
-When processing a context whose matchStartRow differs from the shared
-value, nfa_reevaluate_dependent_vars() temporarily sets nav_match_start
-to that context's matchStartRow and re-evaluates only the dependent
-variables.  The original nav_match_start and currentpos are saved and
-restored after re-evaluation.
+When processing a context whose matchStartRow differs,
+nfa_reevaluate_dependent_vars() resets only the dependent variables to
+RPR_VAR_UNEVALUATED so they are re-evaluated lazily against this context's
+matchStartRow, installs nav_match_start to that value, and invalidates the
+nav_slot cache.  match_start-independent variables keep their cached value
+across contexts (they do not read nav_match_start).
 
-Summary of evaluation strategy by navigation content:
+nav_match_start is left installed and NOT restored: FIRST/LAST read it at
+evaluation time, which happens later during nfa_match(); the next
+context's invalidation or the next row's setup overwrites it.  The
+function also resets rprContext so one context's DEFINE scratch does not
+accumulate across every context of a row.
+
+Summary of evaluation strategy by navigation content (a variable is
+evaluated once per row and cached, except dependent ones which are
+re-evaluated once per differing context):
 
   Navigation content               evaluation
   -------------------------------------------------------
-  No navigation                    shared (once per row)
-  PREV/NEXT only                   shared (once per row)
-  LAST (no offset)                 shared (once per row)
+  No navigation                    cached (once per row)
+  PREV/NEXT only                   cached (once per row)
+  LAST (no offset)                 cached (once per row)
   LAST (with offset)               per-context
   FIRST (any)                      per-context
   Compound (inner FIRST)           per-context
-  Compound (inner LAST, no off.)   shared (once per row)
+  Compound (inner LAST, no off.)   cached (once per row)
   Compound (inner LAST, w/off.)    per-context
 
 VI-5. Tuplestore Mark and Trim (nodeWindowAgg.c)
@@ -777,7 +799,7 @@ nfa_match() iterates through each state in the context:
 
 Match determination (nfa_eval_var_match):
 
-  If varId is within the range of defineVariableList:
+  If varId is within the range of defineClauseExprs:
       Use the value of varMatched[varId]
 
   If varId exceeds the range (variable not defined in DEFINE):
@@ -1180,13 +1202,12 @@ Chapter X  Match Result Processing
 X-1. Match Result
 
 RPR tracks the current match result as a single entry in WindowAggState
-with four fields: rpr_match_valid, rpr_match_matched, rpr_match_start,
-and rpr_match_length.  When rpr_match_valid is true, the entry describes
-the match result for the position at rpr_match_start: rpr_match_matched
-indicates success or failure, and rpr_match_length gives the number of
-rows consumed.  A match with rpr_match_length 0 represents an empty match
-(pattern matched but consumed no rows).  When rpr_match_valid is false,
-the position has not been evaluated yet (RF_NOT_DETERMINED).
+with two fields: rpr_match_start and rpr_match_length.  When
+rpr_match_start is >= 0 the entry describes the result for that position,
+and rpr_match_length gives the kind: -1 for an unmatched row, 0 for an
+empty match (pattern matched but consumed no rows), and >= 1 for a real
+match of that many rows.  When rpr_match_start is < 0, the position has
+not been evaluated yet (RF_NOT_DETERMINED).
 
 A row's status against the current match result can be obtained by
 calling get_reduced_frame_status().
@@ -1281,6 +1302,11 @@ XI-3. Compilation Result
 
 XI-4. Execution Trace
 
+The trace lists every variable's DEFINE value together for readability.  In
+the lazy model each variable is evaluated only when a state consumes it
+(nfa_eval_var_match); a variable no state tests at a row stays
+RPR_VAR_UNEVALUATED.
+
 --- Row 0 (price=100) ---
 
   update_reduced_frame(0) called.
@@ -1289,7 +1315,7 @@ XI-4. Execution Trace
   Initial advance: elemIdx=0(A) -> VAR, so state is added.
   C0.states = [{elemIdx=0, counts=[0]}]
 
-  rpr_evaluate_row(0):
+  DEFINE values, row 0:
     A: price(100) > PREV(price) -> no PREV -> false
     B: price(100) < PREV(price) -> no PREV -> false
     varMatched = [false, false]
@@ -1311,7 +1337,7 @@ XI-4. Execution Trace
   Context C1 created (matchStartRow=1).
   Initial advance: C1.states = [{elemIdx=0, counts=[0]}]
 
-  rpr_evaluate_row(1):
+  DEFINE values, row 1:
     A: 110 > PREV(100) -> true
     B: 110 < PREV(100) -> false
     varMatched = [true, false]
@@ -1333,7 +1359,7 @@ XI-4. Execution Trace
   Context C2 created (matchStartRow=2).
   Initial advance: C2.states = [{elemIdx=0, counts=[0]}]
 
-  rpr_evaluate_row(2):
+  DEFINE values, row 2:
     A: 120 > PREV(110) -> true
     B: 120 < PREV(110) -> false
     varMatched = [true, false]
@@ -1365,7 +1391,7 @@ XI-4. Execution Trace
 
 --- Row 3 (price=115) ---
 
-  rpr_evaluate_row(3):
+  DEFINE values, row 3:
     A: 115 > PREV(120) -> false
     B: 115 < PREV(120) -> true
     varMatched = [false, true]
@@ -1394,7 +1420,7 @@ XI-4. Execution Trace
   C3 was already created but matchStartRow=3, so it is not applicable.
   New context C4 created (matchStartRow=4).
 
-  rpr_evaluate_row(4):
+  DEFINE values, row 4:
     A: 130 > PREV(115) -> true
     B: 130 < PREV(115) -> false
 
@@ -1570,7 +1596,8 @@ Appendix A. Key Function Index
   finalizeRPRPattern            rpr.c                 Finalization
   computeAbsorbability          rpr.c                 Absorption analysis
   update_reduced_frame          nodeWindowAgg.c       Execution main loop
-  rpr_evaluate_row              nodeWindowAgg.c       DEFINE evaluation
+  rpr_prepare_row               nodeWindowAgg.c       Row prep (lazy DEFINE)
+  nfa_eval_var_match            execRPR.c             Lazy DEFINE evaluation
   ExecRPRStartContext           execRPR.c             Context creation
   ExecRPRProcessRow             execRPR.c             3-phase processing
   nfa_match                     execRPR.c             Phase 1
@@ -1631,9 +1658,8 @@ Appendix B. Data Structure Relationship Diagram
   WindowAggState
     |--- rpSkipTo: RPSkipTo (AFTER MATCH SKIP mode)
     |--- rpPattern: RPRPattern* (copied from plan)
-    |--- defineVariableList: List<String> (variable names, DEFINE order)
-    |--- defineClauseExprs: List<ExprState>
-    |--- nfaVarMatched: bool[] (per-row cache)
+    |--- defineClauseExprs: List<ExprState> (DEFINE order, index == varId)
+    |--- nfaVarMatched: RPRVarMatch[] (per-row tri-state cache, lazy)
     |--- defineMatchStartDependent: Bitmapset* (match_start_dependent
     |        DEFINE vars; see VI-4)
     |--- nfaVisitedEnds: bitmapword* (cycle detection)

@@ -2550,6 +2550,7 @@ RPRPatternNode
 RPRPatternNodeType
 RPRQuantity
 RPRVarId
+RPRVarMatch
 RPSkipTo
 RTEKind
 RTEPermissionInfo
