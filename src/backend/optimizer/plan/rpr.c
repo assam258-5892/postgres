@@ -37,6 +37,7 @@
 
 #include "postgres.h"
 
+#include "common/int.h"
 #include "miscadmin.h"
 #include "optimizer/rpr.h"
 
@@ -263,66 +264,63 @@ flattenSeqChildren(List *children)
 static List *
 mergeConsecutiveVars(List *children)
 {
-	List	   *mergedChildren = NIL;
-	RPRPatternNode *prev = NULL;
-
-	foreach_node(RPRPatternNode, child, children)
+	for (int outerpos = 0; outerpos < list_length(children); outerpos++)
 	{
-		if (child->nodeType == RPR_PATTERN_VAR && child->reluctant == false)
+		RPRPatternNode *rprpattern = list_nth_node(RPRPatternNode, children, outerpos);
+
+		if (rprpattern->nodeType != RPR_PATTERN_VAR ||
+			rprpattern->reluctant)
+			continue;
+
+		for (int restpos = outerpos + 1; restpos < list_length(children);)
 		{
-			/* ----------------------
-			 * Can merge consecutive VAR nodes if:
-			 * 1. Same variable name
-			 * 2. No min overflow: prev->min + child->min < INF
-			 * 3. No max overflow: prev->max + child->max < INF (or either is INF)
-			 *
-			 * Strict <: a sum equal to INF would alias the unbounded sentinel
-			 * (min must stay finite; a finite max must not become INF).
+			RPRPatternNode *other;
+			int			newmin;
+			int			newmax = 0;
+
+			other = list_nth_node(RPRPatternNode, children, restpos);
+
+			if (other->nodeType != RPR_PATTERN_VAR)
+				break;
+
+			/*
+			 * A greedy quantifier followed by a reluctant one over the same
+			 * variable is not expressible as a single quantifier: the pair
+			 * settles the first quantifier's count before the second one
+			 * decides, which the standard's leftmost-choice-first rule
+			 * (ISO/IEC TR 19075-5 7.2) makes observable.  Merging them would
+			 * change the preferred match, so stop here.
 			 */
-			if (prev != NULL &&
-				strcmp(prev->varName, child->varName) == 0 &&
-				prev->min < RPR_QUANTITY_INF - child->min &&
-				(prev->max < RPR_QUANTITY_INF - child->max ||
-				 prev->max == RPR_QUANTITY_INF ||
-				 child->max == RPR_QUANTITY_INF))
+			if (other->reluctant)
+				break;
+
+			if (strcmp(rprpattern->varName, other->varName) != 0)
+				break;
+
+			if (rprpattern->max == RPR_QUANTITY_INF ||
+				other->max == RPR_QUANTITY_INF)
+				newmax = RPR_QUANTITY_INF;
+
+			if (pg_add_s32_overflow(rprpattern->min, other->min, &newmin))
+				break;
+
+			if (newmax != RPR_QUANTITY_INF &&
+				pg_add_s32_overflow(rprpattern->max, other->max, &newmax))
+				break;
+
+			if (newmin < RPR_QUANTITY_INF &&
+				newmax <= RPR_QUANTITY_INF)
 			{
-				/*
-				 * Merge: accumulate min/max into prev. prev is guaranteed to
-				 * be a non-reluctant VAR by the outer condition.
-				 */
-				Assert(prev->nodeType == RPR_PATTERN_VAR && prev->reluctant == false);
-
-				prev->min += child->min;
-
-				if (prev->max == RPR_QUANTITY_INF ||
-					child->max == RPR_QUANTITY_INF)
-					prev->max = RPR_QUANTITY_INF;
-				else
-					prev->max += child->max;
+				rprpattern->min = newmin;
+				rprpattern->max = newmax;
+				children = list_delete_nth_cell(children, restpos);
 			}
 			else
-			{
-				/* Flush previous and start new */
-				if (prev != NULL)
-					mergedChildren = lappend(mergedChildren, prev);
-				prev = child;
-			}
-		}
-		else
-		{
-			/* Non-mergeable - flush previous */
-			if (prev != NULL)
-				mergedChildren = lappend(mergedChildren, prev);
-			mergedChildren = lappend(mergedChildren, child);
-			prev = NULL;
+				break;
 		}
 	}
 
-	/* Flush remaining */
-	if (prev != NULL)
-		mergedChildren = lappend(mergedChildren, prev);
-
-	return mergedChildren;
+	return children;
 }
 
 /*
@@ -421,76 +419,38 @@ mergeConsecutiveGroups(List *children)
 static List *
 mergeConsecutiveAlts(List *children)
 {
-	List	   *mergedChildren = NIL;
-	RPRPatternNode *prev = NULL;
-	int			count = 0;
+	int			count = 1;
 
-	foreach_node(RPRPatternNode, child, children)
+	for (int outerpos = 0; outerpos < list_length(children); outerpos++)
 	{
-		if (child->nodeType == RPR_PATTERN_ALT && child->reluctant == false)
+		RPRPatternNode *rprpattern;
+
+		rprpattern = list_nth_node(RPRPatternNode, children, outerpos);
+
+		if (rprpattern->nodeType != RPR_PATTERN_ALT ||
+			rprpattern->reluctant)
+			continue;
+
+		for (int restpos = outerpos + 1; restpos < list_length(children);)
 		{
-			if (prev != NULL &&
-				rprPatternChildrenEqual(prev->children, child->children))
-			{
-				/* Same ALT as prev - accumulate */
-				count++;
-			}
-			else
-			{
-				/* Different ALT or first ALT - flush previous */
-				if (prev != NULL)
-				{
-					if (count > 1)
-					{
-						/* Wrap in GROUP{count,count}(ALT) */
-						RPRPatternNode *group = makeNode(RPRPatternNode);
+			RPRPatternNode *other;
 
-						group->nodeType = RPR_PATTERN_GROUP;
-						group->min = count;
-						group->max = count;
-						group->reluctant = false;
-						group->location = -1;
-						group->children = list_make1(prev);
-						mergedChildren = lappend(mergedChildren, group);
-					}
-					else
-						mergedChildren = lappend(mergedChildren, prev);
-				}
-				prev = child;
-				count = 1;
-			}
+			other = list_nth_node(RPRPatternNode, children, restpos);
+
+			if (other->nodeType != RPR_PATTERN_ALT || other->reluctant)
+				break;
+
+			if (!rprPatternChildrenEqual(rprpattern->children,
+										 other->children))
+				break;
+
+			children = list_delete_nth_cell(children, restpos);
+			count++;
 		}
-		else
-		{
-			/* Non-ALT - flush previous */
-			if (prev != NULL)
-			{
-				if (count > 1)
-				{
-					RPRPatternNode *group = makeNode(RPRPatternNode);
 
-					group->nodeType = RPR_PATTERN_GROUP;
-					group->min = count;
-					group->max = count;
-					group->reluctant = false;
-					group->location = -1;
-					group->children = list_make1(prev);
-					mergedChildren = lappend(mergedChildren, group);
-				}
-				else
-					mergedChildren = lappend(mergedChildren, prev);
-			}
-			mergedChildren = lappend(mergedChildren, child);
-			prev = NULL;
-			count = 0;
-		}
-	}
-
-	/* Flush remaining */
-	if (prev != NULL)
-	{
 		if (count > 1)
 		{
+			/* Wrap it into GROUP {count, count}(ALT) */
 			RPRPatternNode *group = makeNode(RPRPatternNode);
 
 			group->nodeType = RPR_PATTERN_GROUP;
@@ -498,14 +458,15 @@ mergeConsecutiveAlts(List *children)
 			group->max = count;
 			group->reluctant = false;
 			group->location = -1;
-			group->children = list_make1(prev);
-			mergedChildren = lappend(mergedChildren, group);
+			group->children = list_make1(copyObject(rprpattern));
+
+			/* Replace the surviving ALT at this position with the GROUP */
+			lfirst(list_nth_cell(children, outerpos)) = group;
 		}
-		else
-			mergedChildren = lappend(mergedChildren, prev);
+		count = 1;				/* reset */
 	}
 
-	return mergedChildren;
+	return children;
 }
 
 /*
@@ -744,19 +705,43 @@ optimizeSeqPattern(RPRPatternNode *pattern)
 static List *
 flattenAltChildren(List *children)
 {
-	List	   *newChildren = NIL;
-
-	foreach_node(RPRPatternNode, child, children)
+	for (int outerpos = 0; outerpos < list_length(children);)
 	{
-		RPRPatternNode *opt = optimizeRPRPattern(child);
+		ListCell   *lc = list_nth_cell(children, outerpos);
 
-		if (opt->nodeType == RPR_PATTERN_ALT)
-			newChildren = list_concat(newChildren, list_copy(opt->children));
+		RPRPatternNode *rprpattern = list_nth_node(RPRPatternNode, children,
+												   outerpos);
+
+		RPRPatternNode *optimized = optimizeRPRPattern(rprpattern);
+
+		if (optimized->nodeType == RPR_PATTERN_ALT)
+		{
+			List	   *optimized_list = list_copy(optimized->children);
+			int			numFlattened = list_length(optimized_list);
+			int			i = 0;
+
+			/*
+			 * Splice the nested ALT's children in at this position, in order,
+			 * so the flattened alternatives keep their place in the parent.
+			 */
+			children = list_delete_nth_cell(children, outerpos);
+
+			foreach_ptr(RPRPatternNode, child, optimized_list)
+			{
+				children = list_insert_nth(children, outerpos + i, child);
+				i++;
+			}
+
+			outerpos += numFlattened;
+		}
 		else
-			newChildren = lappend(newChildren, opt);
+		{
+			lfirst(lc) = optimized;
+			outerpos++;
+		}
 	}
 
-	return newChildren;
+	return children;
 }
 
 /*
@@ -772,26 +757,26 @@ flattenAltChildren(List *children)
 static List *
 removeDuplicateAlternatives(List *children)
 {
-	List	   *uniqueChildren = NIL;
-
-	foreach_node(RPRPatternNode, child, children)
+	for (int outerpos = 0; outerpos < list_length(children); outerpos++)
 	{
-		bool		isDuplicate = false;
+		RPRPatternNode *rprpattern;
 
-		foreach_node(RPRPatternNode, uchild, uniqueChildren)
+		rprpattern = list_nth_node(RPRPatternNode, children, outerpos);
+
+		for (int restpos = outerpos + 1; restpos < list_length(children);)
 		{
-			if (rprPatternEqual(uchild, child))
-			{
-				isDuplicate = true;
-				break;
-			}
-		}
+			RPRPatternNode *other;
 
-		if (!isDuplicate)
-			uniqueChildren = lappend(uniqueChildren, child);
+			other = list_nth_node(RPRPatternNode, children, restpos);
+
+			if (rprPatternEqual(rprpattern, other))
+				children = list_delete_nth_cell(children, restpos);
+			else
+				restpos++;
+		}
 	}
 
-	return uniqueChildren;
+	return children;
 }
 
 /*
@@ -930,7 +915,11 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		return pattern;
 
 	/* Flatten the child quantifier, guarding against overflow. */
-	new_min_64 = (int64) pattern->min * child->min;
+	if (pg_mul_s64_overflow(pattern->min, child->min, &new_min_64))
+		ereport(ERROR,
+				errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+				errmsg("quantifier bound out of range"));
+
 	if (new_min_64 >= RPR_QUANTITY_INF)
 		return pattern;			/* overflow, skip optimization */
 
@@ -938,7 +927,11 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		new_max_64 = RPR_QUANTITY_INF;
 	else
 	{
-		new_max_64 = (int64) pattern->max * child->max;
+		if (pg_mul_s64_overflow(pattern->max, child->max, &new_max_64))
+			ereport(ERROR,
+					errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+					errmsg("quantifier bound out of range"));
+
 		if (new_max_64 >= RPR_QUANTITY_INF)
 			return pattern;
 	}
@@ -1006,16 +999,18 @@ tryUnwrapGroup(RPRPatternNode *pattern)
 static RPRPatternNode *
 optimizeGroupPattern(RPRPatternNode *pattern)
 {
-	List	   *newChildren;
+	ListCell   *lc;
 	RPRPatternNode *result;
 
 	/* Recursively optimize children */
-	newChildren = NIL;
-	foreach_node(RPRPatternNode, child, pattern->children)
+	foreach(lc, pattern->children)
 	{
-		newChildren = lappend(newChildren, optimizeRPRPattern(child));
+		RPRPatternNode *child = (RPRPatternNode *) lfirst(lc);
+
+		RPRPatternNode *optimized = optimizeRPRPattern(child);
+
+		lfirst(lc) = optimized;
 	}
-	pattern->children = newChildren;
 
 	/* Try quantifier multiplication */
 	result = tryMultiplyQuantifiers(pattern);
