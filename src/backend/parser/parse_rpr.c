@@ -438,9 +438,6 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  *   - offset_arg / compound_offset_arg must not contain column refs
  *     or nested navigation operations
  *
- * Volatile callees (and sequence operations) are rejected later in the
- * planner via validate_rpr_define_volatility(); see optimizer/plan/rpr.c.
- *
  * The walker uses a phase tag to know which subtree it is in: DEFINE
  * body (top-level), inside a nav.arg, or inside a nav.offset_arg /
  * compound_offset_arg.  When entering an outer nav (PHASE_BODY), it

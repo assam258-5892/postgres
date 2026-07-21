@@ -2115,8 +2115,8 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
 
 -- A qualified call invokes the function, so its volatility still matters
 -- VOLATILE: unqualified is nav; qualified is rejected as a volatile function
-CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
-  LANGUAGE sql VOLATILE;
+CREATE FUNCTION prev(integer) RETURNS integer
+  LANGUAGE plpgsql VOLATILE AS 'BEGIN RETURN -999; END';
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   FROM nt
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -2141,8 +2141,57 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
 ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 6:     DEFINE A AS rpr_navns.prev(val) = -999)
-                        ^
+-- error
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) s;
+ERROR:  volatile functions are not allowed in DEFINE clause
+-- error
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
+ERROR:  volatile functions are not allowed in DEFINE clause
+-- accepted: the volatile is in a dead CASE arm that folds away, so a
+-- pulled-up subquery window is no stricter here than at top level
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS CASE WHEN false THEN random()::int > 0
+                                  ELSE val > 5 END)) s
+ORDER BY id;
+ id 
+----
+  1
+  2
+  3
+  4
+  5
+(5 rows)
+
+-- error: a volatile spliced in by folding after the gate -- a STABLE function
+-- whose default argument is volatile -- is still caught by the post-fold check
+CREATE FUNCTION rpr_off_leak(n bigint DEFAULT (random() * 5)::bigint)
+  RETURNS bigint LANGUAGE sql STABLE AS 'SELECT n';
+SELECT count(*) OVER w FROM generate_series(1, 100) g(v)
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS v > PREV(v, rpr_off_leak()));
+ERROR:  volatile functions are not allowed in DEFINE clause
+DROP FUNCTION rpr_off_leak(bigint);
+-- error: a UNION ALL leaf reaches the pull-up guard too, so its unused RPR
+-- window with a volatile DEFINE is rejected like the top-level case
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)
+ UNION ALL
+ SELECT id FROM nt) s;
+ERROR:  volatile functions are not allowed in DEFINE clause
 DROP FUNCTION prev(integer);
 -- IMMUTABLE: unqualified is nav; qualified is the escape hatch and succeeds
 CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
