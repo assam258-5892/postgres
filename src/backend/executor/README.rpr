@@ -956,11 +956,13 @@ Two boolean flags make the absorption decision efficient:
     states.
     Once false, it never becomes true again.
 
-  allStatesAbsorbable (dynamic: can fluctuate)
+  allStatesAbsorbable (dynamic until a match is recorded)
     "Can this context be absorbed?"
-    true if all states are in an absorbable region.
+    true if all states are in an absorbable region and no match is
+    recorded.
     Becomes false when a non-absorbable state is added; reverts to true
-    when it is removed.
+    when it is removed.  Recording a match also sets it false and that
+    does not revert, since absorbing would free the match.
 
 VIII-5. Absorption Order
 

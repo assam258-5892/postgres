@@ -3907,8 +3907,8 @@ LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* *?|B) DEFI...
                                                              ^
 HINT:  Did you mean "*?" for reluctant quantifier?
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFINE A AS val > 0, B AS val <= 0);
-ERROR:  invalid quantifier combination
-LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DE...
+ERROR:  invalid token "*?" after "?" quantifier
+LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFI...
                                                              ^
 HINT:  Did you mean "??" for reluctant quantifier?
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2}*?|B) DEFINE A AS val > 0, B AS val <= 0);
@@ -3980,8 +3980,8 @@ LINE 1: ...S BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A* ?+) DEFINE...
                                                              ^
 HINT:  Did you mean "*?" for reluctant quantifier?
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE A AS TRUE);
-ERROR:  invalid quantifier combination
-LINE 1: ...OWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFI...
+ERROR:  invalid token "??" after "?" quantifier
+LINE 1: ...S BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE...
                                                              ^
 HINT:  Did you mean "??" for reluctant quantifier?
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A {1,2}??) DEFINE A AS TRUE);
@@ -4334,6 +4334,20 @@ WINDOW w AS (
 );
 ERROR:  cannot nest row pattern navigation more than two levels deep
 LINE 6:     DEFINE A AS PREV(FIRST(PREV(v))) > 0
+                        ^
+HINT:  Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed.
+-- Sibling navigations: prohibited, but they are not a deeper nesting,
+-- so the inner navigation must be reported as not being the direct
+-- argument rather than as a third level.
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v) + LAST(v)) > 0
+);
+ERROR:  row pattern navigation operation must be a direct argument of the outer navigation
+LINE 6:     DEFINE A AS PREV(FIRST(v) + LAST(v)) > 0
                         ^
 HINT:  Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed.
 -- A navigation offset must be a run-time constant, not a navigation operation

@@ -29,7 +29,11 @@
 --    B7. RPR + Recursive CTE
 --    B8. RPR + Incremental sort
 --    B9. RPR + Volatile function in DEFINE
---    B10. RPR + Correlated subquery
+--    B10. RPR + Correlated subquery in WHERE
+--    B11. RPR + Junk targetlist pruning
+--    B12. RPR + Correlated navigation offsets
+--    B13. RPR + DEFINE-only parameter caching
+--    B14. RPR + Multiple window definitions
 --
 CREATE TABLE rpr_integ (id INT, val INT);
 INSERT INTO rpr_integ VALUES
@@ -1353,6 +1357,53 @@ ORDER BY o.id, r.id;
        10 |  8 |   3
 (6 rows)
 
+-- A lateral outer reference carried in the subquery's SELECT list can
+-- share varno and varattno with a local column that only DEFINE
+-- references.  The two must not be taken for one targetlist entry:
+-- the planner turns the outer reference into a PARAM_EXEC, so
+-- dropping the junk entry would leave the DEFINE column out of every
+-- subplan targetlist and setrefs.c would fail with "variable not
+-- found in subplan target list".  Here o.b and the DEFINE column y
+-- are both attribute 2 of relation 1 at their own query levels.
+CREATE TABLE rpr_lat_o (a int, b int);
+CREATE TABLE rpr_lat_i (x int, y int);
+INSERT INTO rpr_lat_o VALUES (1, 10);
+INSERT INTO rpr_lat_i VALUES (1, 5), (2, 6);
+-- Result: the shared attribute number does not disturb the match.
+SELECT *
+FROM rpr_lat_o o,
+LATERAL (
+    SELECT o.b AS lat, count(*) OVER w AS c
+    FROM rpr_lat_i
+    WINDOW w AS (ORDER BY x
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS y > 0)
+) s;
+ a | b  | lat | c 
+---+----+-----+---
+ 1 | 10 |  10 | 2
+ 1 | 10 |  10 | 0
+(2 rows)
+
+-- Result: attribute 1 never collided; the counts must match above.
+SELECT *
+FROM rpr_lat_o o,
+LATERAL (
+    SELECT o.a AS lat, count(*) OVER w AS c
+    FROM rpr_lat_i
+    WINDOW w AS (ORDER BY x
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS y > 0)
+) s;
+ a | b  | lat | c 
+---+----+-----+---
+ 1 | 10 |   1 | 2
+ 1 | 10 |   1 | 0
+(2 rows)
+
+DROP TABLE rpr_lat_o, rpr_lat_i;
 -- ============================================================
 -- B7. RPR + Recursive CTE
 -- ============================================================
@@ -1566,13 +1617,18 @@ ORDER BY o.id;
  10 |  45 |         2
 (10 rows)
 
--- A column referenced only by DEFINE must not keep an unrelated column that
--- merely shares its attribute number.  DEFINE references a (rpr_over1); c
--- (rpr_over2) has the same attno but is unused, so it must be dropped.
+-- ============================================================
+-- B11. RPR + Junk targetlist pruning
+-- ============================================================
+-- Verify that the junk targetlist entry planted for a DEFINE-only
+-- column does not keep an unrelated column alive.  DEFINE references
+-- a (rpr_over1); c (rpr_over2) carries the same attribute number but
+-- is unused, so the plan must drop it.
 CREATE TABLE rpr_over1 (a int);
 CREATE TABLE rpr_over2 (c int);
 INSERT INTO rpr_over1 VALUES (1),(2),(3);
 INSERT INTO rpr_over2 VALUES (1),(2),(3);
+-- Plan: only the DEFINE column survives in the subquery output.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT cnt FROM (
   SELECT a AS oa, c AS oc, count(*) OVER w AS cnt
@@ -1601,11 +1657,16 @@ SELECT cnt FROM (
 (16 rows)
 
 DROP TABLE rpr_over1, rpr_over2;
--- A row pattern navigation offset that resolves to a correlated PARAM_EXEC
--- (here through SRF inlining of rpr_srf_f(g.n)) must be re-resolved on every
--- rescan, not frozen at executor init.  The inlined WindowAgg is the inner
--- side of a nestloop and is rescanned once per outer row, so each row sees its
--- own PREV(v, n) offset; a frozen offset would report the same value for all.
+-- ============================================================
+-- B12. RPR + Correlated navigation offsets
+-- ============================================================
+-- Verify that a navigation offset resolving to a correlated
+-- PARAM_EXEC is re-resolved on every rescan rather than frozen at
+-- executor init.  Each function below is inlined into the inner side
+-- of a nestloop and rescanned once per outer row, so every row must
+-- see its own offset; a frozen offset would report one value for all.
+-- Three shapes are covered: a backward PREV offset, a forward
+-- FIRST-family offset, and a compound navigation's outer offset.
 CREATE TABLE rpr_srf (v int);
 INSERT INTO rpr_srf SELECT generate_series(1, 10);
 CREATE FUNCTION rpr_srf_f(k int) RETURNS SETOF bigint AS $$
@@ -1614,8 +1675,8 @@ CREATE FUNCTION rpr_srf_f(k int) RETURNS SETOF bigint AS $$
   WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                PATTERN (A+) DEFINE A AS v > PREV(v, k))
 $$ LANGUAGE sql STABLE;
--- The offset reads "runtime"; the WindowAgg inlines into the nestloop and is
--- rescanned per outer row.
+-- Plan: the offset reads "runtime"; the WindowAgg inlines into the
+-- nestloop and is rescanned per outer row.
 EXPLAIN (COSTS OFF)
 SELECT g.n, max(s) FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_f(g.n) s
 GROUP BY g.n ORDER BY g.n;
@@ -1636,7 +1697,8 @@ GROUP BY g.n ORDER BY g.n;
                            ->  Seq Scan on rpr_srf
 (13 rows)
 
--- Each outer row yields its own offset (9, 8, 7), not one frozen value.
+-- Result: each outer row yields its own offset (9, 8, 7), not one
+-- frozen value.
 SELECT g.n, max(s) AS m FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_f(g.n) s
 GROUP BY g.n ORDER BY g.n;
  n | m 
@@ -1646,18 +1708,18 @@ GROUP BY g.n ORDER BY g.n;
  3 | 7
 (3 rows)
 
--- A forward FIRST-family offset with a correlated PARAM_EXEC must likewise be
--- re-resolved per scan (navFirstOffset / navFirstOffsetKind), not frozen at init.
--- PATTERN (B A+) anchors the match start at B so A can reference FIRST(v, k)
--- k rows ahead; each outer k yields its own forward offset (k=0 matches all
--- ten rows, k>=1 makes the first A fail), proving per-scan re-resolution.
+-- A forward FIRST-family offset must likewise be re-resolved per scan
+-- (navFirstOffset / navFirstOffsetKind).  PATTERN (B A+) anchors the
+-- match start at B so A can reference FIRST(v, k) k rows ahead, and
+-- each outer k yields its own forward offset.
 CREATE FUNCTION rpr_srf_first(k int) RETURNS SETOF bigint AS $$
   SELECT count(*) OVER w
   FROM rpr_srf
   WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                PATTERN (B A+) DEFINE A AS v > FIRST(v, k))
 $$ LANGUAGE sql STABLE;
--- The forward offset reads "runtime" and the WindowAgg inlines into the nestloop.
+-- Plan: the forward offset reads "runtime" and the WindowAgg inlines
+-- into the nestloop.
 EXPLAIN (COSTS OFF)
 SELECT g.n, max(s) FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
 GROUP BY g.n ORDER BY g.n;
@@ -1679,8 +1741,8 @@ GROUP BY g.n ORDER BY g.n;
                            ->  Seq Scan on rpr_srf
 (14 rows)
 
--- k=0 -> 10, k>=1 -> 0: distinct per outer row, so the forward offset is not
--- frozen at ExecInit.
+-- Result: k=0 matches all ten rows and k>=1 makes the first A fail,
+-- so the forward offset is not frozen at ExecInit.
 SELECT g.n, max(s) AS m FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
 GROUP BY g.n ORDER BY g.n;
  n | m  
@@ -1691,18 +1753,19 @@ GROUP BY g.n ORDER BY g.n;
 (3 rows)
 
 DROP FUNCTION rpr_srf_first(int);
--- A compound navigation whose OUTER offset is a correlated PARAM_EXEC must be
--- re-resolved per scan as well.  An outer offset that overflows int64 flips the
--- backward trim to RETAIN_ALL for that scan only; a smaller offset on the next
--- rescan must go back to FIXED.  k=1 -> 9, k=3 -> 7, k=overflow -> 0 (out of
--- range, no match), proving both the per-scan outer-offset resolution and the
--- RETAIN_ALL <-> FIXED toggle across rescans.
+-- A compound navigation's OUTER offset must be re-resolved per scan
+-- as well.  An outer offset that overflows int64 flips the backward
+-- trim to RETAIN_ALL for that scan only; a smaller offset on the next
+-- rescan must go back to FIXED.
 CREATE FUNCTION rpr_srf_cmp(k int8) RETURNS SETOF bigint AS $$
   SELECT count(*) OVER w
   FROM rpr_srf
   WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                PATTERN (A B+) DEFINE B AS v > PREV(LAST(v, 1), k))
 $$ LANGUAGE sql STABLE;
+-- Result: k=1 -> 9, k=3 -> 7, overflow -> 0 (out of range, no match),
+-- proving both the per-scan outer-offset resolution and the
+-- RETAIN_ALL <-> FIXED toggle across rescans.
 SELECT g.n, max(s) AS m
 FROM (VALUES (1::int8), (3::int8), (9223372036854775807::int8)) g(n),
      LATERAL rpr_srf_cmp(g.n) s
@@ -1717,13 +1780,16 @@ GROUP BY g.n ORDER BY g.n;
 DROP FUNCTION rpr_srf_cmp(int8);
 DROP FUNCTION rpr_srf_f(int);
 DROP TABLE rpr_srf;
--- A correlated PARAM_EXEC that appears only inside DEFINE must be registered in
--- the WindowAgg's extParam so the chgParam signal reaches a caching node above.
--- Here the inlined function's argument is used only in DEFINE, DISTINCT is
--- planned as a HashAgg, and HashAgg rescan is gated on chgParam; without the
--- param in extParam the hash table built for the first outer row would be
--- re-served for the rest.  Each threshold must get its own answer set
--- (10 -> {0, 90}, 200 -> {0}); a stale cache would add a spurious 200|90.
+-- ============================================================
+-- B13. RPR + DEFINE-only parameter caching
+-- ============================================================
+-- Verify that a correlated PARAM_EXEC appearing only inside DEFINE is
+-- registered in the WindowAgg's extParam, so the chgParam signal
+-- reaches a caching node above.  Here the inlined function's argument
+-- is used only in DEFINE, DISTINCT is planned as a HashAgg, and
+-- HashAgg rescan is gated on chgParam; without the param in extParam
+-- the hash table built for the first outer row would be re-served for
+-- the rest.
 CREATE TABLE rpr_hcache_thr (threshold int);
 INSERT INTO rpr_hcache_thr VALUES (10), (200);
 CREATE TABLE rpr_hcache_stock (price int);
@@ -1733,6 +1799,8 @@ CREATE FUNCTION rpr_hcache_fn(th int) RETURNS SETOF bigint LANGUAGE sql STABLE A
   WINDOW w AS (ORDER BY price ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                AFTER MATCH SKIP PAST LAST ROW
                INITIAL PATTERN (a+) DEFINE a AS price > th) $$;
+-- Result: each threshold gets its own answer set (10 -> {0, 90},
+-- 200 -> {0}); a stale cache would add a spurious 200|90.
 SELECT o.threshold, f FROM rpr_hcache_thr o, LATERAL rpr_hcache_fn(o.threshold) f
 ORDER BY 1, 2;
  threshold | f  
@@ -1744,6 +1812,62 @@ ORDER BY 1, 2;
 
 DROP FUNCTION rpr_hcache_fn(int);
 DROP TABLE rpr_hcache_thr, rpr_hcache_stock;
+-- ============================================================
+-- B14. RPR + Multiple window definitions
+-- ============================================================
+-- Verify that a column referenced only by DEFINE coexists with a
+-- later window's PARTITION BY / ORDER BY key that the SELECT list
+-- does not carry.  Both are added to the targetlist as junk entries
+-- and must draw their resno from p_next_resno; otherwise the two
+-- collide and apply_tlist_labeling trips an assertion during
+-- planning.  Here val is DEFINE-only and grp belongs to w2, with the
+-- RPR window defined first so its junk entry is created first.
+-- Result: the DEFINE-only column and the later window's key coexist.
+SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
+WINDOW w1 AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (S U+)
+        DEFINE U AS val > PREV(val)),
+    w2 AS (PARTITION BY grp ORDER BY id)
+ORDER BY id;
+ id | c1 | c2 
+----+----+----
+  1 |  2 |  1
+  2 |  0 |  2
+(2 rows)
+
+-- Result: same collision reached through a plain ORDER BY window.
+SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
+WINDOW w1 AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (S U+)
+        DEFINE U AS val > PREV(val)),
+    w2 AS (ORDER BY grp)
+ORDER BY id;
+ id | c1 | c2 
+----+----+----
+  1 |  2 |  2
+  2 |  0 |  2
+(2 rows)
+
+-- Result: defining the windows in the opposite order never collided,
+-- and must keep returning the same rows as the first query above.
+SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
+WINDOW w2 AS (PARTITION BY grp ORDER BY id),
+    w1 AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (S U+)
+        DEFINE U AS val > PREV(val))
+ORDER BY id;
+ id | c1 | c2 
+----+----+----
+  1 |  2 |  1
+  2 |  0 |  2
+(2 rows)
+
 -- Cleanup
 DROP TABLE rpr_integ;
 DROP TABLE rpr_integ2;
