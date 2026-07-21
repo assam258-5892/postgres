@@ -177,8 +177,9 @@ static void nfa_reevaluate_dependent_vars(WindowAggState *winstate,
  *     - Monotonic: true->false only (optimization: skip recalc when false)
  *
  *   ctx.allStatesAbsorbable: can this context be absorbed?
- *     - True if ALL states have isAbsorbable=true
- *     - Dynamic: can change false->true (when non-absorbable states die)
+ *     - True if ALL states have isAbsorbable=true and no match is recorded
+ *     - Dynamic: false->true when non-absorbable states die, but a
+ *       recorded match pins it false
  *
  * Absorption Algorithm:
  *   For each pair (older Ctx1, newer Ctx2):
@@ -586,9 +587,10 @@ nfa_record_context_absorbed(WindowAggState *winstate, int64 absorbedLen)
  *   hasAbsorbableState: true if context has at least one absorbable state.
  *     This flag is monotonic (true -> false only). Once all absorbable states
  *     die, no new absorbable states can be created through transitions.
- *   allStatesAbsorbable: true if ALL states in context are absorbable.
- *     This flag is dynamic and can change false -> true when non-absorbable
- *     states die off.
+ *   allStatesAbsorbable: true if ALL states in context are absorbable and no
+ *     match is recorded.  Dynamic (false -> true as non-absorbable states die
+ *     off), except that a recorded match pins it false: absorbing would free
+ *     a match no absorbing context can reproduce.
  *
  * Optimization: Once hasAbsorbableState becomes false, both flags remain false
  * permanently, so we skip recalculation.

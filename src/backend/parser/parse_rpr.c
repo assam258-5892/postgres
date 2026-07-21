@@ -371,6 +371,10 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		 * one is present in the targetlist.  This is needed so the planner
 		 * propagates the referenced columns through the plan tree, making
 		 * them available to the WindowAgg's DEFINE evaluation.
+		 *
+		 * Compare with equal(): a lateral outer reference can share varno and
+		 * varattno with a local column that DEFINE references, and conflating
+		 * them would drop the DEFINE column from the targetlist.
 		 */
 		vars = pull_var_clause(expr, 0);
 		foreach_node(Var, var, vars)
@@ -379,9 +383,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 
 			foreach_node(TargetEntry, tle, *targetlist)
 			{
-				if (IsA(tle->expr, Var) &&
-					((Var *) tle->expr)->varno == var->varno &&
-					((Var *) tle->expr)->varattno == var->varattno)
+				if (equal(tle->expr, var))
 				{
 					found = true;
 					break;
@@ -392,7 +394,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 				TargetEntry *newtle;
 
 				newtle = makeTargetEntry((Expr *) copyObject(var),
-										 list_length(*targetlist) + 1,
+										 (AttrNumber) pstate->p_next_resno++,
 										 NULL,
 										 true);
 				*targetlist = lappend(*targetlist, newtle);
@@ -446,7 +448,11 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  * walks nav.arg in PHASE_NAV_ARG to collect nesting/column-ref state,
  * applies compound flatten or raises a nesting error, then walks the
  * (post-flatten) offset(s) in PHASE_NAV_OFFSET to enforce the
- * constant-offset and no-nested-nav rules.  No subtree is walked twice.
+ * constant-offset and no-nested-nav rules.  A compound form's inner
+ * offset is covered by both walks: the PHASE_NAV_ARG pass only asks
+ * whether nav.arg as a whole holds a column reference, so the offset
+ * is walked again in PHASE_NAV_OFFSET to catch one it would have
+ * leaked.
  */
 
 /*
@@ -467,7 +473,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  * Var sightings feed the column-ref rule for the enclosing nav scope;
  * RPRNavExpr sightings inside PHASE_NAV_ARG feed the nesting decision.
  * See the comment block above DefinePhase for the overall design and
- * how each subtree is walked exactly once.
+ * the phase transitions.
  */
 static bool
 define_walker(Node *node, void *context)
@@ -538,18 +544,19 @@ define_walker(Node *node, void *context)
 				{
 					RPRNavExpr *inner;
 
-					/* Reject triple-or-deeper nesting */
-					if (ctx->nav_count > 1)
-						ereport(ERROR,
-								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("cannot nest row pattern navigation more than two levels deep"),
-								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-								parser_errposition(ctx->pstate, nav->location));
-
+					/* Reject an inner nav that is not the whole argument */
 					if (!IsA(nav->arg, RPRNavExpr))
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
 								errmsg("row pattern navigation operation must be a direct argument of the outer navigation"),
+								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+								parser_errposition(ctx->pstate, nav->location));
+
+					/* Reject triple-or-deeper nesting; siblings caught above */
+					if (ctx->nav_count > 1)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("cannot nest row pattern navigation more than two levels deep"),
 								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
 								parser_errposition(ctx->pstate, nav->location));
 
