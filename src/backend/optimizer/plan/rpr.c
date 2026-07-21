@@ -37,13 +37,8 @@
 
 #include "postgres.h"
 
-#include "catalog/pg_proc.h"
-#include "mb/pg_wchar.h"
 #include "miscadmin.h"
-#include "nodes/nodeFuncs.h"
 #include "optimizer/rpr.h"
-#include "tcop/tcopprot.h"
-#include "utils/lsyscache.h"
 
 /* Forward declarations */
 static bool rprPatternEqual(RPRPatternNode *a, RPRPatternNode *b);
@@ -1995,78 +1990,6 @@ computeAbsorbability(RPRPattern *pattern)
 	/* Start recursion from first element */
 	computeAbsorbabilityRecursive(pattern, 0, &hasAbsorbable);
 	pattern->isAbsorbable = hasAbsorbable;
-}
-
-/*
- * rpr_volatile_func_checker
- *		check_functions_in_node callback: true if funcid is VOLATILE.
- */
-static bool
-rpr_volatile_func_checker(Oid funcid, void *context)
-{
-	return (func_volatile(funcid) == PROVOLATILE_VOLATILE);
-}
-
-/*
- * rpr_define_errposition
- *		Error cursor position for a DEFINE subexpression.
- *
- * The planner has no ParseState, but the original query text is available in
- * debug_query_string, so we can still point at the offending location exactly
- * as parser_errposition() would.
- */
-static int
-rpr_define_errposition(int location)
-{
-	if (location < 0 || debug_query_string == NULL)
-		return 0;
-	return errposition(pg_mbstrlen_with_len(debug_query_string, location) + 1);
-}
-
-/*
- * reject_volatile_in_define_walker
- *		Reject volatile callees and sequence operations anywhere in a DEFINE
- *		expression: they are non-deterministic across the multiple predicate
- *		evaluations that NFA backtracking and PREV/NEXT navigation may trigger
- *		for a single row.
- *
- * NextValueExpr is checked separately because it is not a function call and
- * so is not caught by check_functions_in_node().
- */
-static bool
-reject_volatile_in_define_walker(Node *node, void *context)
-{
-	if (node == NULL)
-		return false;
-	if (check_functions_in_node(node, rpr_volatile_func_checker, NULL))
-		ereport(ERROR,
-				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("volatile functions are not allowed in DEFINE clause"),
-				rpr_define_errposition(exprLocation(node)));
-	if (IsA(node, NextValueExpr))
-		ereport(ERROR,
-				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("sequence operations are not allowed in DEFINE clause"),
-				rpr_define_errposition(exprLocation(node)));
-	return expression_tree_walker(node, reject_volatile_in_define_walker, context);
-}
-
-/*
- * validate_rpr_define_volatility
- *		Reject volatile functions / sequence operations in a DEFINE clause.
- *
- * Called from the planner (subquery_planner) for every RPR WindowClause,
- * including windows not referenced by any OVER clause, so the check is applied
- * regardless of whether the window survives to execution -- matching the
- * coverage of the former parse-time check.
- */
-void
-validate_rpr_define_volatility(List *defineClause)
-{
-	foreach_node(TargetEntry, te, defineClause)
-	{
-		(void) reject_volatile_in_define_walker((Node *) te->expr, NULL);
-	}
 }
 
 /*

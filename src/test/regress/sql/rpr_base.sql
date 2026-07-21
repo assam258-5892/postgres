@@ -1491,8 +1491,8 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
 
 -- A qualified call invokes the function, so its volatility still matters
 -- VOLATILE: unqualified is nav; qualified is rejected as a volatile function
-CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
-  LANGUAGE sql VOLATILE;
+CREATE FUNCTION prev(integer) RETURNS integer
+  LANGUAGE plpgsql VOLATILE AS 'BEGIN RETURN -999; END';
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   FROM nt
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -1507,6 +1507,31 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     PATTERN (A+)
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
+
+-- error
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) s;
+
+-- error
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
+
+-- accepted: the volatile is in a dead CASE arm that folds away, so a
+-- pulled-up subquery window is no stricter here than at top level
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS CASE WHEN false THEN random()::int > 0
+                                  ELSE val > 5 END)) s
+ORDER BY id;
+
 DROP FUNCTION prev(integer);
 -- IMMUTABLE: unqualified is nav; qualified is the escape hatch and succeeds
 CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'

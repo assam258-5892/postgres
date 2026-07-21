@@ -79,7 +79,6 @@
 #define RPRElemIsFin(e)			((e)->varId == RPR_VARID_FIN)
 #define RPRElemCanSkip(e)		((e)->min == 0)
 
-extern void validate_rpr_define_volatility(List *defineClause);
 extern RPRPattern *buildRPRPattern(WindowClause *wc, bool hasMatchStartDependent);
 
 /*

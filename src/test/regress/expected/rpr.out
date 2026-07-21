@@ -1218,8 +1218,6 @@ WINDOW w AS (
     DEFINE A AS PREV(price, random()::int) > 0
 );
 ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 7:     DEFINE A AS PREV(price, random()::int) > 0
-                                    ^
 -- Non-constant offset: subquery as offset
 SELECT price FROM stock
 WINDOW w AS (
@@ -1255,8 +1253,6 @@ WINDOW w AS (
     DEFINE A AS PREV(price + random() * 0) >= 0
 );
 ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 8:     DEFINE A AS PREV(price + random() * 0) >= 0
-                                     ^
 -- nextval is volatile (per pg_proc), so it is rejected via the FuncExpr
 -- path with the "volatile functions" message
 CREATE SEQUENCE rpr_seq;
@@ -1269,8 +1265,6 @@ WINDOW w AS (
     DEFINE A AS price > nextval('rpr_seq')
 );
 ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 7:     DEFINE A AS price > nextval('rpr_seq')
-                                ^
 DROP SEQUENCE rpr_seq;
 -- A volatile DEFINE is now rejected in the planner, not at parse time, so a
 -- view that hides one is created successfully and only errors when read.
