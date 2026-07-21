@@ -1217,9 +1217,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS PREV(price, random()::int) > 0
 );
-ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 7:     DEFINE A AS PREV(price, random()::int) > 0
-                                    ^
+ERROR:  DEFINE clause cannot contain volatile functions
 -- Non-constant offset: subquery as offset
 SELECT price FROM stock
 WINDOW w AS (
@@ -1254,11 +1252,8 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS PREV(price + random() * 0) >= 0
 );
-ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 8:     DEFINE A AS PREV(price + random() * 0) >= 0
-                                     ^
--- nextval is volatile (per pg_proc), so it is rejected via the FuncExpr
--- path with the "volatile functions" message
+ERROR:  DEFINE clause cannot contain volatile functions
+-- nextval is volatile, so a DEFINE that calls it is rejected
 CREATE SEQUENCE rpr_seq;
 SELECT price FROM stock
 WINDOW w AS (
@@ -1268,9 +1263,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS price > nextval('rpr_seq')
 );
-ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 7:     DEFINE A AS price > nextval('rpr_seq')
-                                ^
+ERROR:  DEFINE clause cannot contain volatile functions
 DROP SEQUENCE rpr_seq;
 -- A volatile DEFINE is now rejected in the planner, not at parse time, so a
 -- view that hides one is created successfully and only errors when read.
@@ -1285,7 +1278,7 @@ WINDOW w AS (
     DEFINE A AS price > random() * 0
 );
 SELECT * FROM rpr_volatile_view;
-ERROR:  volatile functions are not allowed in DEFINE clause
+ERROR:  DEFINE clause cannot contain volatile functions
 DROP VIEW rpr_volatile_view;
 -- DEFINE cannot reference an outer query's column.  A correlated outer
 -- reference must produce a clean error, not the internal "Upper-level Var"

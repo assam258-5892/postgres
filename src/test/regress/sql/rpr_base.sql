@@ -1539,9 +1539,9 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   ORDER BY id;
 
 -- A qualified call invokes the function, so its volatility still matters
--- VOLATILE: unqualified is nav; qualified is rejected as a volatile function
-CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
-  LANGUAGE sql VOLATILE;
+-- VOLATILE: unqualified is nav; qualified is rejected unless it folds away
+CREATE FUNCTION prev(integer) RETURNS integer
+  LANGUAGE plpgsql VOLATILE AS 'BEGIN RETURN -999; END';
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   FROM nt
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -1556,6 +1556,80 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     PATTERN (A+)
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
+-- accepted: the SQL body inlines and folds to a constant, so no volatile call
+-- is left for the check to find
+CREATE OR REPLACE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
+  LANGUAGE sql VOLATILE;
+SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
+  FROM nt
+  WINDOW w AS (PARTITION BY g ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
+    PATTERN (A+)
+    DEFINE A AS rpr_navns.prev(val) = -999)
+  ORDER BY id;
+
+-- error: an unreferenced subquery still reaches the post-fold volatility
+-- check, so a volatile DEFINE inside it is rejected
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) s;
+
+-- error: OFFSET 0 blocks pull-up but not the volatility check
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
+
+-- accepted: the volatile is in a dead CASE arm that folds away, so nothing
+-- volatile is left for the check to find
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS CASE WHEN false THEN random()::int > 0
+                                  ELSE val > 5 END)) s
+ORDER BY id;
+
+-- error: folding can splice in a volatile that parse analysis never saw -- a
+-- STABLE function whose default argument is volatile -- and the check runs late
+-- enough to catch it
+CREATE FUNCTION rpr_off_leak(n bigint DEFAULT (random() * 5)::bigint)
+  RETURNS bigint LANGUAGE sql STABLE AS 'SELECT n';
+SELECT count(*) OVER w FROM generate_series(1, 100) g(v)
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS v > PREV(v, rpr_off_leak()));
+DROP FUNCTION rpr_off_leak(bigint);
+
+-- error: a UNION ALL leaf keeps its DEFINE, so the volatility check still
+-- fires there
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)
+ UNION ALL
+ SELECT id FROM nt) s;
+
+-- accepted: an unreferenced CTE is never planned, so nothing looks at its
+-- DEFINE
+WITH unused AS (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5))
+SELECT 1;
+
+-- error: referencing it plans the CTE, and the check reaches the DEFINE there
+WITH used AS (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5))
+SELECT count(*) FROM used;
+
 DROP FUNCTION prev(integer);
 -- IMMUTABLE: unqualified is nav; qualified is the escape hatch and succeeds
 CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
