@@ -1288,7 +1288,7 @@ prepare_tuplestore(WindowAggState *winstate)
 		winstate->nav_winobj->readptr =
 			tuplestore_alloc_read_pointer(winstate->buffer,
 										  EXEC_FLAG_BACKWARD);
-		winstate->nav_winobj->markpos = 0;
+		winstate->nav_winobj->markpos = -1;
 	}
 
 	/*
