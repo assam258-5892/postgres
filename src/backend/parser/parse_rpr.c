@@ -402,8 +402,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 
 	/*
 	 * Validate DEFINE expressions: nested PREV/NEXT, column references,
-	 * compound flatten, volatile callees -- all in a single walk per
-	 * variable.
+	 * compound flatten -- all in a single walk per variable.
 	 */
 	foreach_ptr(TargetEntry, te, defineClause)
 	{
@@ -437,9 +436,6 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  *   - Other nestings are rejected (FIRST(PREV()), PREV(PREV()), ...)
  *   - offset_arg / compound_offset_arg must not contain column refs
  *     or nested navigation operations
- *
- * Volatile callees (and sequence operations) are rejected later in the
- * planner via validate_rpr_define_volatility(); see optimizer/plan/rpr.c.
  *
  * The walker uses a phase tag to know which subtree it is in: DEFINE
  * body (top-level), inside a nav.arg, or inside a nav.offset_arg /
@@ -493,7 +489,7 @@ define_walker(Node *node, void *context)
 			/*
 			 * Nested nav inside an outer nav.arg: record for the outer's
 			 * compound / nesting decision, then keep recursing so deeper Vars
-			 * and volatile callees are still observed.
+			 * are still observed.
 			 */
 			if (ctx->nav_count == 0)
 				ctx->inner_kind = nav->kind;

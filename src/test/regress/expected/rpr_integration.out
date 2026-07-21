@@ -1536,9 +1536,7 @@ WINDOW w AS (ORDER BY id
     PATTERN (A B+)
     DEFINE B AS val > PREV(val) AND random() >= 0.0)
 ORDER BY id;
-ERROR:  volatile functions are not allowed in DEFINE clause
-LINE 6:     DEFINE B AS val > PREV(val) AND random() >= 0.0)
-                                            ^
+ERROR:  DEFINE clause cannot contain volatile functions
 -- ============================================================
 -- B10. RPR + Correlated subquery in WHERE
 -- ============================================================

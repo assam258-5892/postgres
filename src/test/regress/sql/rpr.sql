@@ -635,8 +635,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price + random() * 0) >= 0
 );
 
--- nextval is volatile (per pg_proc), so it is rejected via the FuncExpr
--- path with the "volatile functions" message
+-- nextval is volatile, so a DEFINE that calls it is rejected
 CREATE SEQUENCE rpr_seq;
 SELECT price FROM stock
 WINDOW w AS (
