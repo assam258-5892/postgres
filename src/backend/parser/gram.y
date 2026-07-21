@@ -17941,9 +17941,9 @@ row_pattern_quantifier_opt:
 					else
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("invalid quantifier combination"),
+								errmsg("invalid token \"%s\" after \"?\" quantifier", rpr_invalid_quantifier_token($2)),
 								errhint("Did you mean \"??\" for reluctant quantifier?"),
-								parser_errposition(@1));
+								parser_errposition(@2));
 				}
 			/* {n}, {n,}, {,m}, {n,m} quantifiers */
 			| '{' Iconst '}'
