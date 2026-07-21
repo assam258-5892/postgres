@@ -1070,18 +1070,6 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 	{
 		WindowClause *wc = lfirst_node(WindowClause, l);
 
-		/*
-		 * Reject volatile functions (and sequence operations) in an RPR
-		 * DEFINE clause.  This is done here, not during parse analysis, to
-		 * follow the convention of not checking expression volatility while
-		 * parsing; debug_query_string still lets us report the offending
-		 * location.  Every window clause is visited, including ones not used
-		 * by any OVER, so the check does not depend on the window surviving
-		 * select_active_windows().
-		 */
-		if (wc->rpPattern && wc->defineClause)
-			validate_rpr_define_volatility(wc->defineClause);
-
 		/* partitionClause/orderClause are sort/group expressions */
 		wc->startOffset = preprocess_expression(root, wc->startOffset,
 												EXPRKIND_LIMIT);
@@ -1090,6 +1078,16 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 		wc->defineClause = (List *) preprocess_expression(root,
 														  (Node *) wc->defineClause,
 														  EXPRKIND_TARGET);
+
+		/*
+		 * Reject volatile expressions in an RPR DEFINE clause.  This is done
+		 * here, not during parse analysis, to follow the convention of not
+		 * checking expression volatility while parsing.
+		 */
+		if (contain_volatile_functions((Node *) wc->defineClause))
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("volatile functions are not allowed in DEFINE clause"));
 	}
 
 	parse->limitOffset = preprocess_expression(root, parse->limitOffset,
