@@ -885,6 +885,19 @@ DROP TABLE rpr_quant;
 CREATE TABLE rpr_reluctant (id INT, val INT);
 INSERT INTO rpr_reluctant VALUES (1, 10), (2, 20), (3, 30);
 
+-- A greedy quantifier followed by a reluctant one over the same variable must
+-- not be merged: the merged form settles the count differently and changes
+-- which match leftmost-choice-first selects.
+SELECT id, count(*) OVER w FROM rpr_reluctant
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+ A??) DEFINE A AS TRUE);
+
+SELECT id, count(*) OVER w FROM rpr_reluctant
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{1,2} A{1,2}? B) DEFINE A AS TRUE);
+
+-- cascade: the reluctant middle VAR must stop the merge on both sides
+SELECT id, count(*) OVER w FROM rpr_reluctant
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? A?? A) DEFINE A AS TRUE);
+
 -- *? (zero or more, reluctant)
 -- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
