@@ -702,7 +702,7 @@ typedef struct ExprEvalStep
 		/* for EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE */
 		struct
 		{
-			RprNavState *rprnavstate;
+			RPRNavState *rprnavstate;
 		}			rpr_nav;
 
 		/* for EEOP_AGG_*DESERIALIZE */

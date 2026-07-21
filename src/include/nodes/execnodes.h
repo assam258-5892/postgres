@@ -1075,7 +1075,7 @@ typedef struct SubPlanState
 	ExprState  *cur_eq_comp;	/* equality comparator for LHS vs. table */
 } SubPlanState;
 
-typedef struct RprNavState
+typedef struct RPRNavState
 {
 	NodeTag		type;
 
@@ -1092,24 +1092,25 @@ typedef struct RprNavState
 	NullableDatum compound_offset;	/* outer offset for compound nav */
 	int16		resulttyplen;	/* RESTORE: result type length */
 	bool		resulttypbyval; /* RESTORE: result pass-by-value? */
-} RprNavState;
+} RPRNavState;
 
 /*
- * RprNavOffsets - one entry of WindowAggState.rprNavOffsets
+ * RPRNavOffsets - one entry of WindowAggState.rprNavOffsets
  *
  * Associates an RPRNavExpr from the (read-only) plan tree with its offsets
  * as resolved by eval_define_offsets() at executor startup.  The plan node
  * pointer serves as lookup key; ExecInitExprRec copies the values into the
- * RprNavState of each compiled navigation expression.
+ * RPRNavState of each compiled navigation expression.
  */
-typedef struct RprNavOffsets
+typedef struct RPRNavOffsets
 {
 	RPRNavExpr *nav;			/* plan-tree node (lookup key) */
 	int64		offset;			/* resolved inner offset */
-	bool		offset_valid;
 	int64		compound_offset;	/* resolved outer offset */
-	bool		compound_offset_valid;
-} RprNavOffsets;
+	ExprState  *offset_state;	/* inner offset expr, evaluated once per scan */
+	ExprState  *compound_offset_state;	/* outer (compound) offset expr */
+	RPRNavState *rprnavstate;	/* back-link, to pin resolved values per scan */
+} RPRNavOffsets;
 
 /*
  * DomainConstraintState - one item to check during CoerceToDomain
@@ -2780,14 +2781,19 @@ typedef struct WindowAggState
 	/* RPR navigation */
 
 	/*
-	 * per-execution resolved nav offsets: list of RprNavOffsets, keyed by
+	 * per-execution resolved nav offsets: list of RPRNavOffsets, keyed by
 	 * RPRNavExpr pointer; built by eval_define_offsets()
 	 */
 	List	   *rprNavOffsets;
-	int64		navMaxOffset;	/* max backward nav offset, -1 means infinite
-								 * offset, retain all */
+	int64		navMaxOffset;	/* max backward nav offset (when FIXED) */
+	RPRNavOffsetKind navMaxOffsetKind;	/* status of navMaxOffset */
 	bool		hasFirstNav;	/* FIRST() present in DEFINE */
 	int64		navFirstOffset; /* min FIRST() offset (when FIXED) */
+	RPRNavOffsetKind navFirstOffsetKind;	/* status of navFirstOffset */
+	bool		navResolvePending;	/* nav offsets need (re)resolving at the
+									 * next ExecWindowAgg call; set at init
+									 * and rescan, cleared by
+									 * resolve_nav_offsets() */
 	struct WindowObjectData *nav_winobj;	/* winobj for RPR */
 	int64		nav_slot_pos;	/* position cached in nav_slot, or -1 */
 	TupleTableSlot *nav_slot;	/* slot holding the resolved navigation target

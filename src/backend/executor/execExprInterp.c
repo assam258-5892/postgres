@@ -6029,7 +6029,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	int64		compound_offset;
 	int64		target_pos;
 	TupleTableSlot *target_slot;
-	RprNavState *rprnavstate = op->d.rpr_nav.rprnavstate;
+	RPRNavState *rprnavstate = op->d.rpr_nav.rprnavstate;
 
 	winstate = rprnavstate->winstate;
 

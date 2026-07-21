@@ -3210,19 +3210,27 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 
 		/*
 		 * Navigation offsets for tuplestore trim are resolved at executor
-		 * init, which runs even for plain EXPLAIN, so read the resolved
-		 * values from the planstate.  navMaxOffset < 0 is the retain-all
-		 * sentinel (trim disabled).
+		 * init, which runs even for plain EXPLAIN, so read the resolved value
+		 * and its kind from the planstate.
 		 */
-		if (planstate->navMaxOffset < 0)
-			ExplainPropertyText("Nav Mark Lookback", "retain all", es);
-		else
-			ExplainPropertyInteger("Nav Mark Lookback", NULL,
-								   planstate->navMaxOffset, es);
+		switch (planstate->navMaxOffsetKind)
+		{
+			case RPR_NAV_OFFSET_NEEDS_EVAL:
+				ExplainPropertyText("Nav Mark Lookback", "runtime", es);
+				break;
+			case RPR_NAV_OFFSET_RETAIN_ALL:
+				ExplainPropertyText("Nav Mark Lookback", "retain all", es);
+				break;
+			default:
+				ExplainPropertyInteger("Nav Mark Lookback", NULL,
+									   planstate->navMaxOffset, es);
+		}
 
 		if (planstate->hasFirstNav)
 		{
-			if (planstate->navFirstOffset == PG_INT64_MAX)
+			if (planstate->navFirstOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL)
+				ExplainPropertyText("Nav Mark Lookahead", "runtime", es);
+			else if (planstate->navFirstOffset == PG_INT64_MAX)
 				ExplainPropertyText("Nav Mark Lookahead", "infinite", es);
 			else
 				ExplainPropertyInteger("Nav Mark Lookahead", NULL,

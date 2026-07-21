@@ -6007,12 +6007,32 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: retain all
+   Nav Mark Lookback: runtime
    ->  Function Scan on generate_series s
 (5 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE rpr_nav_offset_prep;
+-- EXPLAIN (GENERIC_PLAN) of an unbound parameter offset must not evaluate the
+-- parameter: the offset stays "runtime" instead of failing with "no value
+-- found for parameter 1".
+EXPLAIN (GENERIC_PLAN, COSTS OFF)
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > PREV(v, $1)
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+"
+   Nav Mark Lookback: runtime
+   ->  Function Scan on generate_series s
+(5 rows)
+
 -- FIRST(v): retain all (references match_start row)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -6224,7 +6244,7 @@ EXPLAIN (COSTS OFF) EXECUTE test_overflow_lookback(4611686018427387904, 46116860
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: retain all
+   Nav Mark Lookback: runtime
    ->  Function Scan on generate_series s
 (5 rows)
 
@@ -6264,13 +6284,14 @@ EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
  WindowAgg (actual rows=10.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: retain all
+   Nav Mark Lookback: 0
+   Nav Mark Lookahead: infinite
    Storage: Memory  Maximum Storage: NkB
    NFA States: 1 peak, 11 total, 0 merged
    NFA Contexts: 2 peak, 11 total, 10 pruned
    NFA: 0 matched, 0 mismatched
    ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
-(9 rows)
+(10 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE test_overflow_lookahead;
@@ -6292,9 +6313,10 @@ EXPLAIN (COSTS OFF) EXECUTE p_first_runtime(1, 1);
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: retain all
+   Nav Mark Lookback: 0
+   Nav Mark Lookahead: runtime
    ->  Function Scan on generate_series s
-(5 rows)
+(6 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE p_first_runtime;
@@ -6462,3 +6484,28 @@ WINDOW w AS (
 EXECUTE test_runtime_null_offset(NULL);
 ERROR:  row pattern navigation offset must not be null
 DEALLOCATE test_runtime_null_offset;
+-- A correlated PARAM_EXEC nav offset (reaching the offset via SRF inlining) is
+-- resolved per scan by resolve_nav_offsets(); after execution EXPLAIN ANALYZE
+-- must display the concrete resolved bound (a number), not "runtime" -- that is,
+-- navMaxOffsetKind resolves to FIXED.  Plain EXPLAIN of the same query shows
+-- "runtime"; only ANALYZE exercises the per-scan clear.
+CREATE TABLE rpr_exp_srf (v int);
+INSERT INTO rpr_exp_srf SELECT generate_series(1, 10);
+CREATE FUNCTION rpr_exp_srf_f(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_exp_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS v > PREV(v, k))
+$$ LANGUAGE sql STABLE;
+SELECT t FROM rpr_explain_filter(
+  'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, BUFFERS OFF)
+   SELECT g.n, max(s) FROM (VALUES (2), (2)) g(n), LATERAL rpr_exp_srf_f(g.n) s
+   GROUP BY g.n') AS t
+WHERE t LIKE '%Nav Mark Lookback%';
+                 t                  
+------------------------------------
+               Nav Mark Lookback: 2
+(1 row)
+
+DROP FUNCTION rpr_exp_srf_f(int);
+DROP TABLE rpr_exp_srf;

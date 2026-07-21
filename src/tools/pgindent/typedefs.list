@@ -2544,6 +2544,9 @@ RPRNFAContext
 RPRNFAState
 RPRNavExpr
 RPRNavKind
+RPRNavOffsetKind
+RPRNavOffsets
+RPRNavState
 RPRPattern
 RPRPatternElement
 RPRPatternNode
@@ -2755,8 +2758,6 @@ RowMarkClause
 RowMarkType
 RowSecurityDesc
 RowSecurityPolicy
-RprNavOffsets
-RprNavState
 RtlGetLastNtStatus_t
 RtlNtStatusToDosError_t
 RuleInfo

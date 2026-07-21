@@ -606,6 +606,18 @@ typedef enum RPRPatternNodeType
 } RPRPatternNodeType;
 
 /*
+ * RPRNavOffsetKind - status of a resolved navigation trim offset
+ * (WindowAggState.navMaxOffset / navFirstOffset)
+ */
+typedef enum RPRNavOffsetKind
+{
+	RPR_NAV_OFFSET_FIXED,		/* resolved constant; use the offset value */
+	RPR_NAV_OFFSET_NEEDS_EVAL,	/* non-constant offset; shows "runtime",
+								 * resolved per scan */
+	RPR_NAV_OFFSET_RETAIN_ALL,	/* offset overflow; retain all rows (no trim) */
+} RPRNavOffsetKind;
+
+/*
  * RPR_QUANTITY_INF is the sentinel stored in RPRPatternNode.max for an
  * unbounded quantifier (*, +, or {n,}); later stages treat this max as
  * "no upper bound".  It lives here, next to the node, so the parser, the

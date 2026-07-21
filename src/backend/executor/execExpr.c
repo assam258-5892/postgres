@@ -1179,7 +1179,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				 * expression is compiled normally (reads from the swapped
 				 * slot), and the RESTORE opcode restores the original slot.
 				 */
-				RprNavState *rprnavstate = makeNode(RprNavState);
+				RPRNavState *rprnavstate = makeNode(RPRNavState);
 				RPRNavExpr *nav = (RPRNavExpr *) node;
 				WindowAggState *winstate;
 				int			skip_arg_step;
@@ -1192,42 +1192,29 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				rprnavstate->rprnavexpr = nav;
 
 				/*
-				 * Fetch the resolved navigation offsets for a given
-				 * RPRNavExpr, as computed by eval_define_offsets() at
-				 * executor startup.  Called from ExecInitExprRec when
-				 * compiling a navigation expression; the values are captured
-				 * into its RprNavState.
+				 * Link this RPRNavState to the navigation's RPRNavOffsets
+				 * entry (built by build_define_offsets() at executor
+				 * startup). The offset is a run-time constant resolved once
+				 * per scan by resolve_nav_offsets(), which pins the value
+				 * here through the back-link; seed with a placeholder now.
 				 *
 				 * The offsets live in executor state rather than on the
 				 * RPRNavExpr because the plan tree is read-only and may be
 				 * shared by concurrent executions.
 				 */
-				foreach_ptr(RprNavOffsets, entry, winstate->rprNavOffsets)
+				foreach_ptr(RPRNavOffsets, entry, winstate->rprNavOffsets)
 				{
 					if (entry->nav == nav && find_navexpr)
 						elog(ERROR, "RPRNavExpr occruence more than once");
 
 					if (entry->nav == nav)
 					{
-						if (entry->offset_valid)
-						{
-							rprnavstate->offset.isnull = false;
-							rprnavstate->offset.value = Int64GetDatum(entry->offset);
-						}
-						else
-							ExecInitExprRec(entry->nav->offset_arg, state,
-											&rprnavstate->offset.value,
-											&rprnavstate->offset.isnull);
-
-						if (entry->compound_offset_valid)
-						{
-							rprnavstate->compound_offset.isnull = false;
-							rprnavstate->compound_offset.value = Int64GetDatum(entry->compound_offset);
-						}
-						else
-							ExecInitExprRec(entry->nav->compound_offset_arg, state,
-											&rprnavstate->compound_offset.value,
-											&rprnavstate->compound_offset.isnull);
+						entry->rprnavstate = rprnavstate;
+						rprnavstate->offset.isnull = false;
+						rprnavstate->offset.value = Int64GetDatum(entry->offset);
+						rprnavstate->compound_offset.isnull = false;
+						rprnavstate->compound_offset.value =
+							Int64GetDatum(entry->compound_offset);
 
 						find_navexpr = true;
 					}

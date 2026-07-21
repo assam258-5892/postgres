@@ -742,7 +742,7 @@ VI-5. Tuplestore Mark and Trim (nodeWindowAgg.c)
 
 Navigation functions require access to past rows via the tuplestore.
 To allow tuplestore_trim() to free rows that are no longer reachable,
-the planner computes two offsets (see compute_define_metadata):
+the executor computes two offsets at init (see build_define_offsets):
 
   navMaxOffset (Nav Mark Lookback):
     Maximum backward reach from currentpos.  Contributed by PREV,
@@ -758,9 +758,10 @@ the planner computes two offsets (see compute_define_metadata):
 The actual mark is set to: min(lookback_mark, lookahead_mark).
 This ensures all rows reachable by any navigation function are retained.
 
-When offsets contain non-constant expressions (Param), the planner sets
-navMaxOffsetKind/navFirstOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL and the
-executor evaluates them at init time.  On overflow, the kind is set to
+When offsets contain non-constant expressions (Param), the executor sets
+navMaxOffsetKind/navFirstOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL; constant
+and bind-parameter offsets are resolved at init, and a PARAM_EXEC offset is
+re-resolved per scan (resolve_nav_offsets).  On overflow, the kind is set to
 RPR_NAV_OFFSET_RETAIN_ALL, disabling trim for that dimension.
 
 VI-6. ExecRPRProcessRow(): 3-Phase Processing

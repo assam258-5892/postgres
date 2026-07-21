@@ -3050,6 +3050,8 @@ finalize_plan(PlannerInfo *root, Plan *plan,
 							  &context);
 			finalize_primnode(((WindowAgg *) plan)->endOffset,
 							  &context);
+			finalize_primnode(((WindowAgg *) plan)->defineClause,
+							  &context);
 			break;
 
 		case T_Gather:

@@ -354,6 +354,23 @@ ORDER BY id;
 
 DROP TABLE rpr_unused;
 
+-- A DEFINE predicate is evaluated only when its variable is tentatively
+-- mapped.  A is false at every row, so B is never reached; B's condition
+-- (which would divide by zero) must never run, and every row is unmatched.
+CREATE TABLE rpr_lazy (id INT, v INT);
+INSERT INTO rpr_lazy VALUES (1, 1), (2, 2), (3, 3);
+SELECT id, v, count(*) OVER w AS cnt
+FROM rpr_lazy
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B)
+    DEFINE A AS v < 0, B AS 1 / (v - v) > 0
+)
+ORDER BY id;
+
+DROP TABLE rpr_lazy;
+
 -- ============================================================
 -- FRAME Options Tests
 -- ============================================================
@@ -1531,6 +1548,25 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS CASE WHEN false THEN random()::int > 0
                                   ELSE val > 5 END)) s
 ORDER BY id;
+
+-- error: a volatile spliced in by folding after the gate -- a STABLE function
+-- whose default argument is volatile -- is still caught by the post-fold check
+CREATE FUNCTION rpr_off_leak(n bigint DEFAULT (random() * 5)::bigint)
+  RETURNS bigint LANGUAGE sql STABLE AS 'SELECT n';
+SELECT count(*) OVER w FROM generate_series(1, 100) g(v)
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS v > PREV(v, rpr_off_leak()));
+DROP FUNCTION rpr_off_leak(bigint);
+
+-- error: a UNION ALL leaf reaches the pull-up guard too, so its unused RPR
+-- window with a volatile DEFINE is rejected like the top-level case
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)
+ UNION ALL
+ SELECT id FROM nt) s;
 
 DROP FUNCTION prev(integer);
 -- IMMUTABLE: unqualified is nav; qualified is the escape hatch and succeeds
