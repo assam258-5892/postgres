@@ -1196,7 +1196,7 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     used in the <literal>PATTERN</literal> clause is 240.
     If this limit is exceeded, an error will be raised.
     Additionally, the maximum nesting depth of pattern groups
-    (parentheses) is 253 levels.
+    (parentheses) is 254 levels.
     However, pattern optimizations such as flattening nested sequences
     and simplifying nested quantifiers may reduce the effective depth,
     so this limit is rarely reached in practice.
