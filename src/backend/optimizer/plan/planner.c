@@ -6207,7 +6207,6 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 					equal(wc->startOffset, existing_wc->startOffset) &&
 					equal(wc->endOffset, existing_wc->endOffset) &&
 					wc->rpSkipTo == existing_wc->rpSkipTo &&
-					wc->initial == existing_wc->initial &&
 					equal(wc->defineClause, existing_wc->defineClause) &&
 					equal(wc->rpPattern, existing_wc->rpPattern))
 				{
