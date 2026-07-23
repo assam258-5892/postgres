@@ -7338,42 +7338,33 @@ get_rule_windowspec(WindowClause *wc, List *targetList,
 	}
 
 	/* RPR */
-	if (wc->rpSkipTo == ST_NEXT_ROW)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf,
-							   "\n  AFTER MATCH SKIP TO NEXT ROW ");
-		needspace = true;
-	}
-	else if (wc->rpSkipTo == ST_PAST_LAST_ROW)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf,
-							   "\n  AFTER MATCH SKIP PAST LAST ROW ");
-		needspace = true;
-	}
-	if (wc->initial)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf, "\n  INITIAL");
-		needspace = true;
-	}
 	if (wc->rpPattern)
 	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf, "\n  PATTERN ");
-		get_rule_pattern(wc->rpPattern, context);
-		needspace = true;
-	}
+		if (wc->rpSkipTo == ST_NEXT_ROW)
+		{
+			if (needspace)
+				appendStringInfoChar(buf, ' ');
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP TO NEXT ROW");
+			needspace = true;
+		}
+		else
+		{
+			Assert(wc->rpSkipTo == ST_PAST_LAST_ROW);
 
-	if (wc->defineClause)
-	{
+			if (needspace)
+				appendStringInfoChar(buf, ' ');
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP PAST LAST ROW");
+			needspace = true;
+		}
+
+		appendStringInfoString(buf, "\n  INITIAL\n  PATTERN ");
+		get_rule_pattern(wc->rpPattern, context);
+
 		if (needspace)
 			appendStringInfoChar(buf, ' ');
+
 		appendStringInfoString(buf, "\n  DEFINE\n");
 		get_rule_define(wc->defineClause, context);
 		appendStringInfoChar(buf, ' ');
