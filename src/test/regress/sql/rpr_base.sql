@@ -1637,8 +1637,8 @@ SELECT id FROM (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
 
--- The volatile is in a dead CASE arm that folds away, so nothing
--- volatile is left for the check to find
+-- The volatile sits in a dead CASE arm that folds away before the post-fold
+-- volatility check, so nothing volatile remains
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (
@@ -1646,6 +1646,15 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS CASE WHEN false THEN random()::int > 0
                                   ELSE val > 5 END)) s
 ORDER BY id;
+
+-- Accepted for the same reason: the planner discards the subquery before the
+-- check runs, so the volatile never reaches it and never executes
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) s
+WHERE false;
 
 -- ERROR: folding can splice in a volatile that parse analysis never saw -- a
 -- STABLE function whose default argument is volatile -- and the check runs late
