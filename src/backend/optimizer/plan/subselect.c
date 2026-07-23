@@ -1814,7 +1814,8 @@ simplify_EXISTS_query(PlannerInfo *root, Query *query)
 		query->hasModifyingCTE ||
 		query->havingQual ||
 		query->limitOffset ||
-		query->rowMarks)
+		query->rowMarks ||
+		query->hasRPR)
 		return false;
 
 	/*

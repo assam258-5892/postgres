@@ -2197,8 +2197,8 @@ SELECT id FROM (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
 ERROR:  volatile functions are not allowed in DEFINE clause
--- accepted: the volatile is in a dead CASE arm that folds away, so a
--- pulled-up subquery window is no stricter here than at top level
+-- accepted: the volatile sits in a dead CASE arm that folds away
+-- before the post-fold volatility check, so nothing volatile remains
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (

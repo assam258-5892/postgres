@@ -1278,28 +1278,6 @@ pull_up_subqueries_recurse(PlannerInfo *root, Node *jtnode,
 		int			varno = ((RangeTblRef *) jtnode)->rtindex;
 		RangeTblEntry *rte = rt_fetch(varno, root->parse->rtable);
 
-		if (rte->rtekind == RTE_SUBQUERY &&
-			rte->subquery->windowClause != NIL)
-		{
-			foreach_node(WindowClause, wc, rte->subquery->windowClause)
-			{
-				/*
-				 * An unused RPR WINDOW in a subquery is dropped when the
-				 * subquery is flattened, so its DEFINE would never reach the
-				 * volatility check in subquery_planner().  Check it here
-				 * instead.  Use the after-planning form so a DEFINE whose
-				 * volatility folds away is accepted the same as at top level
-				 * (post-fold), not rejected only because it sits one level
-				 * down.
-				 */
-				if (wc->defineClause &&
-					contain_volatile_functions_after_planning((Expr *) wc->defineClause))
-					ereport(ERROR,
-							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("volatile functions are not allowed in DEFINE clause"));
-			}
-		}
-
 		/*
 		 * Is this a subquery RTE, and if so, is the subquery simple enough to
 		 * pull up?
@@ -2014,7 +1992,8 @@ is_simple_subquery(PlannerInfo *root, Query *subquery, RangeTblEntry *rte,
 		subquery->limitOffset ||
 		subquery->limitCount ||
 		subquery->hasForUpdate ||
-		subquery->cteList)
+		subquery->cteList ||
+		subquery->hasRPR)
 		return false;
 
 	/*
