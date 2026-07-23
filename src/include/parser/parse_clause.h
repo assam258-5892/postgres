@@ -35,7 +35,8 @@ extern List *transformSortClause(ParseState *pstate, List *orderlist,
 
 extern List *transformWindowDefinitions(ParseState *pstate,
 										List *windowdefs,
-										List **targetlist);
+										List **targetlist,
+										bool *hasRPR);
 
 extern List *transformDistinctClause(ParseState *pstate,
 									 List **targetlist, List *sortClause, bool is_agg);

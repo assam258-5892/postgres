@@ -226,6 +226,8 @@ typedef struct Query
 	Node	   *havingQual;		/* qualifications applied to groups */
 
 	List	   *windowClause;	/* a list of WindowClause's */
+	/* was ROW PATTERN RECOGNITION used in windowClause? */
+	bool		hasRPR pg_node_attr(query_jumble_ignore);
 
 	List	   *distinctClause; /* a list of SortGroupClause's */
 

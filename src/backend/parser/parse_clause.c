@@ -2913,7 +2913,8 @@ transformSortClause(ParseState *pstate,
 List *
 transformWindowDefinitions(ParseState *pstate,
 						   List *windowdefs,
-						   List **targetlist)
+						   List **targetlist,
+						   bool *hasRPR)
 {
 	List	   *result = NIL;
 	Index		winref = 0;
@@ -3110,6 +3111,9 @@ transformWindowDefinitions(ParseState *pstate,
 
 		/* Process Row Pattern Recognition related clauses */
 		transformRPR(pstate, wc, windef, targetlist);
+
+		if (windef->rpCommonSyntax)
+			*hasRPR = true;
 
 		wc->winref = winref;
 
