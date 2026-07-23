@@ -1853,7 +1853,8 @@ transformSelectStmt(ParseState *pstate, SelectStmt *stmt,
 	/* transform window clauses after we have seen all window functions */
 	qry->windowClause = transformWindowDefinitions(pstate,
 												   pstate->p_windowdefs,
-												   &qry->targetList);
+												   &qry->targetList,
+												   &qry->hasRPR);
 
 	/* resolve any still-unresolved output columns as being type text */
 	if (pstate->p_resolve_unknowns)
