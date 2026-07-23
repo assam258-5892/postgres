@@ -174,9 +174,6 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	/* Assign AFTER MATCH SKIP TO flag */
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
 
-	/* Assign INITIAL flag */
-	wc->initial = windef->rpCommonSyntax->initial;
-
 	/* Transform DEFINE clause into list of TargetEntry's */
 	wc->defineClause = transformDefineClause(pstate, windef, targetlist);
 

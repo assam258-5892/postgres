@@ -656,8 +656,6 @@ typedef struct RPCommonSyntax
 {
 	NodeTag		type;
 	RPSkipTo	rpSkipTo;		/* Row Pattern AFTER MATCH SKIP type */
-	bool		initial;		/* true if <row pattern initial or seek> is
-								 * initial */
 	RPRPatternNode *rpPattern;	/* PATTERN parse tree */
 	List	   *rpDefs;			/* row pattern definitions clause (list of
 								 * ResTarget) */
@@ -1766,8 +1764,6 @@ typedef struct WindowClause
 	bool		copiedOrder pg_node_attr(query_jumble_ignore);
 	/* Row Pattern AFTER MATCH SKIP clause */
 	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
-	bool		initial;		/* true if <row pattern initial or seek> is
-								 * initial */
 	/* Row Pattern DEFINE clause (list of TargetEntry) */
 	List	   *defineClause;
 	/* Row Pattern PATTERN parse tree */
