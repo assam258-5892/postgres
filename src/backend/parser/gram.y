@@ -921,7 +921,7 @@ static const char *rpr_invalid_quantifier_token(const char *tok);
  * keywords that lack a natural precedence level.
  *
  * We need to do this for PARTITION, RANGE, ROWS, GROUPS, AFTER, INITIAL,
- * SEEK, PATTERN_P to support opt_existing_window_name (see comment there).
+ * SEEK, PATTERN to support opt_existing_window_name (see comment there).
  *
  * The frame_bound productions UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING
  * are even messier: since UNBOUNDED is an unreserved keyword (per spec!),
@@ -17465,7 +17465,7 @@ window_specification: '(' opt_existing_window_name opt_partition_clause
 		;
 
 /*
- * If we see PARTITION, RANGE, ROWS, GROUPS, AFTER, INITIAL, SEEK or PATTERN_P
+ * If we see PARTITION, RANGE, ROWS, GROUPS, AFTER, INITIAL, SEEK or PATTERN
  * as the first token after the '(' of a window_specification, we want the
  * assumption to be that there is no existing_window_name; but those keywords
  * are unreserved and so could be ColIds.  We fix this by making them have the
