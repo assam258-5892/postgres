@@ -183,6 +183,7 @@ typedef struct
 	bool		maxOverflow;	/* true if backward-reach overflow detected */
 	int64		minFirstOffset; /* min forward-from-match_start offset; may be
 								 * negative (PREV_FIRST: inner - outer < 0) */
+	bool		hasMax;			/* any backward-reach nav found */
 	bool		hasFirst;		/* any FIRST-based nav found */
 	bool		validate;		/* fail-closed on a null/negative offset?
 								 * false at init (display only), true at
@@ -4102,6 +4103,7 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 
 	winstate->navMaxOffset = 0;
 	winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
+	winstate->hasMaxNav = false;
 	winstate->hasFirstNav = false;
 	winstate->navFirstOffset = 0;
 	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
@@ -4126,6 +4128,7 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 	ctx.maxOffset = 0;
 	ctx.maxOverflow = false;
 	ctx.minFirstOffset = PG_INT64_MAX;
+	ctx.hasMax = false;
 	ctx.hasFirst = false;
 	ctx.validate = false;		/* init resolution is for EXPLAIN display only */
 
@@ -4154,7 +4157,10 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 			 */
 			if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_LAST ||
 				nav->kind == RPR_NAV_PREV_LAST || nav->kind == RPR_NAV_NEXT_LAST)
+			{
+				ctx.hasMax = true;
 				winstate->navMaxOffsetKind = RPR_NAV_OFFSET_NEEDS_EVAL;
+			}
 			if (nav->kind == RPR_NAV_FIRST || nav->kind == RPR_NAV_PREV_FIRST ||
 				nav->kind == RPR_NAV_NEXT_FIRST)
 			{
@@ -4176,11 +4182,13 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 	else
 		winstate->navMaxOffset = ctx.maxOffset;
 
+	winstate->hasMaxNav = ctx.hasMax;
 	winstate->hasFirstNav = ctx.hasFirst;
 	if (ctx.hasFirst && ctx.minFirstOffset < PG_INT64_MAX)
 		winstate->navFirstOffset = ctx.minFirstOffset;
 	else if (ctx.hasFirst)
 		winstate->navFirstOffset = PG_INT64_MAX;
+
 }
 
 /*
@@ -4212,6 +4220,17 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 	else
 		outer = 1;
 
+	/*
+	 * A negative offset is rejected at execution, so this navigation can
+	 * never run and needs no rows retained.  Leave it out of both reaches,
+	 * which also keeps the arithmetic below on non-negative operands.
+	 */
+	if (inner < 0 || outer < 0)
+	{
+		Assert(!context->validate);
+		return;
+	}
+
 	entry->offset = inner;
 	entry->compound_offset = outer;
 
@@ -4229,26 +4248,30 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 	}
 
 	/* Backward reach: PREV, LAST-with-offset */
-	if (!context->maxOverflow &&
-		(nav->kind == RPR_NAV_PREV ||
-		 nav->kind == RPR_NAV_LAST ||
-		 nav->kind == RPR_NAV_PREV_LAST ||
-		 nav->kind == RPR_NAV_NEXT_LAST))
+	if (nav->kind == RPR_NAV_PREV ||
+		nav->kind == RPR_NAV_LAST ||
+		nav->kind == RPR_NAV_PREV_LAST ||
+		nav->kind == RPR_NAV_NEXT_LAST)
 	{
-		int64		reach = 0;
-
-		if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_LAST)
-			reach = inner;
-		else if (nav->kind == RPR_NAV_PREV_LAST)
-		{
-			if (pg_add_s64_overflow(inner, outer, &reach))
-				context->maxOverflow = true;
-		}
-		else
-			reach = Max(inner - outer, 0);
+		context->hasMax = true;
 
 		if (!context->maxOverflow)
-			context->maxOffset = Max(context->maxOffset, reach);
+		{
+			int64		reach = 0;
+
+			if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_LAST)
+				reach = inner;
+			else if (nav->kind == RPR_NAV_PREV_LAST)
+			{
+				if (pg_add_s64_overflow(inner, outer, &reach))
+					context->maxOverflow = true;
+			}
+			else
+				reach = Max(inner - outer, 0);
+
+			if (!context->maxOverflow)
+				context->maxOffset = Max(context->maxOffset, reach);
+		}
 	}
 
 	/* Forward reach from match_start: FIRST, compound PREV_FIRST/NEXT_FIRST */
@@ -4297,6 +4320,7 @@ resolve_nav_offsets(WindowAggState *winstate)
 
 	winstate->navMaxOffset = 0;
 	winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
+	winstate->hasMaxNav = false;
 	winstate->hasFirstNav = false;
 	winstate->navFirstOffset = 0;
 	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
@@ -4308,6 +4332,7 @@ resolve_nav_offsets(WindowAggState *winstate)
 	ctx.maxOffset = 0;
 	ctx.maxOverflow = false;
 	ctx.minFirstOffset = PG_INT64_MAX;
+	ctx.hasMax = false;
 	ctx.hasFirst = false;
 	ctx.validate = true;		/* execution: fail-closed on null/negative */
 
@@ -4327,6 +4352,7 @@ resolve_nav_offsets(WindowAggState *winstate)
 		winstate->navMaxOffset = ctx.maxOffset;
 
 	/* Forward (FIRST) reach; never needs a retain-all sentinel */
+	winstate->hasMaxNav = ctx.hasMax;
 	winstate->hasFirstNav = ctx.hasFirst;
 
 	if (ctx.hasFirst)

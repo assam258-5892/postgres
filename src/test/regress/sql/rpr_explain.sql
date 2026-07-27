@@ -3530,6 +3530,52 @@ WINDOW w AS (
     DEFINE A AS NEXT(FIRST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
 );
 
+-- A navigation with a negative offset cannot run, so it contributes no reach
+-- and its dimension reports nothing at all.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
+);
+
+-- The same query errors once it runs, since execution validates the offset.
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
+);
+
+-- Same at the int64 limit, where the reach subtraction would otherwise wrap.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, (-9223372036854775807)::int8), 2) IS NOT NULL
+);
+
+-- The other dimension keeps its own aggregate.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(v, 5) IS NOT NULL AND FIRST(v, -1) IS NOT NULL
+);
+
+-- NEXT(LAST()) reaches the same subtraction on the lookback side.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS NEXT(LAST(v, 2), (-9223372036854775807)::int8) IS NOT NULL
+);
+
 -- Compound PREV(LAST(val, $1), $2): parameter lookback overflow -> retain all
 -- EXPLAIN shows "runtime" (plan-level); EXPLAIN ANALYZE shows "retain all"
 -- (executor-resolved).

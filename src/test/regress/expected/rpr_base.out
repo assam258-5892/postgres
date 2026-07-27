@@ -4548,11 +4548,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive VAR merge: A{2} A{3} -> a{5}
 EXPLAIN (COSTS OFF)
@@ -4564,11 +4563,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{5}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive VAR merge: A+ A* -> a+
 EXPLAIN (COSTS OFF)
@@ -4580,11 +4578,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive VAR merge: A A+ -> a{2,}
 -- where a finite prev (A{1,1}) meets an infinite child (A+).
@@ -4597,11 +4594,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive VAR merge at the boundary: A{1073741823,} A{1073741823,} ->
 -- a{2147483646,}.  The min sum 2147483646 = INT32_MAX - 1 is the largest
@@ -4616,11 +4612,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2147483646,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive GROUP merge with finite quantifiers: ((A B){5}) ((A B){10}) -> merged
 EXPLAIN (COSTS OFF)
@@ -4632,11 +4627,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b){15}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive GROUP merge with unbounded: (A B)+ (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
@@ -4648,11 +4642,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive GROUP merge: (A B){2} (A B)+ -> (a b){3,}
 -- Where a finite prev ((A B){2,2}) meets an infinite child ((A B)+).
@@ -4665,11 +4658,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){3,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive GROUP merge at the boundary: (A B){1073741823,} (A B){1073741823,}
 -- -> (a b){2147483646,}.  The min sum INT32_MAX - 1 is still finite, so the
@@ -4684,11 +4676,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){2147483646,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX merge: A B (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
@@ -4700,11 +4691,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX and SUFFIX merge: A B (A B)+ A B -> (a b){3,}
 EXPLAIN (COSTS OFF)
@@ -4716,11 +4706,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){3,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Flatten nested: A ((B) (C)) -> a b c
 EXPLAIN (COSTS OFF)
@@ -4732,11 +4721,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Data execution: SEQ flatten produces correct results
 SELECT id, val, count(*) OVER w AS cnt
@@ -4768,11 +4756,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ALT deduplicate: (A | B | A) -> (a | b)
 EXPLAIN (COSTS OFF)
@@ -4784,11 +4771,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Data execution: ALT dedup produces correct results
 SELECT id, val, count(*) OVER w AS cnt
@@ -4820,11 +4806,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{6}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: reluctant GROUP child (((A B){2}?){3}) stays nested
 -- a reluctant quantifier on a GROUP is not subject to multiplication
@@ -4837,11 +4822,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a b){2}?){3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier multiply control: greedy GROUP (((A B){2}){3}) -> (a b){6}
 EXPLAIN (COSTS OFF)
@@ -4853,11 +4837,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b){6}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier multiply with child range: (A{2,3}){3} -> a{6,9}
 -- outer exact, child range - optimization applies
@@ -4870,11 +4853,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{6,9}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: (A{2}){2,3} stays as (a{2}){2,3}
 -- outer range - gaps would occur (4,6 not 4,5,6), no optimization
@@ -4887,11 +4869,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2}){2,3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: (A{2}){2,} stays as (a{2}){2,}
 -- outer unbounded - gaps would occur (4,6,8,... not 4,5,6,...), no optimization
@@ -4904,11 +4885,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2}'){2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier multiply: (A){2,} -> a{2,}
 -- child exact 1 - no gaps, optimization applies
@@ -4921,11 +4901,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier multiply: (A)+ -> a+
 -- child exact 1 - no gaps, optimization applies
@@ -4938,11 +4917,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: (A{2}){3,5} stays as (a{2}){3,5}
 -- outer range, child exact > 1 - gaps would occur (6,8,10 not 6,7,8,9,10)
@@ -4955,11 +4933,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2}){3,5}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier multiply refused: (A{2,3}){2,3} stays nested.
 -- The counts [4,6] U [6,9] = [4,9] are contiguous, but a bounded child with a
@@ -4974,11 +4951,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2,3}){2,3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: (A{4,5}){2,3} stays as (a{4,5}){2,3}
 -- outer range, child range with a gap: [8,10] U [12,15] misses 11
@@ -4991,11 +4967,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{4,5}){2,3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested unbounded: (A*)* -> a*
 EXPLAIN (COSTS OFF)
@@ -5007,11 +4982,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a*"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested unbounded: (A+)* -> a*
 EXPLAIN (COSTS OFF)
@@ -5023,11 +4997,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a*"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested unbounded: (A+)+ -> a+
 EXPLAIN (COSTS OFF)
@@ -5039,11 +5012,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier multiply with an unbounded child: an exact outer count (m == n)
 -- always folds regardless of the child's max - (A+){3} -> a{3,}
@@ -5056,11 +5028,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{3,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- (A{2,}){3} -> a{6,}  (m == n, unbounded child with min 2)
 EXPLAIN (COSTS OFF)
@@ -5072,11 +5043,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{6,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- (A+){2,4} -> a{2,}  (outer range, unbounded child: every interval reaches INF,
 -- so they always touch)
@@ -5089,11 +5059,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- (A{2,3}){2,4} stays nested for the same reason, even though the counts
 -- [4,6] U [6,9] U [8,12] = [4,12] are contiguous.
@@ -5106,11 +5075,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2,3}){2,4}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Skippable outer (min 0) folds only when the zero case connects to the child
 -- range: (A{1,3})? -> a{0,3}  (child min <= 1, so {0} U [1,3] = [0,3] is contiguous)
@@ -5123,11 +5091,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{0,3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: (A{2,3})? stays as (a{2,3})?
 -- min 0 with child min >= 2: {0} U [2,3] leaves 1 unreachable (intervals touch but
@@ -5141,11 +5108,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2,3})?
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Quantifier NO multiply: (A{3,4})? stays as (a{3,4})?
 -- min 0 with child min >= 2: {0} U [3,4] leaves 1,2 unreachable
@@ -5158,11 +5124,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{3,4})?
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Unwrap GROUP{1,1}: (A) -> a
 EXPLAIN (COSTS OFF)
@@ -5174,11 +5139,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Unwrap GROUP{1,1}: (A B) -> a b
 EXPLAIN (COSTS OFF)
@@ -5190,11 +5154,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Combined optimization: A A (B B)+ B B C C C -> a{2} (b{2}){2,} c{3}
 EXPLAIN (COSTS OFF)
@@ -5207,11 +5170,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2} (b{2}){2,} c{3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive GROUP merge with unbounded: (A+) (A+) -> a{2,}
 EXPLAIN (COSTS OFF)
@@ -5223,11 +5185,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive GROUP merge finite: (A{10}){20} -> a{200}
 EXPLAIN (COSTS OFF)
@@ -5239,11 +5200,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{200}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Different GROUP prevents merge: (A B){2} (C D){3}
 EXPLAIN (COSTS OFF)
@@ -5257,11 +5217,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b){2} (c d){3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Different children count prevents merge: (A B)+ (A B C)+
 EXPLAIN (COSTS OFF)
@@ -5274,11 +5233,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b')+" (a b c)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX only merge: A B (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
@@ -5290,11 +5248,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- SUFFIX only merge: (A B)+ A B -> (a b){2,}
 EXPLAIN (COSTS OFF)
@@ -5306,11 +5263,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Multiple SUFFIX absorption with skipUntil: (A B)+ A B A B C
 EXPLAIN (COSTS OFF)
@@ -5323,11 +5279,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){3,}" c
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX merge with remaining prefix: A B C D (C D)+  -> A B (C D) {2,}
 EXPLAIN (COSTS OFF)
@@ -5341,11 +5296,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b (c d){2,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- cannot merge, prefix is different
 EXPLAIN (COSTS OFF)
@@ -5360,11 +5314,10 @@ DEFINE A AS val <= 25, B AS val > 25,
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c d c (c d)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX merge with quantifiers: A B* (A B*)+ -> (a b*){2,}
 EXPLAIN (COSTS OFF)
@@ -5377,11 +5330,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b*){2,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX merge with multiple quantifiers: A+ B* C? (A+ B* C?)+ -> (a+ b* c?){2,}
 EXPLAIN (COSTS OFF)
@@ -5394,11 +5346,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" b* c?){2,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- SUFFIX merge refused: (A B*)+ A B* stays as written.  The body A B* has no
 -- fixed row count, so folding the trailing copy into the group would move the
@@ -5415,11 +5366,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b*)+ a b*
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Unwrap GROUP{1,1}: ((A | B | C)) -> (a | b | c)
 EXPLAIN (COSTS OFF)
@@ -5431,11 +5381,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c)
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Data execution: GROUP unwrap produces correct results
 SELECT id, val, count(*) OVER w AS cnt
@@ -5468,11 +5417,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+? a
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant optimization bypass: GROUP merge
 -- (A B)+? (A B) stays separate (greedy merges to (a b){2,})
@@ -5485,11 +5433,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b)+? a b
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant optimization bypass: quantifier multiply (outer reluctant)
 -- (A{2}){3}? stays as (a{2}){3}? (greedy merges to a{6})
@@ -5502,11 +5449,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2}){3}?
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant optimization bypass: quantifier multiply (inner reluctant)
 -- (A{2}?){3} stays as (a{2}?){3} (greedy merges to a{6})
@@ -5519,11 +5465,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2}?){3}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant optimization bypass: PREFIX merge
 -- A B (A B)+? stays separate (greedy merges to (a b){2,})
@@ -5536,11 +5481,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b (a b)+?
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant optimization bypass: SUFFIX merge
 -- (A B)+? A B stays separate (greedy merges to (a b){2,})
@@ -5553,11 +5497,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b)+? a b
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- GROUP unwrap with quantifier propagation: (A)?? B -> a?? b
 -- Single VAR child {1,1} receives GROUP's quantifier and reluctant
@@ -5570,11 +5513,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a?? b
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant preserved through ALT flatten
 -- (A | (B | C))+? flattens to (a | b | c)+? - inner ALT flattened, reluctant kept
@@ -5587,11 +5529,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c)+?
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant optimization bypass: absorption flags
 -- A+? with SKIP PAST LAST ROW - no absorption markers (greedy A+ gets a+")
@@ -5604,11 +5545,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+?
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Duplicate GROUP removal: ((A | B)+ | (A | B)+) -> (a | b)+
 EXPLAIN (COSTS OFF)
@@ -5620,11 +5560,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive VAR merge with zero-min: A* A+ -> a+
 EXPLAIN (COSTS OFF)
@@ -5636,11 +5575,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Consecutive VAR merge (4-element): A A{2} A+ A{3} -> a{7,}
 EXPLAIN (COSTS OFF)
@@ -5652,11 +5590,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{7,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX+SUFFIX merge (5-way): A B A B (A B)+ A B A B -> (a b){5,}
 EXPLAIN (COSTS OFF)
@@ -5669,11 +5606,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){5,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- PREFIX+SUFFIX merge (5-way): B A B (A B)+ A B A B -> b (a b){4,}
 EXPLAIN (COSTS OFF)
@@ -5686,11 +5622,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: b (a b){4,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Unwrap single-item ALT after dedup: (A | A)+ -> a+
 -- ALT dedup reduces to single-item, then GROUP unwrap
@@ -5703,11 +5638,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- GROUP{1,1} to SEQ with flatten: ((A B)(C D)) -> a b c d
 EXPLAIN (COSTS OFF)
@@ -5721,11 +5655,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c d
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested ALT pattern: ((A B) | C) D | A B C
 EXPLAIN (COSTS OFF)
@@ -5739,11 +5672,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a b | c) d | a b c)
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested ALT with unbounded: ((A+ B) | C) D | A B C
 EXPLAIN (COSTS OFF)
@@ -5757,11 +5689,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a+" b | c) d | a b c)
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ============================================================
 -- Absorption Flag Display Tests
@@ -5779,11 +5710,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- GROUP unbounded: (A B)+ -> (a' b')+" (branch + comparison)
 EXPLAIN (COSTS OFF)
@@ -5795,11 +5725,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b')+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ALT both absorbable: A+ | B+ -> (a+" | b+")
 EXPLAIN (COSTS OFF)
@@ -5811,11 +5740,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" | b+")
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ALT one absorbable: A+ | B -> (a+" | b)
 EXPLAIN (COSTS OFF)
@@ -5827,11 +5755,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" | b)
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Sequence with absorbable start: A+ B -> a+" b
 EXPLAIN (COSTS OFF)
@@ -5843,11 +5770,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Complex nested: ((A+ B) | C) D | A B C - deeply nested ALT
 EXPLAIN (COSTS OFF)
@@ -5860,11 +5786,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a+" b | c) d | a b c)
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b' c')+" (d e)+)
 EXPLAIN (COSTS OFF)
@@ -5877,11 +5802,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | (b' c')+" (d e)+)
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested unbounded: (A+ | B)+ -> (a+" | b)+ (first iteration absorbable)
 EXPLAIN (COSTS OFF)
@@ -5894,11 +5818,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" | b)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ALT inside unbounded GROUP: (A+ B | A B)* -> (a+" b | a b)* (first iteration absorbable)
 EXPLAIN (COSTS OFF)
@@ -5911,11 +5834,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" b | a b)*
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Fixed-length group absorbable: (A{2} B{3})+ -> (a{2}' b{3}'){2,}"
 -- All children have min == max, equivalent to unrolling to {1,1}
@@ -5929,11 +5851,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2}' b{3}')+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested fixed-length group: (A (B C){2} D)+ -> absorbable
 EXPLAIN (COSTS OFF)
@@ -5946,11 +5867,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' (b' c'){2}' d')+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Nested fixed-length with inner quantifier: ((A{2} B{3}){2})+ -> absorbable
 EXPLAIN (COSTS OFF)
@@ -5963,11 +5883,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a{2}' b{3}'){2}')+"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Non-absorbable fixed-length: (A B{2,5})+ -> no markers (min != max)
 EXPLAIN (COSTS OFF)
@@ -5980,11 +5899,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b{2,5})+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Non-absorbable fixed-length: (A B?)+ -> no markers (min != max)
 EXPLAIN (COSTS OFF)
@@ -5997,11 +5915,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b?)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Non-absorbable (unbounded not at start): A B+ -> a b+ (no markers)
 EXPLAIN (COSTS OFF)
@@ -6013,11 +5930,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Non-absorbable (no unbounded branch): (A | B){2,} -> (a | b){2,} (no markers)
 EXPLAIN (COSTS OFF)
@@ -6029,11 +5945,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b){2,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Non-absorbable (SKIP TO NEXT ROW): A+ -> a+ (no markers)
 EXPLAIN (COSTS OFF)
@@ -6045,11 +5960,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Non-absorbable (limited frame): A+ -> a+ (no markers)
 EXPLAIN (COSTS OFF)
@@ -6061,11 +5975,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND '10'::bigint FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- Reluctant {1}? quantifier deparse
 -- A{1}? is a reluctant {1,1} quantifier.  The deparse code must
@@ -6084,11 +5997,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY val ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{1}? b
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: val
          ->  Seq Scan on rpr_plan
-(7 rows)
+(6 rows)
 
 -- ============================================================
 -- Absorption Analysis Tests
@@ -6663,11 +6575,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2000000000}){2}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Expected: Fallback - pattern not merged due to min overflow (4000000000 > INT32_MAX)
 -- Test: max-only quantifier overflow causes optimization fallback
@@ -6684,11 +6595,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{1,2000000000}){2}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Expected: Fallback - min OK (2*1=2), but max overflow (2*2000000000 > INT32_MAX)
 -- Test: max quantifier exceeds valid range (2147483647 = INT_MAX, limit is 2147483646)
@@ -6717,11 +6627,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2000000000,}"){2000000000,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Expected: Fallback - min overflow (2000000000 * 2000000000 > INT32_MAX)
 -- Test: prefix mismatch causes optimization fallback
@@ -6738,11 +6647,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b (c d)+
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Expected: Fallback - prefix elements don't match GROUP content
 -- Test: consecutive VAR merge whose min sum is exactly INF causes fallback.
@@ -6762,11 +6670,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{1073741824,}" a{1073741823,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Expected: Fallback - VARs not merged (min sum 2147483647 == INF)
 -- Test: VAR merge falls back when the max sum lands exactly on INF.
@@ -6783,11 +6690,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{1,1073741823} a{1,1073741824}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Test: one below that sum is the largest max the merge may keep.
 EXPLAIN (COSTS OFF)
@@ -6803,11 +6709,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,2147483646}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Test: one above that does not fit in int32; the overflow check rejects it.
 EXPLAIN (COSTS OFF)
@@ -6823,11 +6728,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{1,1073741824} a{1,1073741824}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Test: an operand that is already unbounded still merges.
 EXPLAIN (COSTS OFF)
@@ -6843,11 +6747,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,}"
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Test: consecutive GROUP merge whose min sum is exactly INF causes fallback.
 EXPLAIN (COSTS OFF)
@@ -6863,11 +6766,10 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b'){1073741824,}" (a b){1073741823,}
-   Nav Mark Lookback: 0
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
-(7 rows)
+(6 rows)
 
 -- Expected: Fallback - GROUPs not merged (min sum 2147483647 == INF)
 DROP TABLE rpr_fallback;
