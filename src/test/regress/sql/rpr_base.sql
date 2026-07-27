@@ -4702,7 +4702,7 @@ DROP TABLE rpr_sort;
 CREATE TABLE rpr_srf_t (v int);
 INSERT INTO rpr_srf_t SELECT generate_series(1, 5);
 
-CREATE FUNCTION rpr_srf_f(threshold int)
+CREATE FUNCTION rpr_srf_inline(threshold int)
 RETURNS TABLE (v int, cnt bigint)
 LANGUAGE sql STABLE AS $$
     SELECT v::int, count(*) OVER w
@@ -4715,10 +4715,10 @@ LANGUAGE sql STABLE AS $$
     )
 $$;
 
-SELECT v, cnt FROM rpr_srf_f(3) ORDER BY v;
+SELECT v, cnt FROM rpr_srf_inline(3) ORDER BY v;
 
 DROP TABLE rpr_srf_t;
-DROP FUNCTION rpr_srf_f(int);
+DROP FUNCTION rpr_srf_inline(int);
 
 DROP TABLE rpr_planner;
 
