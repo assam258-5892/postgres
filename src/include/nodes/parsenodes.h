@@ -678,10 +678,10 @@ typedef struct WindowDef
 	char	   *refname;		/* referenced window name, if any */
 	List	   *partitionClause;	/* PARTITION BY expression list */
 	List	   *orderClause;	/* ORDER BY (list of SortBy) */
-	RPCommonSyntax *rpCommonSyntax; /* row pattern common syntax */
 	int			frameOptions;	/* frame_clause options, see below */
 	Node	   *startOffset;	/* expression for starting bound, if any */
 	Node	   *endOffset;		/* expression for ending bound, if any */
+	RPCommonSyntax *rpCommonSyntax; /* row pattern common syntax */
 	ParseLoc	location;		/* parse location, or -1 if none/unknown */
 	ParseLoc	frameLocation;	/* ROWS/RANGE/GROUPS location, or -1 */
 	ParseLoc	excludeLocation;	/* EXCLUDE location, or -1 */
