@@ -7346,7 +7346,6 @@ get_rule_windowspec(WindowClause *wc, List *targetList,
 				appendStringInfoChar(buf, ' ');
 			appendStringInfoString(buf,
 								   "\n  AFTER MATCH SKIP TO NEXT ROW");
-			needspace = true;
 		}
 		else
 		{
@@ -7356,18 +7355,13 @@ get_rule_windowspec(WindowClause *wc, List *targetList,
 				appendStringInfoChar(buf, ' ');
 			appendStringInfoString(buf,
 								   "\n  AFTER MATCH SKIP PAST LAST ROW");
-			needspace = true;
 		}
 
 		appendStringInfoString(buf, "\n  INITIAL\n  PATTERN ");
 		get_rule_pattern(wc->rpPattern, context);
 
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-
 		appendStringInfoString(buf, "\n  DEFINE\n");
 		get_rule_define(wc->defineClause, context);
-		appendStringInfoChar(buf, ' ');
 	}
 
 	appendStringInfoChar(buf, ')');

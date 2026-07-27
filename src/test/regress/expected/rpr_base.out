@@ -2430,7 +2430,7 @@ SELECT pg_get_viewdef('navns_nav');
    PATTERN (start up+)                                                                      +
    DEFINE                                                                                   +
    start AS true,                                                                           +
-   up AS (val > PREV(val)) );
+   up AS (val > PREV(val)));
 (1 row)
 
 SELECT pg_get_viewdef('navns_fn');
@@ -2444,7 +2444,7 @@ SELECT pg_get_viewdef('navns_fn');
    INITIAL                                                                                  +
    PATTERN (a+)                                                                             +
    DEFINE                                                                                   +
-   a AS (rpr_navns.prev(val) = '-999'::integer) );
+   a AS (rpr_navns.prev(val) = '-999'::integer));
 (1 row)
 
 DROP VIEW navns_nav, navns_fn;
@@ -2467,7 +2467,7 @@ SELECT pg_get_viewdef('navns_fn_last');
    INITIAL                                                                                  +
    PATTERN (a+)                                                                             +
    DEFINE                                                                                   +
-   a AS (rpr_navns.last(val) = '-999'::integer) );
+   a AS (rpr_navns.last(val) = '-999'::integer));
 (1 row)
 
 DROP VIEW navns_fn_last;
@@ -2742,7 +2742,7 @@ SELECT pg_get_viewdef('rpr_serial_v1'::regclass);
    INITIAL                                                                   +
    PATTERN (a+)                                                              +
    DEFINE                                                                    +
-   a AS (val > 0) );
+   a AS (val > 0));
 (1 row)
 
 -- Complex pattern with alternation
@@ -2778,7 +2778,7 @@ SELECT pg_get_viewdef('rpr_serial_v2'::regclass);
    PATTERN (a+ | b*)                                                         +
    DEFINE                                                                    +
    a AS (val > 20),                                                          +
-   b AS (val <= 20) );
+   b AS (val <= 20));
 (1 row)
 
 -- Pattern with grouping and quantifiers
@@ -2818,7 +2818,7 @@ SELECT pg_get_viewdef('rpr_serial_v3'::regclass);
    DEFINE                                                                    +
    a AS (val > 10),                                                          +
    b AS (val > 20),                                                          +
-   c AS (val <= 10) );
+   c AS (val <= 10));
 (1 row)
 
 -- All features combined
@@ -2862,7 +2862,7 @@ SELECT pg_get_viewdef('rpr_serial_v4'::regclass);
    start AS (val > 5),                                                       +
    mid AS ((val >= 10) AND (val <= 25)),                                     +
    alt AS (val > 25),                                                        +
-   finish AS (val > 15) );
+   finish AS (val > 15));
 (1 row)
 
 -- Additional quantifiers for deparsing coverage
@@ -2899,7 +2899,7 @@ SELECT pg_get_viewdef('rpr_serial_v5'::regclass);
    PATTERN (a b?)                                                            +
    DEFINE                                                                    +
    a AS (val > 10),                                                          +
-   b AS (val > 20) );
+   b AS (val > 20));
 (1 row)
 
 -- {n,} quantifier (n or more)
@@ -2934,7 +2934,7 @@ SELECT pg_get_viewdef('rpr_serial_v6'::regclass);
    INITIAL                                                                   +
    PATTERN (a{2,})                                                           +
    DEFINE                                                                    +
-   a AS (val > 15) );
+   a AS (val > 15));
 (1 row)
 
 -- {n} quantifier (exactly n)
@@ -2969,7 +2969,7 @@ SELECT pg_get_viewdef('rpr_serial_v7'::regclass);
    INITIAL                                                                   +
    PATTERN (a{3})                                                            +
    DEFINE                                                                    +
-   a AS (val > 0) );
+   a AS (val > 0));
 (1 row)
 
 -- Nested ALT pattern (tests deparse of complex nested structure)
@@ -3007,7 +3007,7 @@ SELECT pg_get_viewdef('rpr_serial_v8'::regclass);
    a AS (val <= 15),                                                         +
    b AS (val <= 25),                                                         +
    c AS (val <= 30),                                                         +
-   d AS (val > 30) );
+   d AS (val > 30));
 (1 row)
 
 -- Navigation function serialization: PREV with offset
@@ -3031,7 +3031,7 @@ SELECT pg_get_viewdef('rpr_serial_nav1'::regclass);
    PATTERN (a b+)                                                            +
    DEFINE                                                                    +
    a AS true,                                                                +
-   b AS (val > PREV(val, (2)::bigint)) );
+   b AS (val > PREV(val, (2)::bigint)));
 (1 row)
 
 -- Navigation function serialization: FIRST and LAST
@@ -3055,7 +3055,7 @@ SELECT pg_get_viewdef('rpr_serial_nav2'::regclass);
    PATTERN (a b+)                                                            +
    DEFINE                                                                    +
    a AS true,                                                                +
-   b AS (FIRST(val) < LAST(val, (1)::bigint)) );
+   b AS (FIRST(val) < LAST(val, (1)::bigint)));
 (1 row)
 
 -- Navigation function serialization: compound PREV(FIRST())
@@ -3079,7 +3079,7 @@ SELECT pg_get_viewdef('rpr_serial_nav3'::regclass);
    PATTERN (a b+)                                                            +
    DEFINE                                                                    +
    a AS true,                                                                +
-   b AS (PREV(FIRST(val, (1)::bigint), (2)::bigint) > 0) );
+   b AS (PREV(FIRST(val, (1)::bigint), (2)::bigint) > 0));
 (1 row)
 
 -- Navigation function serialization: compound NEXT(LAST())
@@ -3103,7 +3103,7 @@ SELECT pg_get_viewdef('rpr_serial_nav4'::regclass);
    PATTERN (a b+)                                                            +
    DEFINE                                                                    +
    a AS true,                                                                +
-   b AS (NEXT(LAST(val), (2)::bigint) IS NOT NULL) );
+   b AS (NEXT(LAST(val), (2)::bigint) IS NOT NULL));
 (1 row)
 
 -- Navigation function serialization: compound PREV(LAST())
@@ -3127,7 +3127,7 @@ SELECT pg_get_viewdef('rpr_serial_nav5'::regclass);
    PATTERN (a b+)                                                            +
    DEFINE                                                                    +
    a AS true,                                                                +
-   b AS (PREV(LAST(val, (1)::bigint), (2)::bigint) > 0) );
+   b AS (PREV(LAST(val, (1)::bigint), (2)::bigint) > 0));
 (1 row)
 
 -- Navigation function serialization: compound NEXT(FIRST())
@@ -3151,7 +3151,7 @@ SELECT pg_get_viewdef('rpr_serial_nav6'::regclass);
    PATTERN (a b+)                                                            +
    DEFINE                                                                    +
    a AS true,                                                                +
-   b AS (NEXT(FIRST(val), (3)::bigint) > 0) );
+   b AS (NEXT(FIRST(val), (3)::bigint) > 0));
 (1 row)
 
 -- Pretty deparse: navigation calls are function-like and take no extra parens
@@ -3166,19 +3166,19 @@ WINDOW w AS (ORDER BY id
                          AND NEXT(val) > FIRST(val)
                          AND PREV(FIRST(val)) > 0);
 SELECT pg_get_viewdef('rpr_nav_pretty_v'::regclass, true);
-                                             pg_get_viewdef                                              
----------------------------------------------------------------------------------------------------------
-  SELECT id,                                                                                            +
-     val,                                                                                               +
-     count(*) OVER w AS count                                                                           +
-    FROM rpr_serial                                                                                     +
-   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING                            +
-   AFTER MATCH SKIP PAST LAST ROW                                                                       +
-   INITIAL                                                                                              +
-   PATTERN (a b+)                                                                                       +
-   DEFINE                                                                                               +
-   a AS true,                                                                                           +
-   b AS val > PREV(val) AND PREV(val) IS NOT NULL AND NEXT(val) > FIRST(val) AND PREV(FIRST(val)) > 0 );
+                                             pg_get_viewdef                                             
+--------------------------------------------------------------------------------------------------------
+  SELECT id,                                                                                           +
+     val,                                                                                              +
+     count(*) OVER w AS count                                                                          +
+    FROM rpr_serial                                                                                    +
+   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING                           +
+   AFTER MATCH SKIP PAST LAST ROW                                                                      +
+   INITIAL                                                                                             +
+   PATTERN (a b+)                                                                                      +
+   DEFINE                                                                                              +
+   a AS true,                                                                                          +
+   b AS val > PREV(val) AND PREV(val) IS NOT NULL AND NEXT(val) > FIRST(val) AND PREV(FIRST(val)) > 0);
 (1 row)
 
 -- Reluctant {1}? quantifier deparse through ruleutils
@@ -3203,7 +3203,7 @@ SELECT pg_get_viewdef('rpr_quant_reluctant_v'::regclass);
    PATTERN (a{1}? b)                                                         +
    DEFINE                                                                    +
    a AS (val > 0),                                                           +
-   b AS (val > 0) );
+   b AS (val > 0));
 (1 row)
 
 -- Quoted identifier round-trip: mixed case and reserved words need quoting
@@ -3227,7 +3227,7 @@ SELECT pg_get_viewdef('rpr_serial_quoted'::regclass);
    PATTERN ("Start" "Up"+)                                                   +
    DEFINE                                                                    +
    "Start" AS true,                                                          +
-   "Up" AS (val > PREV(val)) );
+   "Up" AS (val > PREV(val)));
 (1 row)
 
 -- Inline OVER round-trip: inline window spec (no WINDOW alias) deparses inside OVER (...)
@@ -3249,7 +3249,7 @@ SELECT pg_get_viewdef('rpr_serial_inline_over'::regclass);
    PATTERN (a b+)                                                                +
    DEFINE                                                                        +
    a AS (val > 10),                                                              +
-   b AS (val > PREV(val)) ) AS cnt                                               +
+   b AS (val > PREV(val))) AS cnt                                                +
     FROM rpr_serial;
 (1 row)
 
@@ -3285,7 +3285,7 @@ SELECT pg_get_viewdef('rpr_mview_v1'::regclass);
    INITIAL                                                                   +
    PATTERN (a+)                                                              +
    DEFINE                                                                    +
-   a AS (val > 0) );
+   a AS (val > 0));
 (1 row)
 
 -- Refresh test
@@ -3681,24 +3681,24 @@ SELECT * FROM rpr_multiwin_v ORDER BY id;
 (3 rows)
 
 SELECT pg_get_viewdef('rpr_multiwin_v'::regclass);
-                                      pg_get_viewdef                                       
--------------------------------------------------------------------------------------------
-  SELECT id,                                                                              +
-     val,                                                                                 +
-     count(*) OVER w1 AS cnt1,                                                            +
-     count(*) OVER w2 AS cnt2                                                             +
-    FROM rpr_multiwin                                                                     +
-   WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING             +
-   AFTER MATCH SKIP PAST LAST ROW                                                         +
-   INITIAL                                                                                +
-   PATTERN (a+)                                                                           +
-   DEFINE                                                                                 +
-   a AS (val > 15) ), w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING +
-   AFTER MATCH SKIP PAST LAST ROW                                                         +
-   INITIAL                                                                                +
-   PATTERN (b*)                                                                           +
-   DEFINE                                                                                 +
-   b AS (val <= 15) );
+                                      pg_get_viewdef                                      
+------------------------------------------------------------------------------------------
+  SELECT id,                                                                             +
+     val,                                                                                +
+     count(*) OVER w1 AS cnt1,                                                           +
+     count(*) OVER w2 AS cnt2                                                            +
+    FROM rpr_multiwin                                                                    +
+   WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING            +
+   AFTER MATCH SKIP PAST LAST ROW                                                        +
+   INITIAL                                                                               +
+   PATTERN (a+)                                                                          +
+   DEFINE                                                                                +
+   a AS (val > 15)), w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING +
+   AFTER MATCH SKIP PAST LAST ROW                                                        +
+   INITIAL                                                                               +
+   PATTERN (b*)                                                                          +
+   DEFINE                                                                                +
+   b AS (val <= 15));
 (1 row)
 
 -- {n} quantifier display in view
@@ -3722,7 +3722,7 @@ SELECT pg_get_viewdef('rpr_quant_n_v'::regclass);
    INITIAL                                                                   +
    PATTERN (a{3})                                                            +
    DEFINE                                                                    +
-   a AS (val > 0) );
+   a AS (val > 0));
 (1 row)
 
 -- {n,} quantifier display in view
@@ -3746,7 +3746,7 @@ SELECT pg_get_viewdef('rpr_quant_n_plus_v'::regclass);
    INITIAL                                                                   +
    PATTERN (a{2,})                                                           +
    DEFINE                                                                    +
-   a AS (val > 0) );
+   a AS (val > 0));
 (1 row)
 
 -- ============================================================
@@ -3771,14 +3771,14 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w5 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+?|B) DEFINE A AS val > 0, B AS val <= 0),
        w6 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A??|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_op'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (a* | b) 
-   PATTERN (a+ | b) 
-   PATTERN (a? | b) 
-   PATTERN (a*? | b) 
-   PATTERN (a+? | b) 
-   PATTERN (a?? | b) 
+        line         
+---------------------
+   PATTERN (a* | b)
+   PATTERN (a+ | b)
+   PATTERN (a? | b)
+   PATTERN (a*? | b)
+   PATTERN (a+? | b)
+   PATTERN (a?? | b)
 (6 rows)
 
 DROP VIEW rpr_dp_op;
@@ -3789,10 +3789,10 @@ FROM rpr_glue
 WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* | B) DEFINE A AS val > 0, B AS val <= 0),
        w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*? | B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_spc'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (a* | b) 
-   PATTERN (a*? | b) 
+        line         
+---------------------
+   PATTERN (a* | b)
+   PATTERN (a*? | b)
 (2 rows)
 
 DROP VIEW rpr_dp_spc;
@@ -3811,16 +3811,16 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w7 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{,3}?|B) DEFINE A AS val > 0, B AS val <= 0),
        w8 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2,3}?|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_rng'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN (a{2} | b) 
-   PATTERN (a{2,} | b) 
-   PATTERN (a{0,3} | b) 
-   PATTERN (a{2,3} | b) 
-   PATTERN (a{2}? | b) 
-   PATTERN (a{2,}? | b) 
-   PATTERN (a{0,3}? | b) 
-   PATTERN (a{2,3}? | b) 
+          line           
+-------------------------
+   PATTERN (a{2} | b)
+   PATTERN (a{2,} | b)
+   PATTERN (a{0,3} | b)
+   PATTERN (a{2,3} | b)
+   PATTERN (a{2}? | b)
+   PATTERN (a{2,}? | b)
+   PATTERN (a{0,3}? | b)
+   PATTERN (a{2,3}? | b)
 (8 rows)
 
 DROP VIEW rpr_dp_rng;
@@ -3832,11 +3832,11 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+ ?|B) DEFINE A AS val > 0, B AS val <= 0),
        w3 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? ?|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_mix'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (a*? | b) 
-   PATTERN (a+? | b) 
-   PATTERN (a?? | b) 
+        line         
+---------------------
+   PATTERN (a*? | b)
+   PATTERN (a+? | b)
+   PATTERN (a?? | b)
 (3 rows)
 
 DROP VIEW rpr_dp_mix;
@@ -3853,14 +3853,14 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w5 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|(B|C)) DEFINE A AS val > 0, B AS val <= 0, C AS val < 100),
        w6 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A*|B)+) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_struct'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN (a* | b c) 
-   PATTERN (a* | b* | c) 
-   PATTERN (a b* | c d) 
-   PATTERN ((a* | b)) 
-   PATTERN (a* | (b | c)) 
-   PATTERN ((a* | b)+) 
+           line           
+--------------------------
+   PATTERN (a* | b c)
+   PATTERN (a* | b* | c)
+   PATTERN (a b* | c d)
+   PATTERN ((a* | b))
+   PATTERN (a* | (b | c))
+   PATTERN ((a* | b)+)
 (6 rows)
 
 DROP VIEW rpr_dp_struct;
