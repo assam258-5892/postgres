@@ -142,14 +142,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 101 total, 0 merged
    NFA Contexts: 2 peak, 101 total, 60 pruned
    NFA: 20 matched (len 2/2/2.0), 0 mismatched
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Pattern with no matches - 0 matched
 CREATE VIEW rpr_ev_basic_nomatch AS
@@ -182,13 +181,12 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: x y z
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 1 peak, 101 total, 0 merged
    NFA Contexts: 2 peak, 101 total, 100 pruned
    NFA: 0 matched, 0 mismatched
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Pattern matching every row - high match count
 CREATE VIEW rpr_ev_basic_allrows AS
@@ -221,13 +219,12 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: r
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 101 total, 0 merged
    NFA Contexts: 2 peak, 101 total, 0 pruned
    NFA: 100 matched (len 1/1/1.0), 0 mismatched
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Regression test: Space before parenthesis in pattern deparse
 -- Verifies that "A (B | C)" correctly outputs as "a (b | c)" with space
@@ -259,14 +256,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a (b | c)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 35 total, 0 merged
    NFA Contexts: 2 peak, 21 total, 6 pruned
    NFA: 7 matched (len 2/2/2.0), 0 mismatched
    NFA: 0 absorbed, 7 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Regression test: Sequential alternations at same depth
 -- Verifies that "((B | C) (D | E))" correctly outputs as "(b | c) (d | e)"
@@ -299,13 +295,12 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a ((b | c) (d | e))*
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 61 total, 0 merged
    NFA Contexts: 3 peak, 31 total, 24 pruned
    NFA: 6 matched (len 1/1/1.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Regression test: ALT branch whose tail is a group
 -- (A | (B C)+ (D E)+) means A | ((B C)+ (D E)+) by precedence, so the two
@@ -340,14 +335,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | (b' c')+" (d e)+)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 103 total, 0 merged
    NFA Contexts: 3 peak, 31 total, 15 pruned
    NFA: 10 matched (len 1/4/2.5), 0 mismatched
    NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Regression test: Quoted identifiers in EXPLAIN pattern deparse
 -- Mixed case names must be quoted to preserve round-trip safety
@@ -403,13 +397,12 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 76 total, 0 merged
    NFA Contexts: 3 peak, 51 total, 25 pruned
    NFA: 25 matched (len 1/1/1.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Alternation pattern - multiple state branches
 CREATE VIEW rpr_ev_state_alt AS
@@ -446,14 +439,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c) (d | e)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 524 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 20 pruned
    NFA: 20 matched (len 2/2/2.0), 40 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Complex pattern with high state count
 CREATE VIEW rpr_ev_state_complex AS
@@ -492,14 +484,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b* c+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 235 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 34 pruned
    NFA: 33 matched (len 3/3/3.0), 0 mismatched
    NFA: 0 absorbed, 33 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Grouped pattern with quantifier - state count with grouping
 CREATE VIEW rpr_ev_state_group_quant AS
@@ -532,14 +523,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b')+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 91 total, 0 merged
    NFA Contexts: 3 peak, 61 total, 0 pruned
    NFA: 1 matched (len 60/60/60.0), 0 mismatched
    NFA: 29 absorbed (len 2/2/2.0), 30 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- State explosion pattern - many alternations
 -- Pattern (A|B)(A|B)(A|B)(A|B) can create many parallel states
@@ -573,14 +563,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b){8}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 17 peak, 995 total, 0 merged
    NFA Contexts: 8 peak, 101 total, 1 pruned
    NFA: 12 matched (len 8/8/8.0), 3 mismatched (len 2/4/3.0)
    NFA: 0 absorbed, 84 skipped (len 1/7/4.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Consecutive ALT merge followed by different ALT
 -- ((A | B) (A | B) (C | D)) -> (A|B){2} (C|D)
@@ -614,14 +603,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b){2} (c | d)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 181 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 12 pruned
    NFA: 9 matched (len 3/3/3.0), 1 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 18 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Consecutive ALT merge followed by non-ALT element
 -- ((A | B) (A | B) C) -> (A|B){2} C
@@ -655,14 +643,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b){2} c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 177 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 2 pruned
    NFA: 12 matched (len 3/3/3.0), 2 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 24 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ALT prefix/suffix absorbed into GROUP: (A|B) (A|B)+ (A|B) -> (A|B){3,}
 CREATE VIEW rpr_ev_state_alt_absorb_group AS
@@ -695,14 +682,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b){3,}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 243 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 0 pruned
    NFA: 1 matched (len 40/40/40.0), 0 mismatched
    NFA: 0 absorbed, 39 skipped (len 1/2/1.0)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- High state count - alternation with plus quantifier
 CREATE VIEW rpr_ev_state_alt_plus AS
@@ -735,14 +721,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c)+ d
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 16 peak, 1004 total, 0 merged
    NFA Contexts: 4 peak, 101 total, 0 pruned
    NFA: 25 matched (len 4/4/4.0), 0 mismatched
    NFA: 0 absorbed, 75 skipped (len 1/3/2.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Early termination: first ALT branch (A) reaches FIN immediately,
 -- pruning second branch (A B+) before it can accumulate B repetitions.
@@ -776,13 +761,12 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | a b)+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 306 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 99 pruned
    NFA: 1 matched (len 1/1/1.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Nested quantifiers causing state growth
 CREATE VIEW rpr_ev_state_nested_quant AS
@@ -815,14 +799,13 @@ WINDOW w AS (
  WindowAgg (actual rows=1000.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 5004 total, 0 merged
    NFA Contexts: 3 peak, 1001 total, 333 pruned
    NFA: 334 matched (len 1/2/2.0), 0 mismatched
    NFA: 0 absorbed, 333 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=1000.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- (A{2,})* must NOT flatten to a* (H-1): counts {0} UNION [2, INF) leave 1
 -- unreachable.  The planner keeps it as (a{2,})*, not a*.
@@ -856,14 +839,13 @@ WINDOW w AS (
  WindowAgg (actual rows=6.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a{2,}")*
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 18 total, 0 merged
    NFA Contexts: 3 peak, 7 total, 0 pruned
    NFA: 4 matched (len 0/2/1.0), 0 mismatched
    NFA: 0 absorbed, 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=6.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Context Statistics Tests (peak, total, pruned + absorbed/skipped)
@@ -899,14 +881,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 91 total, 0 merged
    NFA Contexts: 2 peak, 51 total, 0 pruned
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 30 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Bare unbounded quantifier: A+ absorbs redundant contexts
 -- min=1 commits no match until the run ends, so newer contexts absorb in-progress
@@ -940,14 +921,13 @@ WINDOW w AS (
  WindowAgg (actual rows=10.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 21 total, 0 merged
    NFA Contexts: 2 peak, 11 total, 0 pruned
    NFA: 1 matched (len 10/10/10.0), 0 mismatched
    NFA: 9 absorbed (len 1/1/1.0), 0 skipped
    ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Bare min=0 quantifier: A* is skipped, not absorbed
 -- min=0 commits an empty match at creation, so SKIP (not absorption) removes them
@@ -981,14 +961,13 @@ WINDOW w AS (
  WindowAgg (actual rows=10.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a*"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 32 total, 0 merged
    NFA Contexts: 2 peak, 11 total, 0 pruned
    NFA: 1 matched (len 10/10/10.0), 0 mismatched
    NFA: 0 absorbed, 9 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- No absorption - bounded quantifier
 CREATE VIEW rpr_ev_ctx_no_absorb AS
@@ -1021,14 +1000,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,4} b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 101 total, 0 merged
    NFA Contexts: 5 peak, 51 total, 0 pruned
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 0 absorbed, 40 skipped (len 1/4/2.5)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Contexts skipped by SKIP PAST LAST ROW
 CREATE VIEW rpr_ev_ctx_skip AS
@@ -1061,14 +1039,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 101 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 80 pruned
    NFA: 10 matched (len 3/3/3.0), 0 mismatched
    NFA: 0 absorbed, 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- High context absorption - unbounded group
 CREATE VIEW rpr_ev_ctx_absorb_group AS
@@ -1101,14 +1078,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b')+" c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 134 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 34 pruned
    NFA: 33 matched (len 3/3/3.0), 0 mismatched
    NFA: 0 absorbed, 33 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Fixed-length group absorption: (A B B)+ C
 -- B B merged to B{2}; absorbable with fixed-length check
@@ -1143,14 +1119,13 @@ WINDOW w AS (
  WindowAgg (actual rows=70.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b{2}')+" c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 91 total, 0 merged
    NFA Contexts: 4 peak, 71 total, 40 pruned
    NFA: 10 matched (len 7/7/7.0), 0 mismatched
    NFA: 10 absorbed (len 3/3/3.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=70.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Nested fixed-length group absorption: (A (B C){2} D)+ E
 -- step_size = 1 + (1+1)*2 + 1 = 6; v % 13 cycle gives 2 iterations + E
@@ -1188,14 +1163,13 @@ WINDOW w AS (
  WindowAgg (actual rows=65.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' (b' c'){2}' d')+" e
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 76 total, 0 merged
    NFA Contexts: 4 peak, 66 total, 50 pruned
    NFA: 5 matched (len 13/13/13.0), 0 mismatched
    NFA: 5 absorbed (len 6/6/6.0), 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=65.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Doubly nested fixed-length group absorption: (A ((B C{3}){2} D){2} E)+ F
 -- step_size = 1 + ((1+3)*2+1)*2 + 1 = 20; v % 41 cycle gives 2 iterations + F
@@ -1241,14 +1215,13 @@ WINDOW w AS (
  WindowAgg (actual rows=82.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' ((b' c{3}'){2}' d'){2}' e')+" f
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 87 total, 0 merged
    NFA Contexts: 4 peak, 83 total, 76 pruned
    NFA: 2 matched (len 41/41/41.0), 0 mismatched
    NFA: 2 absorbed (len 20/20/20.0), 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=82.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- 3-level END chain absorption: ((A (B C){2}){2})+
 -- step_size = (1 + (1+1)*2) * 2 = 10; v % 21 cycle gives 2 iterations
@@ -1287,14 +1260,13 @@ WINDOW w AS (
  WindowAgg (actual rows=42.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' (b' c'){2}'){2}')+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 47 total, 0 merged
    NFA Contexts: 5 peak, 43 total, 30 pruned
    NFA: 2 matched (len 20/20/20.0), 0 mismatched
    NFA: 2 absorbed (len 10/10/10.0), 8 skipped (len 1/5/3.0)
    ->  Function Scan on generate_series s (actual rows=42.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- No absorption when DEFINE uses FIRST (match_start-dependent)
 -- Same pattern as rpr_ev_ctx_absorb_unbounded but with FIRST in DEFINE.
@@ -1329,7 +1301,6 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+ b
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 9 peak, 151 total, 0 merged
@@ -1337,7 +1308,7 @@ WINDOW w AS (
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 0 absorbed, 40 skipped (len 1/4/2.5)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(11 rows)
+(10 rows)
 
 -- Absorption preserved when DEFINE uses only LAST without offset
 -- LAST(v) is match_start-independent (always currentpos), so absorption
@@ -1407,7 +1378,6 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+ b
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: -1
    Storage: Memory  Maximum Storage: NkB
    NFA States: 9 peak, 151 total, 0 merged
@@ -1415,7 +1385,7 @@ WINDOW w AS (
    NFA: 10 matched (len 4/5/4.9), 1 mismatched (len 5/5/5.0)
    NFA: 0 absorbed, 39 skipped (len 1/4/2.5)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(11 rows)
+(10 rows)
 
 -- Alternation, non-absorbable branch match survives absorption: A+ B | C
 -- The dominating A+ run absorbs redundant contexts, but the recorded C matches
@@ -1458,7 +1428,6 @@ WINDOW w AS (
  WindowAgg (actual rows=6.00 loops=1)
    Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" b | c)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 11 peak, 34 total, 0 merged
    NFA Contexts: 4 peak, 7 total, 0 pruned
@@ -1468,7 +1437,7 @@ WINDOW w AS (
          Sort Key: "*VALUES*".column1
          Sort Method: quicksort  Memory: NkB
          ->  Values Scan on "*VALUES*" (actual rows=6.00 loops=1)
-(13 rows)
+(12 rows)
 
 -- Alternation, both branches absorbable: A+ C | B+
 -- A+ C never completes (C absent) so its A+ run absorbs redundant contexts; the
@@ -1513,7 +1482,6 @@ WINDOW w AS (
  WindowAgg (actual rows=9.00 loops=1)
    Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" c | b+")
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 10 peak, 49 total, 0 merged
    NFA Contexts: 3 peak, 10 total, 0 pruned
@@ -1523,7 +1491,7 @@ WINDOW w AS (
          Sort Key: "*VALUES*".column1
          Sort Method: quicksort  Memory: NkB
          ->  Values Scan on "*VALUES*" (actual rows=9.00 loops=1)
-(13 rows)
+(12 rows)
 
 -- ============================================================
 -- Match Length Statistics Tests
@@ -1563,14 +1531,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c d e
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 101 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 60 pruned
    NFA: 20 matched (len 5/5/5.0), 0 mismatched
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Variable length matches - min/max/avg differ
 CREATE VIEW rpr_ev_mlen_variable AS
@@ -1603,14 +1570,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 191 total, 0 merged
    NFA Contexts: 2 peak, 101 total, 0 pruned
    NFA: 10 matched (len 10/10/10.0), 0 mismatched
    NFA: 80 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Very long matches
 CREATE VIEW rpr_ev_mlen_long AS
@@ -1643,14 +1609,13 @@ WINDOW w AS (
  WindowAgg (actual rows=200.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 396 total, 0 merged
    NFA Contexts: 2 peak, 201 total, 4 pruned
    NFA: 1 matched (len 196/196/196.0), 0 mismatched
    NFA: 194 absorbed (len 1/1/1.0), 1 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=200.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Uniform match length with mismatches from gap rows (v%20 = 11..15)
 CREATE VIEW rpr_ev_mlen_with_mismatch AS
@@ -1687,14 +1652,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 171 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 25 pruned
    NFA: 5 matched (len 5/5/5.0), 5 mismatched (len 11/11/11.0)
    NFA: 60 absorbed (len 1/1/1.0), 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Mismatch Length Statistics Tests
@@ -1745,14 +1709,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b+ c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 151 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 60 pruned
    NFA: 10 matched (len 6/6/6.0), 0 mismatched
    NFA: 20 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Long partial matches that fail
 CREATE VIEW rpr_ev_mlen_long_partial AS
@@ -1809,14 +1772,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b+ c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 115 total, 0 merged
    NFA Contexts: 3 peak, 61 total, 15 pruned
    NFA: 1 matched (len 30/30/30.0), 1 mismatched (len 26/26/26.0)
    NFA: 42 absorbed (len 1/1/1.0), 1 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series i (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- JSON Format Tests
@@ -1860,7 +1822,6 @@ WINDOW w AS (
        "Disabled": false,                                                  +
        "Window": "w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)",+
        "Pattern": "a+\" b+",                                               +
-       "Nav Mark Lookback": 0,                                             +
        "Storage": "Memory",                                                +
        "Maximum Storage": 0,                                               +
        "NFA States Peak": 3,                                               +
@@ -1938,7 +1899,6 @@ WINDOW w AS (
        "Disabled": false,                                                  +
        "Window": "w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)",+
        "Pattern": "a+\" b",                                                +
-       "Nav Mark Lookback": 0,                                             +
        "Storage": "Memory",                                                +
        "Maximum Storage": 0,                                               +
        "NFA States Peak": 3,                                               +
@@ -2020,7 +1980,6 @@ WINDOW w AS (
        "Disabled": false,                                                  +
        "Window": "w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)",+
        "Pattern": "a b c",                                                 +
-       "Nav Mark Lookback": 0,                                             +
        "Storage": "Memory",                                                +
        "Maximum Storage": 0,                                               +
        "NFA States Peak": 2,                                               +
@@ -2101,7 +2060,6 @@ WINDOW w AS (
        "Disabled": false,                                                  +
        "Window": "w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)",+
        "Pattern": "(a | b){8}",                                            +
-       "Nav Mark Lookback": 0,                                             +
        "Storage": "Memory",                                                +
        "Maximum Storage": 0,                                               +
        "NFA States Peak": 17,                                              +
@@ -2185,7 +2143,6 @@ WINDOW w AS (
        <Disabled>false</Disabled>                                              +
        <Window>w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)</Window>+
        <Pattern>a b</Pattern>                                                  +
-       <Nav-Mark-Lookback>0</Nav-Mark-Lookback>                                +
        <Storage>Memory</Storage>                                               +
        <Maximum-Storage>0</Maximum-Storage>                                    +
        <NFA-States-Peak>2</NFA-States-Peak>                                    +
@@ -2268,7 +2225,6 @@ WINDOW w AS (
  WindowAgg (actual rows=90.00 loops=1)
    Window: w AS (PARTITION BY p.p ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 165 total, 0 merged
    NFA Contexts: 2 peak, 93 total, 0 pruned
@@ -2280,7 +2236,7 @@ WINDOW w AS (
          ->  Nested Loop (actual rows=90.00 loops=1)
                ->  Function Scan on generate_series p (actual rows=3.00 loops=1)
                ->  Function Scan on generate_series v (actual rows=30.00 loops=3)
-(15 rows)
+(14 rows)
 
 -- Different pattern behavior per partition
 CREATE VIEW rpr_ev_part_diff AS
@@ -2325,7 +2281,6 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (PARTITION BY (CASE WHEN (v.v <= 25) THEN 1 ELSE 2 END) ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 77 total, 0 merged
    NFA Contexts: 2 peak, 52 total, 21 pruned
@@ -2335,7 +2290,7 @@ WINDOW w AS (
          Sort Key: (CASE WHEN (v.v <= 25) THEN 1 ELSE 2 END)
          Sort Method: quicksort  Memory: NkB
          ->  Function Scan on generate_series v (actual rows=50.00 loops=1)
-(13 rows)
+(12 rows)
 
 -- ============================================================
 -- Edge Cases
@@ -2371,9 +2326,8 @@ WINDOW w AS (
  WindowAgg (actual rows=0.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b
-   Nav Mark Lookback: 0
    ->  Function Scan on generate_series s (actual rows=0.00 loops=1)
-(5 rows)
+(4 rows)
 
 -- Empty matches (length 0): mirror the test_728_* cases in rpr_nfa.sql.
 -- Window aggregates over a length-0 frame return 0 / NULL, so the SELECT
@@ -2411,13 +2365,12 @@ WINDOW w AS (
  WindowAgg (actual rows=3.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{0,3}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 8 total, 0 merged
    NFA Contexts: 2 peak, 4 total, 0 pruned
    NFA: 3 matched (len 0/0/0.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=3.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- (A?){1,3}: min=1, one empty iteration satisfies min -> 3 length-0 matches
 CREATE VIEW rpr_ev_edge_empty_match_min1 AS
@@ -2450,13 +2403,12 @@ WINDOW w AS (
  WindowAgg (actual rows=3.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{0,3}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 8 total, 0 merged
    NFA Contexts: 2 peak, 4 total, 0 pruned
    NFA: 3 matched (len 0/0/0.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=3.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- (A?){2,3}: min=2 (ISO/IEC 19075-5 7.2.8 STR06 = STRE STRE) -> 3 length-0 matches
 CREATE VIEW rpr_ev_edge_empty_match_min2 AS
@@ -2489,13 +2441,12 @@ WINDOW w AS (
  WindowAgg (actual rows=3.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{0,3}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 8 total, 0 merged
    NFA Contexts: 2 peak, 4 total, 0 pruned
    NFA: 3 matched (len 0/0/0.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=3.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- (A?){2,3} mixed: rows 1-2 match A (real), rows 3-4 fall back to empty
 CREATE VIEW rpr_ev_edge_empty_match_mixed AS
@@ -2528,13 +2479,12 @@ WINDOW w AS (
  WindowAgg (actual rows=4.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{0,3}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 13 total, 0 merged
    NFA Contexts: 4 peak, 5 total, 0 pruned
    NFA: 4 matched (len 0/2/0.8), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=4.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- (A? B?){2,3}: pure empty multi-element body -> 3 length-0 matches
 CREATE VIEW rpr_ev_edge_empty_match_multi AS
@@ -2567,13 +2517,12 @@ WINDOW w AS (
  WindowAgg (actual rows=3.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a? b?){2,3}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 24 total, 0 merged
    NFA Contexts: 2 peak, 4 total, 0 pruned
    NFA: 3 matched (len 0/0/0.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=3.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Single row
 CREATE VIEW rpr_ev_edge_single_row AS
@@ -2606,13 +2555,12 @@ WINDOW w AS (
  WindowAgg (actual rows=1.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 2 total, 0 merged
    NFA Contexts: 2 peak, 2 total, 0 pruned
    NFA: 1 matched (len 1/1/1.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=1.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Pattern longer than data
 CREATE VIEW rpr_ev_edge_pattern_longer AS
@@ -2649,13 +2597,12 @@ WINDOW w AS (
  WindowAgg (actual rows=5.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c d e f g h i j
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 6 total, 0 merged
    NFA Contexts: 3 peak, 6 total, 4 pruned
    NFA: 0 matched, 1 mismatched (len 5/5/5.0)
    ->  Function Scan on generate_series s (actual rows=5.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- All rows match as single match
 CREATE VIEW rpr_ev_edge_single_match AS
@@ -2688,14 +2635,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 101 total, 0 merged
    NFA Contexts: 2 peak, 51 total, 0 pruned
    NFA: 1 matched (len 50/50/50.0), 0 mismatched
    NFA: 49 absorbed (len 1/1/1.0), 0 skipped
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Complex Pattern Tests
@@ -2731,14 +2677,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b' c')+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 81 total, 0 merged
    NFA Contexts: 4 peak, 61 total, 20 pruned
    NFA: 1 matched (len 60/60/60.0), 0 mismatched
    NFA: 19 absorbed (len 3/3/3.0), 20 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Multiple alternations
 CREATE VIEW rpr_ev_cpx_multi_alt AS
@@ -2775,14 +2720,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b) (c | d | e)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 423 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 40 pruned
    NFA: 20 matched (len 2/2/2.0), 20 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Optional elements
 CREATE VIEW rpr_ev_cpx_optional AS
@@ -2815,14 +2759,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b? c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 64 total, 0 merged
    NFA Contexts: 3 peak, 51 total, 25 pruned
    NFA: 12 matched (len 3/3/3.0), 1 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 12 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Bounded quantifiers
 CREATE VIEW rpr_ev_cpx_bounded AS
@@ -2855,14 +2798,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,5} b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 9 peak, 311 total, 0 merged
    NFA Contexts: 7 peak, 101 total, 0 pruned
    NFA: 10 matched (len 6/6/6.0), 40 mismatched (len 6/6/6.0)
    NFA: 0 absorbed, 50 skipped (len 1/5/3.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Star quantifier
 CREATE VIEW rpr_ev_cpx_star AS
@@ -2895,14 +2837,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b* c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 91 total, 0 merged
    NFA Contexts: 3 peak, 51 total, 40 pruned
    NFA: 5 matched (len 9/9/9.0), 0 mismatched
    NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Real-world Pattern Examples
@@ -2938,14 +2879,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: d+" u+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 58 total, 0 merged
    NFA Contexts: 3 peak, 31 total, 3 pruned
    NFA: 3 matched (len 3/14/8.0), 1 mismatched (len 3/3/3.0)
    NFA: 9 absorbed (len 1/1/1.0), 14 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_complex (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Stock price pattern - peak (up, stable, down)
 CREATE VIEW rpr_ev_real_peak AS
@@ -2978,14 +2918,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: u+" s* d+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 76 total, 0 merged
    NFA Contexts: 3 peak, 31 total, 1 pruned
    NFA: 4 matched (len 3/11/7.2), 0 mismatched
    NFA: 12 absorbed (len 1/1/1.0), 13 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_complex (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Consecutive increasing values (using PREV)
 CREATE VIEW rpr_ev_real_increasing AS
@@ -3061,14 +3000,13 @@ WINDOW w AS (
  WindowAgg (actual rows=1000.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 1001 total, 0 merged
    NFA Contexts: 2 peak, 1001 total, 0 pruned
    NFA: 500 matched (len 2/2/2.0), 0 mismatched
    NFA: 0 absorbed, 500 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=1000.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Large dataset with absorption
 CREATE VIEW rpr_ev_perf_large_absorb AS
@@ -3101,14 +3039,13 @@ WINDOW w AS (
  WindowAgg (actual rows=1000.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 1991 total, 0 merged
    NFA Contexts: 2 peak, 1001 total, 0 pruned
    NFA: 10 matched (len 100/100/100.0), 0 mismatched
    NFA: 980 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=1000.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- High state merge ratio
 CREATE VIEW rpr_ev_perf_high_merge AS
@@ -3141,14 +3078,13 @@ WINDOW w AS (
  WindowAgg (actual rows=500.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+ c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 9 peak, 3006 total, 0 merged
    NFA Contexts: 3 peak, 501 total, 1 pruned
    NFA: 166 matched (len 3/3/3.0), 1 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 332 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=500.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- INITIAL vs no INITIAL comparison
@@ -3186,14 +3122,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 91 total, 0 merged
    NFA Contexts: 2 peak, 51 total, 0 pruned
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 30 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Without INITIAL keyword (same behavior currently)
 CREATE VIEW rpr_ev_initial_without AS
@@ -3226,14 +3161,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 91 total, 0 merged
    NFA Contexts: 2 peak, 51 total, 0 pruned
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 30 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Quantifier Variations
@@ -3269,14 +3203,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 71 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 10 pruned
    NFA: 10 matched (len 3/3/3.0), 0 mismatched
    NFA: 20 absorbed (len 1/1/1.0), 0 skipped
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Star quantifier (zero or more)
 CREATE VIEW rpr_ev_quant_star AS
@@ -3309,14 +3242,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a*" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 102 total, 0 merged
    NFA Contexts: 2 peak, 41 total, 10 pruned
    NFA: 10 matched (len 3/3/3.0), 0 mismatched
    NFA: 10 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Question mark (zero or one)
 CREATE VIEW rpr_ev_quant_question AS
@@ -3349,14 +3281,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a? b c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 82 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 10 pruned
    NFA: 10 matched (len 3/3/3.0), 0 mismatched
    NFA: 0 absorbed, 20 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Exact count {n}
 CREATE VIEW rpr_ev_quant_exact AS
@@ -3389,14 +3320,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{3} b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 51 total, 0 merged
    NFA Contexts: 5 peak, 51 total, 0 pruned
    NFA: 10 matched (len 4/4/4.0), 10 mismatched (len 4/4/4.0)
    NFA: 0 absorbed, 30 skipped (len 1/3/2.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Range {n,m}
 CREATE VIEW rpr_ev_quant_range AS
@@ -3429,14 +3359,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{2,4} b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 101 total, 0 merged
    NFA Contexts: 5 peak, 51 total, 0 pruned
    NFA: 10 matched (len 5/5/5.0), 0 mismatched
    NFA: 0 absorbed, 40 skipped (len 1/4/2.5)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- At least {n,}
 CREATE VIEW rpr_ev_quant_atleast AS
@@ -3469,14 +3398,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a{3,}" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 86 total, 0 merged
    NFA Contexts: 2 peak, 51 total, 0 pruned
    NFA: 5 matched (len 10/10/10.0), 0 mismatched
    NFA: 40 absorbed (len 1/1/1.0), 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Regression Tests for Statistics Accuracy
@@ -3513,14 +3441,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 37 total, 0 merged
    NFA Contexts: 2 peak, 21 total, 0 pruned
    NFA: 4 matched (len 5/5/5.0), 0 mismatched
    NFA: 12 absorbed (len 1/1/1.0), 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Verify context count with known absorption
 CREATE VIEW rpr_ev_reg_ctx_absorb AS
@@ -3553,14 +3480,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 52 total, 0 merged
    NFA Contexts: 3 peak, 31 total, 6 pruned
    NFA: 3 matched (len 9/9/9.0), 0 mismatched
    NFA: 18 absorbed (len 1/1/1.0), 3 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Verify match length with fixed-length pattern
 CREATE VIEW rpr_ev_reg_matchlen AS
@@ -3593,14 +3519,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 31 total, 0 merged
    NFA Contexts: 3 peak, 31 total, 10 pruned
    NFA: 10 matched (len 3/3/3.0), 0 mismatched
    NFA: 0 absorbed, 10 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Alternation Pattern Tests
@@ -3636,14 +3561,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b) c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 303 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 40 pruned
    NFA: 20 matched (len 2/2/2.0), 20 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Multiple items in alternation
 CREATE VIEW rpr_ev_alt_multi_item AS
@@ -3680,14 +3604,13 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c | d) e
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 505 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 0 pruned
    NFA: 20 matched (len 2/2/2.0), 60 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Alternation with quantifiers
 CREATE VIEW rpr_ev_alt_with_quant AS
@@ -3720,14 +3643,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+ c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 9 peak, 306 total, 0 merged
    NFA Contexts: 3 peak, 51 total, 1 pruned
    NFA: 16 matched (len 3/3/3.0), 1 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 32 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Multiple alternatives (4+)
 CREATE VIEW rpr_ev_alt_four_plus AS
@@ -3758,13 +3680,12 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b | c | d | e)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 606 total, 0 merged
    NFA Contexts: 2 peak, 101 total, 0 pruned
    NFA: 100 matched (len 1/1/1.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Alternation at start
 CREATE VIEW rpr_ev_alt_at_start AS
@@ -3795,14 +3716,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b) c d
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 183 total, 0 merged
    NFA Contexts: 3 peak, 61 total, 16 pruned
    NFA: 15 matched (len 3/3/3.0), 14 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 15 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Multiple sequential alternations
 CREATE VIEW rpr_ev_alt_sequential AS
@@ -3833,13 +3753,12 @@ WINDOW w AS (
  WindowAgg (actual rows=100.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b) c (d | e) f
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 337 total, 0 merged
    NFA Contexts: 3 peak, 101 total, 67 pruned
    NFA: 0 matched, 33 mismatched (len 2/4/3.0)
    ->  Function Scan on generate_series s (actual rows=100.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Quantified alternatives
 CREATE VIEW rpr_ev_alt_quantified AS
@@ -3870,14 +3789,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" | b+") c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 223 total, 0 merged
    NFA Contexts: 3 peak, 61 total, 1 pruned
    NFA: 20 matched (len 2/2/2.0), 19 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 20 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Alternation at end
 CREATE VIEW rpr_ev_alt_at_end AS
@@ -3908,14 +3826,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b (c | d)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 89 total, 0 merged
    NFA Contexts: 3 peak, 61 total, 32 pruned
    NFA: 14 matched (len 3/3/3.0), 0 mismatched
    NFA: 0 absorbed, 14 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Nested ALT at start of branch inside outer ALT
 -- Pattern: (A ((B | C) D | E)) - preceding VAR + inner ALT as first branch element
@@ -3947,13 +3864,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a ((b | c) d | e)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 37 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 17 pruned
    NFA: 0 matched, 3 mismatched (len 3/3/3.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Nested ALT at end of branch inside outer ALT
 -- Pattern: (C (A | B) | D) - inner ALT is last element in outer branch
@@ -3985,13 +3901,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (c (a | b) | d)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 73 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 10 pruned
    NFA: 5 matched (len 1/1/1.0), 5 mismatched (len 2/2/2.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Quantified group as the first alternation branch
 -- Pattern: ((A B)+ | C) - leading group branch must open the enclosing paren
@@ -4023,14 +3938,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' b')+" | c)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 67 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 7 pruned
    NFA: 9 matched (len 1/2/1.4), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified group as the last alternation branch
 -- Pattern: (C | (A B)+) - trailing group branch, no separator follows
@@ -4062,14 +3976,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (c | (a' b')+")
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 67 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 7 pruned
    NFA: 9 matched (len 1/2/1.4), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified group as the middle branch of a three-way alternation
 -- Pattern: (C | (A B)+ | D) - separator before D must survive the group branch
@@ -4101,14 +4014,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (c | (a' b')+" | d)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 88 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 2 pruned
    NFA: 14 matched (len 1/2/1.3), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified group as the first branch of a three-way alternation
 -- Pattern: ((A B)+ | C | D) - leading group branch with two following branches
@@ -4140,14 +4052,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' b')+" | c | d)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 88 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 2 pruned
    NFA: 14 matched (len 1/2/1.3), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Bounded-quantifier group as the first alternation branch
 -- Pattern: ((A B){2} | C) - leading group branch with a range quantifier
@@ -4179,13 +4090,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a b){2} | c)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 63 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 11 pruned
    NFA: 5 matched (len 1/1/1.0), 4 mismatched (len 3/3/3.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Two quantified groups in one alternation
 -- Pattern: ((A B)+ | (C D)+) - both branches are groups
@@ -4217,14 +4127,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' b')+" | (c' d')+")
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 72 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 2 pruned
    NFA: 9 matched (len 2/2/2.0), 0 mismatched
    NFA: 0 absorbed, 9 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Leading group branch in an alternation nested in a sequence
 -- Pattern: (((A B)+ | C) D) - inner alternation opens with a group branch
@@ -4256,14 +4165,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' b')+" | c) d
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 67 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 6 pruned
    NFA: 5 matched (len 2/2/2.0), 4 mismatched (len 3/3/3.0)
    NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Trailing group branch in an alternation nested in a sequence
 -- Pattern: ((C | (A B)+) D) - group as last branch, then a sequence element
@@ -4295,14 +4203,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (c | (a' b')+") d
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 67 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 6 pruned
    NFA: 5 matched (len 2/2/2.0), 4 mismatched (len 3/3/3.0)
    NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified alternation whose first branch is a quantified group
 -- Pattern: (((A B){2} | C)+) - single-ALT group wraps a leading group branch
@@ -4334,13 +4241,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a b){2} | c)+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 78 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 11 pruned
    NFA: 5 matched (len 1/1/1.0), 4 mismatched (len 3/3/3.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Unit (1,1) group as an alternation branch (emits no BEGIN/END)
 -- Pattern: ((A B) | C) - control: takes the variable path, not deparse_rpr_group
@@ -4372,14 +4278,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b | c)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 63 total, 0 merged
    NFA Contexts: 2 peak, 21 total, 7 pruned
    NFA: 9 matched (len 1/2/1.4), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified variable as the first alternation branch
 -- Pattern: (A+ | C) - control: deparse_rpr_var already opens the leading paren
@@ -4411,13 +4316,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a+" | c)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 68 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 10 pruned
    NFA: 10 matched (len 1/1/1.0), 0 mismatched
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Quantified group as the last branch of a three-way alternation
 -- Pattern: (C | D | (A B)+) - control: trailing group needs no separator
@@ -4449,14 +4353,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (c | d | (a' b')+")
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 88 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 2 pruned
    NFA: 14 matched (len 1/2/1.3), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Alternation nested in a leading branch must not swallow the trailing branch
 -- Pattern: (D (A | B) | E) - inherited limit bounds the inner alternation
@@ -4488,13 +4391,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (d (a | b) | e)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 71 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 12 pruned
    NFA: 4 matched (len 1/1/1.0), 4 mismatched (len 2/2/2.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Group mid-branch followed by a sequence element needs no separator before it
 -- Pattern: (C | (A B)+ D) - relative-next blocks a spurious separator at D
@@ -4526,13 +4428,12 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (c | (a' b')+" d)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 67 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 11 pruned
    NFA: 5 matched (len 1/1/1.0), 4 mismatched (len 3/3/3.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(9 rows)
+(8 rows)
 
 -- Quantified group wrapping a lone alternation: the ALT supplies the parens
 -- Pattern: ((A | B)+) - loneAlt path, single pair of parens
@@ -4564,14 +4465,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 93 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 10 pruned
    NFA: 6 matched (len 1/2/1.7), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified group wrapping a sequence whose last element is an alternation
 -- Pattern: ((A (B | C))+) - group paren plus a nested alternation paren
@@ -4603,14 +4503,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a (b | c))+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 35 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 12 pruned
    NFA: 4 matched (len 2/2/2.0), 0 mismatched
    NFA: 0 absorbed, 4 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Quantified group wrapping a sequence whose first element is an alternation
 -- Pattern: (((A | B) C)+) - leading nested alternation inside a group sequence
@@ -4642,14 +4541,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a | b) c)+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 78 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 6 pruned
    NFA: 5 matched (len 2/2/2.0), 4 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Alternation non-last in a non-last branch, stacked three deep: each level's
 -- inherited limit must bound the inner alternation against the next branch
@@ -4684,14 +4582,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (((a | b) c | d) e | f)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 147 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 4 pruned
    NFA: 6 matched (len 1/2/1.5), 7 mismatched (len 2/3/2.4)
    NFA: 0 absorbed, 3 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Same interaction stacked four deep, to exercise the induction one step further
 -- Pattern: ((((A | B) C | D) E | F) G | H) - four nested inherited-limit boundaries
@@ -4725,14 +4622,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((((a | b) c | d) e | f) g | h)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 7 peak, 189 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 6 pruned
    NFA: 4 matched (len 1/2/1.5), 8 mismatched (len 2/3/2.6)
    NFA: 0 absorbed, 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Three-deep stack whose innermost branch is a quantified group: the group's
 -- skip-target jump must not be mistaken for a branch separator at any depth
@@ -4767,14 +4663,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (((a | b)+ c | d) e | f)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 11 peak, 177 total, 0 merged
    NFA Contexts: 4 peak, 21 total, 4 pruned
    NFA: 6 matched (len 1/2/1.5), 7 mismatched (len 2/4/3.1)
    NFA: 0 absorbed, 3 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Alternation trailing a paren-less sequence (last element of a non-last
 -- branch, no same-depth sibling to bound it), nested three deep
@@ -4809,14 +4704,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a (b (c | d) | e) | f)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 75 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 11 pruned
    NFA: 6 matched (len 1/3/2.0), 0 mismatched
    NFA: 0 absorbed, 3 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Same branch-tail alternation nested four deep
 -- Pattern: (A (B (C (D | E) | F) | G) | H) - branch-tail alternation x4
@@ -4850,14 +4744,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a (b (c (d | e) | f) | g) | h)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 75 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 14 pruned
    NFA: 4 matched (len 1/4/2.5), 0 mismatched
    NFA: 0 absorbed, 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- A nested alternation tail neighbouring a multi-element sequence branch: the
 -- branch boundary must split "...branch-tail ALT" from a plain "G A" sequence
@@ -4892,14 +4785,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a (b (c (d | e) | f) | g a) | h)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 75 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 14 pruned
    NFA: 4 matched (len 1/4/2.5), 0 mismatched
    NFA: 0 absorbed, 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- A nested alternation that is sibling-bounded by a trailing sequence element
 -- at the outer level (the ALT is not the branch tail; G follows it in-branch)
@@ -4934,14 +4826,13 @@ WINDOW w AS (
  WindowAgg (actual rows=20.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a (b (c | d) | e) | f) g | h)
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 113 total, 0 merged
    NFA Contexts: 3 peak, 21 total, 12 pruned
    NFA: 4 matched (len 1/2/1.5), 2 mismatched (len 4/4/4.0)
    NFA: 0 absorbed, 2 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=20.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Group Pattern Tests
@@ -4977,14 +4868,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a' b')+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 61 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 0 pruned
    NFA: 1 matched (len 40/40/40.0), 0 mismatched
    NFA: 19 absorbed (len 2/2/2.0), 20 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Group with bounded quantifier
 CREATE VIEW rpr_ev_grp_bounded AS
@@ -5017,14 +4907,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a b){2,4}
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 4 peak, 51 total, 0 merged
    NFA Contexts: 3 peak, 41 total, 5 pruned
    NFA: 5 matched (len 8/8/8.0), 0 mismatched
    NFA: 0 absorbed, 30 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Nested groups
 CREATE VIEW rpr_ev_grp_nested AS
@@ -5057,14 +4946,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' b'){2}')+"
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 5 peak, 76 total, 0 merged
    NFA Contexts: 4 peak, 61 total, 15 pruned
    NFA: 1 matched (len 60/60/60.0), 0 mismatched
    NFA: 14 absorbed (len 4/4/4.0), 30 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Deep nesting (3+ levels)
 CREATE VIEW rpr_ev_grp_deep AS
@@ -5095,14 +4983,13 @@ WINDOW w AS (
  WindowAgg (actual rows=40.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b)+
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 6 peak, 243 total, 0 merged
    NFA Contexts: 2 peak, 41 total, 0 pruned
    NFA: 1 matched (len 40/40/40.0), 0 mismatched
    NFA: 0 absorbed, 39 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Bounded quantifier on alternation
 CREATE VIEW rpr_ev_grp_bounded_alt AS
@@ -5133,14 +5020,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a | b){2,3} c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 8 peak, 320 total, 0 merged
    NFA Contexts: 3 peak, 61 total, 2 pruned
    NFA: 19 matched (len 3/3/3.0), 1 mismatched (len 2/2/2.0)
    NFA: 0 absorbed, 38 skipped (len 1/2/1.5)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Nested groups with quantifiers
 CREATE VIEW rpr_ev_grp_nested_quant AS
@@ -5171,14 +5057,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: ((a' b')+" c)*
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 9 peak, 178 total, 0 merged
    NFA Contexts: 4 peak, 61 total, 0 pruned
    NFA: 4 matched (len 0/57/14.2), 0 mismatched
    NFA: 0 absorbed, 56 skipped (len 1/3/1.6)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Partial nested quantification
 CREATE VIEW rpr_ev_grp_partial_quant AS
@@ -5209,14 +5094,13 @@ WINDOW w AS (
  WindowAgg (actual rows=60.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (a (b c)+)*
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 8 peak, 160 total, 0 merged
    NFA Contexts: 4 peak, 61 total, 0 pruned
    NFA: 4 matched (len 0/57/14.2), 0 mismatched
    NFA: 0 absorbed, 56 skipped (len 1/3/1.6)
    ->  Function Scan on generate_series s (actual rows=60.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Window Function Combinations
@@ -5252,14 +5136,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 55 total, 0 merged
    NFA Contexts: 2 peak, 31 total, 0 pruned
    NFA: 6 matched (len 5/5/5.0), 0 mismatched
    NFA: 18 absorbed (len 1/1/1.0), 6 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- first_value with pattern
 CREATE VIEW rpr_ev_wfn_first_value AS
@@ -5292,14 +5175,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 55 total, 0 merged
    NFA Contexts: 2 peak, 31 total, 0 pruned
    NFA: 6 matched (len 5/5/5.0), 0 mismatched
    NFA: 18 absorbed (len 1/1/1.0), 6 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- last_value with pattern
 CREATE VIEW rpr_ev_wfn_last_value AS
@@ -5332,14 +5214,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 55 total, 0 merged
    NFA Contexts: 2 peak, 31 total, 0 pruned
    NFA: 6 matched (len 5/5/5.0), 0 mismatched
    NFA: 18 absorbed (len 1/1/1.0), 6 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Multiple window functions
 CREATE VIEW rpr_ev_wfn_multi AS
@@ -5378,14 +5259,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 55 total, 0 merged
    NFA Contexts: 2 peak, 31 total, 0 pruned
    NFA: 6 matched (len 5/5/5.0), 0 mismatched
    NFA: 18 absorbed (len 1/1/1.0), 6 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- DEFINE Expression Variations
@@ -5425,14 +5305,13 @@ WINDOW w AS (
  WindowAgg (actual rows=50.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 78 total, 0 merged
    NFA Contexts: 2 peak, 51 total, 6 pruned
    NFA: 17 matched (len 2/3/2.6), 0 mismatched
    NFA: 10 absorbed (len 1/1/1.0), 17 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- Using PREV function
 CREATE VIEW rpr_ev_def_prev AS
@@ -5596,14 +5475,13 @@ WINDOW w AS (
  WindowAgg (actual rows=30.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 55 total, 0 merged
    NFA Contexts: 2 peak, 31 total, 0 pruned
    NFA: 6 matched (len 5/5/5.0), 0 mismatched
    NFA: 18 absorbed (len 1/1/1.0), 6 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series v (actual rows=30.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- ============================================================
 -- Large Scale Statistics Verification
@@ -5639,14 +5517,13 @@ WINDOW w AS (
  WindowAgg (actual rows=500.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+" b c
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 3 peak, 851 total, 0 merged
    NFA Contexts: 3 peak, 501 total, 101 pruned
    NFA: 50 matched (len 8/9/9.0), 0 mismatched
    NFA: 299 absorbed (len 1/1/1.0), 50 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=500.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- High match count scenario
 CREATE VIEW rpr_ev_scale_high_match AS
@@ -5679,14 +5556,13 @@ WINDOW w AS (
  WindowAgg (actual rows=500.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 501 total, 0 merged
    NFA Contexts: 2 peak, 501 total, 0 pruned
    NFA: 250 matched (len 2/2/2.0), 0 mismatched
    NFA: 0 absorbed, 250 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=500.00 loops=1)
-(10 rows)
+(9 rows)
 
 -- High skip count scenario
 CREATE VIEW rpr_ev_scale_high_skip AS
@@ -5729,14 +5605,13 @@ WINDOW w AS (
  WindowAgg (actual rows=500.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b c d e
-   Nav Mark Lookback: 0
    Storage: Memory  Maximum Storage: NkB
    NFA States: 2 peak, 501 total, 0 merged
    NFA Contexts: 3 peak, 501 total, 490 pruned
    NFA: 5 matched (len 5/5/5.0), 0 mismatched
    NFA: 0 absorbed, 5 skipped (len 1/1/1.0)
    ->  Function Scan on generate_series s (actual rows=500.00 loops=1)
-(10 rows)
+(9 rows)
 
 --
 -- Planner optimization: optimize_window_clauses must not alter RPR frame
@@ -5815,13 +5690,12 @@ EXPLAIN (COSTS OFF) SELECT * FROM rpr_ev_opt_mixed;
    ->  WindowAgg
          Window: w_rpr AS (ORDER BY s.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+"
-         Nav Mark Lookback: 0
          ->  WindowAgg
                Window: w_normal AS (ORDER BY s.v ROWS UNBOUNDED PRECEDING)
                ->  Sort
                      Sort Key: s.v
                      ->  Function Scan on generate_series s
-(10 rows)
+(9 rows)
 
 --
 -- Planner optimization: find_window_run_conditions must not push down
@@ -5916,9 +5790,8 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Function Scan on generate_series s
-(5 rows)
+(4 rows)
 
 -- NEXT only: no backward navigation, offset 0
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
@@ -5933,9 +5806,8 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+"
-   Nav Mark Lookback: 0
    ->  Function Scan on generate_series s
-(5 rows)
+(4 rows)
 
 -- PREV(v): implicit offset 1
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
@@ -6046,10 +5918,9 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: 0
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
 
 -- FIRST(v, 5): forward reach 5
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
@@ -6064,10 +5935,9 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: 5
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
 
 -- LAST(v, 1): backward reach 1, same as PREV(v, 1)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
@@ -6116,10 +5986,9 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: -1
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
 
 -- Compound NEXT(FIRST(val), 3): firstOffset = 0+3 = 3
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
@@ -6134,10 +6003,9 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: 3
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
 
 -- Compound PREV(LAST(val), 2): lookback = 0+2 = 2
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
@@ -6221,10 +6089,84 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: infinite
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
+
+-- A navigation with a negative offset cannot run, so it contributes no reach
+-- and its dimension reports nothing at all.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+
+   ->  Function Scan on generate_series s
+(4 rows)
+
+-- The same query errors once it runs, since execution validates the offset.
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
+);
+ERROR:  row pattern navigation offset must not be negative
+-- Same at the int64 limit, where the reach subtraction would otherwise wrap.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, (-9223372036854775807)::int8), 2) IS NOT NULL
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+
+   ->  Function Scan on generate_series s
+(4 rows)
+
+-- The other dimension keeps its own aggregate.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(v, 5) IS NOT NULL AND FIRST(v, -1) IS NOT NULL
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+
+   Nav Mark Lookback: 5
+   ->  Function Scan on generate_series s
+(5 rows)
+
+-- NEXT(LAST()) reaches the same subtraction on the lookback side.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS NEXT(LAST(v, 2), (-9223372036854775807)::int8) IS NOT NULL
+);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a+
+   ->  Function Scan on generate_series s
+(4 rows)
 
 -- Compound PREV(LAST(val, $1), $2): parameter lookback overflow -> retain all
 -- EXPLAIN shows "runtime" (plan-level); EXPLAIN ANALYZE shows "retain all"
@@ -6284,14 +6226,13 @@ EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
  WindowAgg (actual rows=10.00 loops=1)
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: infinite
    Storage: Memory  Maximum Storage: NkB
    NFA States: 1 peak, 11 total, 0 merged
    NFA Contexts: 2 peak, 11 total, 10 pruned
    NFA: 0 matched, 0 mismatched
    ->  Function Scan on generate_series s (actual rows=10.00 loops=1)
-(10 rows)
+(9 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE test_overflow_lookahead;
@@ -6313,10 +6254,9 @@ EXPLAIN (COSTS OFF) EXECUTE p_first_runtime(1, 1);
  WindowAgg
    Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a+
-   Nav Mark Lookback: 0
    Nav Mark Lookahead: runtime
    ->  Function Scan on generate_series s
-(6 rows)
+(5 rows)
 
 RESET plan_cache_mode;
 DEALLOCATE p_first_runtime;
