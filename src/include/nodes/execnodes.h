@@ -2789,6 +2789,7 @@ typedef struct WindowAggState
 	List	   *rprNavOffsets;
 	int64		navMaxOffset;	/* max backward nav offset (when FIXED) */
 	RPRNavOffsetKind navMaxOffsetKind;	/* status of navMaxOffset */
+	bool		hasMaxNav;		/* PREV()/LAST() present in DEFINE */
 	bool		hasFirstNav;	/* FIRST() present in DEFINE */
 	int64		navFirstOffset; /* min FIRST() offset (when FIXED) */
 	RPRNavOffsetKind navFirstOffsetKind;	/* status of navFirstOffset */

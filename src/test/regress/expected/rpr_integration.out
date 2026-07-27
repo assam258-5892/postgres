@@ -414,9 +414,8 @@ SELECT count(*), sum(c) FROM (
    ->  WindowAgg
          Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+"
-         Nav Mark Lookback: 0
          ->  Seq Scan on rpr_integ
-(6 rows)
+(5 rows)
 
 SELECT count(*), sum(c) FROM (
     SELECT count(*) OVER w AS c FROM rpr_integ
@@ -495,13 +494,12 @@ SELECT sum(c) FROM (
          Output: NULL::integer, count(*) OVER w, rpr_integ.id, rpr_integ.*
          Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
-         Nav Mark Lookback: 0
          ->  Sort
                Output: rpr_integ.id, rpr_integ.*
                Sort Key: rpr_integ.id
                ->  Seq Scan on public.rpr_integ
                      Output: rpr_integ.id, rpr_integ.*
-(12 rows)
+(11 rows)
 
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ
@@ -1644,7 +1642,6 @@ SELECT cnt FROM (
          Output: rpr_over1.a, NULL::integer, count(*) OVER w
          Window: w AS (ORDER BY rpr_over1.a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: x+"
-         Nav Mark Lookback: 0
          ->  Sort
                Output: rpr_over1.a
                Sort Key: rpr_over1.a
@@ -1654,7 +1651,7 @@ SELECT cnt FROM (
                            Output: rpr_over1.a
                      ->  Materialize
                            ->  Seq Scan on public.rpr_over2
-(16 rows)
+(15 rows)
 
 DROP TABLE rpr_over1, rpr_over2;
 -- ============================================================
@@ -1734,12 +1731,11 @@ GROUP BY g.n ORDER BY g.n;
                ->  WindowAgg
                      Window: w AS (ORDER BY rpr_srf.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                      Pattern: b a+
-                     Nav Mark Lookback: 0
                      Nav Mark Lookahead: runtime
                      ->  Sort
                            Sort Key: rpr_srf.v
                            ->  Seq Scan on rpr_srf
-(14 rows)
+(13 rows)
 
 -- Result: k=0 matches all ten rows and k>=1 makes the first A fail,
 -- so the forward offset is not frozen at ExecInit.

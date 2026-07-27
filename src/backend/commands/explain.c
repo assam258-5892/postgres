@@ -3213,28 +3213,44 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 		 * init, which runs even for plain EXPLAIN, so read the resolved value
 		 * and its kind from the planstate.
 		 */
-		switch (planstate->navMaxOffsetKind)
+		if (planstate->hasMaxNav)
 		{
-			case RPR_NAV_OFFSET_NEEDS_EVAL:
-				ExplainPropertyText("Nav Mark Lookback", "runtime", es);
-				break;
-			case RPR_NAV_OFFSET_RETAIN_ALL:
-				ExplainPropertyText("Nav Mark Lookback", "retain all", es);
-				break;
-			default:
-				ExplainPropertyInteger("Nav Mark Lookback", NULL,
-									   planstate->navMaxOffset, es);
+			switch (planstate->navMaxOffsetKind)
+			{
+				case RPR_NAV_OFFSET_NEEDS_EVAL:
+					ExplainPropertyText("Nav Mark Lookback", "runtime", es);
+					break;
+				case RPR_NAV_OFFSET_RETAIN_ALL:
+					ExplainPropertyText("Nav Mark Lookback", "retain all", es);
+					break;
+				case RPR_NAV_OFFSET_FIXED:
+					ExplainPropertyInteger("Nav Mark Lookback", NULL,
+										   planstate->navMaxOffset, es);
+					break;
+				default:
+					elog(ERROR, "unrecognized RPR nav offset kind: %d",
+						 planstate->navMaxOffsetKind);
+			}
 		}
 
 		if (planstate->hasFirstNav)
 		{
-			if (planstate->navFirstOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL)
-				ExplainPropertyText("Nav Mark Lookahead", "runtime", es);
-			else if (planstate->navFirstOffset == PG_INT64_MAX)
-				ExplainPropertyText("Nav Mark Lookahead", "infinite", es);
-			else
-				ExplainPropertyInteger("Nav Mark Lookahead", NULL,
-									   planstate->navFirstOffset, es);
+			switch (planstate->navFirstOffsetKind)
+			{
+				case RPR_NAV_OFFSET_NEEDS_EVAL:
+					ExplainPropertyText("Nav Mark Lookahead", "runtime", es);
+					break;
+				case RPR_NAV_OFFSET_FIXED:
+					if (planstate->navFirstOffset == PG_INT64_MAX)
+						ExplainPropertyText("Nav Mark Lookahead", "infinite", es);
+					else
+						ExplainPropertyInteger("Nav Mark Lookahead", NULL,
+											   planstate->navFirstOffset, es);
+					break;
+				default:
+					elog(ERROR, "unrecognized RPR nav offset kind: %d",
+						 planstate->navFirstOffsetKind);
+			}
 		}
 	}
 }
