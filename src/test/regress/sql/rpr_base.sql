@@ -5151,4 +5151,36 @@ FROM (SELECT id, val,
 ) s;
 
 DROP TABLE rpr_plan;
+
+CREATE TEMP TABLE sa (id int, price int);
+CREATE TEMP TABLE sb (id int, qty int);
+INSERT INTO sa VALUES (1,10),(2,20);
+INSERT INTO sb VALUES (1,5),(2,7);
+
+CREATE TEMP VIEW sv AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a JOIN sb b ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+
+ALTER TABLE sb ADD COLUMN price int;
+
+SELECT pg_get_viewdef('sv'::regclass, true);
+
+-- error
+CREATE TEMP VIEW sv3 AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a JOIN sb b ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+
+CREATE TEMP VIEW sv4 AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a (id, price) JOIN sb b (id, qty, price_1) ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+
+SELECT * FROM sv4;
+SELECT * FROM sv;
+
 RESET client_min_messages;

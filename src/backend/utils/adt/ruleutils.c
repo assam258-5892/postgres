@@ -7245,10 +7245,9 @@ static void
 get_rule_define(List *defineClause, deparse_context *context)
 {
 	StringInfo	buf = context->buf;
-	const char *sep;
+	const char *sep = "  ";
 	bool		save_inrprdefine = context->inRPRDefine;
-
-	sep = "  ";
+	bool		save_varprefix = context->varprefix;
 
 	/*
 	 * Within the DEFINE clause an unqualified prev/next/first/last is a
@@ -7257,6 +7256,12 @@ get_rule_define(List *defineClause, deparse_context *context)
 	 */
 	context->inRPRDefine = true;
 
+	/*
+	 * DEFINE clause referenced columns cannot be table/schema-qualified: the
+	 * qualifier slot is for pattern variables, so print bare column names.
+	 */
+	context->varprefix = false;
+
 	foreach_node(TargetEntry, te, defineClause)
 	{
 		appendStringInfo(buf, "%s%s AS ", sep, quote_identifier(te->resname));
@@ -7264,6 +7269,7 @@ get_rule_define(List *defineClause, deparse_context *context)
 		sep = ",\n  ";
 	}
 
+	context->varprefix = save_varprefix;
 	context->inRPRDefine = save_inrprdefine;
 }
 

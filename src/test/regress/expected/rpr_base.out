@@ -8374,4 +8374,57 @@ FROM (SELECT id, val,
 (2 rows)
 
 DROP TABLE rpr_plan;
+CREATE TEMP TABLE sa (id int, price int);
+CREATE TEMP TABLE sb (id int, qty int);
+INSERT INTO sa VALUES (1,10),(2,20);
+INSERT INTO sb VALUES (1,5),(2,7);
+CREATE TEMP VIEW sv AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a JOIN sb b ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+ALTER TABLE sb ADD COLUMN price int;
+SELECT pg_get_viewdef('sv'::regclass, true);
+                                pg_get_viewdef                                 
+-------------------------------------------------------------------------------
+  SELECT a.id,                                                                +
+     count(*) OVER w AS cnt                                                   +
+    FROM sa a                                                                 +
+      JOIN sb b ON a.id = b.id                                                +
+   WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING+
+   AFTER MATCH SKIP PAST LAST ROW                                             +
+   INITIAL                                                                    +
+   PATTERN (up+)                                                              +
+   DEFINE                                                                     +
+   up AS price > 0);
+(1 row)
+
+-- error
+CREATE TEMP VIEW sv3 AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a JOIN sb b ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+ERROR:  column reference "price" is ambiguous
+LINE 5:              PATTERN (UP+) DEFINE UP AS price > 0);
+                                                ^
+CREATE TEMP VIEW sv4 AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a (id, price) JOIN sb b (id, qty, price_1) ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+SELECT * FROM sv4;
+ id | cnt 
+----+-----
+  1 |   2
+  2 |   0
+(2 rows)
+
+SELECT * FROM sv;
+ id | cnt 
+----+-----
+  1 |   2
+  2 |   0
+(2 rows)
+
 RESET client_min_messages;
