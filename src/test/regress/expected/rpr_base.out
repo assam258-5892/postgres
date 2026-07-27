@@ -7701,7 +7701,7 @@ DROP TABLE rpr_sort;
 -- substitute_actual_parameters_in_from via query_tree_mutator.
 CREATE TABLE rpr_srf_t (v int);
 INSERT INTO rpr_srf_t SELECT generate_series(1, 5);
-CREATE FUNCTION rpr_srf_f(threshold int)
+CREATE FUNCTION rpr_srf_inline(threshold int)
 RETURNS TABLE (v int, cnt bigint)
 LANGUAGE sql STABLE AS $$
     SELECT v::int, count(*) OVER w
@@ -7713,7 +7713,7 @@ LANGUAGE sql STABLE AS $$
         DEFINE A AS v > $1
     )
 $$;
-SELECT v, cnt FROM rpr_srf_f(3) ORDER BY v;
+SELECT v, cnt FROM rpr_srf_inline(3) ORDER BY v;
  v | cnt 
 ---+-----
  1 |   0
@@ -7724,7 +7724,7 @@ SELECT v, cnt FROM rpr_srf_f(3) ORDER BY v;
 (5 rows)
 
 DROP TABLE rpr_srf_t;
-DROP FUNCTION rpr_srf_f(int);
+DROP FUNCTION rpr_srf_inline(int);
 DROP TABLE rpr_planner;
 -- ============================================================
 -- Stress Tests
