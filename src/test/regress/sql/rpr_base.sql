@@ -3978,6 +3978,42 @@ WINDOW w AS (
 );
 -- Expected: Fallback - VARs not merged (min sum 2147483647 == INF)
 
+-- Test: VAR merge falls back when the max sum lands exactly on INF.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741823} A{1,1073741824})
+    DEFINE A AS val > 0
+);
+-- Test: one below that sum is the largest max the merge may keep.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741822} A{1,1073741824})
+    DEFINE A AS val > 0
+);
+-- Test: one above that does not fit in int32; the overflow check rejects it.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741824} A{1,1073741824})
+    DEFINE A AS val > 0
+);
+-- Test: an operand that is already unbounded still merges.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741823} A{1,})
+    DEFINE A AS val > 0
+);
 -- Test: consecutive GROUP merge whose min sum is exactly INF causes fallback.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback

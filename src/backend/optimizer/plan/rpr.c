@@ -297,26 +297,24 @@ mergeConsecutiveVars(List *children)
 			if (strcmp(rprpattern->varName, other->varName) != 0)
 				break;
 
+			/*
+			 * RPR_QUANTITY_INF means unbounded, not a count: a finite sum
+			 * landing on it is representable, so reject it separately.
+			 */
 			if (rprpattern->max == RPR_QUANTITY_INF ||
 				other->max == RPR_QUANTITY_INF)
 				newmax = RPR_QUANTITY_INF;
+			else if (pg_add_s32_overflow(rprpattern->max, other->max, &newmax) ||
+					 newmax >= RPR_QUANTITY_INF)
+				break;			/* fallback: leave the pair unmerged */
 
-			if (pg_add_s32_overflow(rprpattern->min, other->min, &newmin))
-				break;
+			if (pg_add_s32_overflow(rprpattern->min, other->min, &newmin) ||
+				newmin >= RPR_QUANTITY_INF)
+				break;			/* fallback: leave the pair unmerged */
 
-			if (newmax != RPR_QUANTITY_INF &&
-				pg_add_s32_overflow(rprpattern->max, other->max, &newmax))
-				break;
-
-			if (newmin < RPR_QUANTITY_INF &&
-				newmax <= RPR_QUANTITY_INF)
-			{
-				rprpattern->min = newmin;
-				rprpattern->max = newmax;
-				children = list_delete_nth_cell(children, restpos);
-			}
-			else
-				break;
+			rprpattern->min = newmin;
+			rprpattern->max = newmax;
+			children = list_delete_nth_cell(children, restpos);
 		}
 	}
 
