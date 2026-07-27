@@ -2936,14 +2936,18 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 		appendStringInfoChar(buf, '?');
 	}
 
-	/* Append absorption markers: " for comparison point, ' for branch only */
+	/*
+	 * Append absorption markers: # for the comparison point, ~ for the
+	 * absorbable region.  These annotate the pattern, so they avoid the
+	 * characters the pattern language and quoted identifiers use.
+	 */
 	if (RPRElemIsAbsorbable(elem))
 	{
 		Assert(elem->max == RPR_QUANTITY_INF);
-		appendStringInfoChar(buf, '"');
+		appendStringInfoChar(buf, '#');
 	}
 	else if (RPRElemIsAbsorbableBranch(elem))
-		appendStringInfoChar(buf, '\'');
+		appendStringInfoChar(buf, '~');
 }
 
 /*
@@ -2969,7 +2973,7 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
  * EXPLAIN parenthesizes every ALT on its own, so a top-level "A | B" deparses
  * as "(a | b)".  This self-consistent EXPLAIN form is the correctness oracle
  * here; pg_get_viewdef differs, as its parens come only from an enclosing
- * GROUP.  Absorption markers (' ") are orthogonal and handled by
+ * GROUP.  Absorption markers (# ~) are orthogonal and handled by
  * append_rpr_quantifier().
  *
  * Two compiler invariants hold throughout: {1,1} groups are unwrapped before
@@ -3033,7 +3037,7 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 	{
 		Assert(elem->varId < pattern->numVars);
 		appendStringInfoString(buf,
-							   quote_identifier(pattern->varNames[elem->varId]));
+							   quote_pattern_variable(pattern->varNames[elem->varId]));
 		append_rpr_quantifier(buf, elem);
 		return idx + 1;
 	}
