@@ -22,6 +22,9 @@
  *   - RPR_ELEM_ABSORBABLE: marks WHERE to compare (comparison point)
  *   - RPR_ELEM_ABSORBABLE_BRANCH: marks the absorbable region
  *
+ *   EXPLAIN shows both on the Pattern: line, # for the comparison point and
+ *   ~ for the region.
+ *
  *   See computeAbsorbability() and the detailed comments before
  *   isUnboundedStart() for the full design explanation.
  *

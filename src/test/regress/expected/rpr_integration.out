@@ -346,7 +346,7 @@ SELECT count(*) FROM (
  Aggregate
    ->  WindowAgg
          Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-         Pattern: a+"
+         Pattern: a+#
          Nav Mark Lookback: 1
          ->  Seq Scan on rpr_integ
 (6 rows)
@@ -380,7 +380,7 @@ SELECT count(*), sum(c) FROM (
  Aggregate
    ->  WindowAgg
          Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-         Pattern: a+"
+         Pattern: a+#
          Nav Mark Lookback: 1
          ->  Seq Scan on rpr_integ
 (6 rows)
@@ -413,7 +413,7 @@ SELECT count(*), sum(c) FROM (
  Aggregate
    ->  WindowAgg
          Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-         Pattern: a+"
+         Pattern: a+#
          ->  Seq Scan on rpr_integ
 (5 rows)
 
@@ -1641,7 +1641,7 @@ SELECT cnt FROM (
    ->  WindowAgg
          Output: rpr_over1.a, NULL::integer, count(*) OVER w
          Window: w AS (ORDER BY rpr_over1.a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-         Pattern: x+"
+         Pattern: x+#
          ->  Sort
                Output: rpr_over1.a
                Sort Key: rpr_over1.a
@@ -1687,7 +1687,7 @@ GROUP BY g.n ORDER BY g.n;
                ->  Values Scan on "*VALUES*"
                ->  WindowAgg
                      Window: w AS (ORDER BY rpr_srf.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-                     Pattern: a+"
+                     Pattern: a+#
                      Nav Mark Lookback: runtime
                      ->  Sort
                            Sort Key: rpr_srf.v
