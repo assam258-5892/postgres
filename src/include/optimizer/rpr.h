@@ -58,7 +58,7 @@
 											 * empty match */
 /*
  * The two absorption flags below are explained in README.rpr IV-5
- * ("Absorbability Analysis"), with worked examples in Appendix C; the
+ * ("Absorbability Analysis"), with worked examples in Appendix B; the
  * analysis that sets them is computeAbsorbability() in
  * optimizer/plan/rpr.c.
  */
