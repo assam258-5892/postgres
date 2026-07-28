@@ -4838,6 +4838,7 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 {
 	Bitmapset  *attrs_used;
 	ListCell   *lc;
+	WindowFuncLists *wflists = NULL;
 
 	/*
 	 * Just point directly to extra_used_attrs. No need to bms_copy as none of
@@ -4885,6 +4886,18 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 	 */
 	if (bms_is_member(0 - FirstLowInvalidHeapAttributeNumber, attrs_used))
 		return;
+
+	/*
+	 * If the subquery uses row pattern recognition, collect its window
+	 * functions so we can tell which window clauses are active (i.e.
+	 * referenced by a window function).  An RPR window that no window
+	 * function references will be dropped by select_active_windows when the
+	 * subquery is planned, so below we should not let such a dead window's
+	 * DEFINE clause retain otherwise-unused output columns.
+	 */
+	if (subquery->hasRPR)
+		wflists = find_window_functions((Node *) subquery->targetList,
+										list_length(subquery->windowClause));
 
 	/*
 	 * Run through the tlist and zap entries we don't need.  It's okay to
@@ -4943,7 +4956,9 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 
 			foreach_node(WindowClause, wc, subquery->windowClause)
 			{
-				if (wc->defineClause != NIL)
+				if (wc->defineClause != NIL &&
+					wflists != NULL &&
+					wflists->windowFuncs[wc->winref] != NIL)
 				{
 					/*
 					 * flags == 0 is safe: DEFINE rejects aggregates, window
@@ -4954,15 +4969,11 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 
 					foreach_node(Var, dvar, vars)
 					{
-
 						/*
-						 * Match varno as well as varattno: a Var pulled from
-						 * a DEFINE clause can share an attribute number with
-						 * an unrelated output column of a different relation,
-						 * which would otherwise be over-retained.  Checking
-						 * varlevelsup is just paranoia, since outer
-						 * references in DEFINE are rejected during parse
-						 * analysis.
+						 * Match varno too: varattno alone can collide with an
+						 * unrelated column of another relation. varlevelsup
+						 * is paranoia, since DEFINE rejects outer references
+						 * at parse time.
 						 */
 						if (dvar->varno == var->varno &&
 							dvar->varattno == var->varattno &&
