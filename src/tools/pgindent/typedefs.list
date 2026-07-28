@@ -753,6 +753,7 @@ EndLOPtrType
 EndLOsPtrType
 EndOfWalRecoveryInfo
 EndSampleScan_function
+EnsureDefineInputsCtx
 EnumItem
 EolType
 EphemeralNameRelationType

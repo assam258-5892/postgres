@@ -31,8 +31,10 @@
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
+#include "parser/parse_relation.h"
 #include "parser/parse_rpr.h"
 #include "parser/parse_target.h"
+#include "parser/parsetree.h"
 
 /* DEFINE clause walker context -- see define_walker for usage. */
 typedef enum
@@ -258,6 +260,83 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 	}
 }
 
+/* State for ensure_define_inputs_walker. */
+typedef struct EnsureDefineInputsCtx
+{
+	ParseState *pstate;
+	List	  **targetlist;
+} EnsureDefineInputsCtx;
+
+static bool
+ensure_define_inputs_walker(Node *node, EnsureDefineInputsCtx *ctx)
+{
+	if (node == NULL)
+		return false;
+
+	/*
+	 * A subexpression that a sort/group clause already computes needs nothing
+	 * of its own.  Its targetlist entry survives into the WindowAgg's input,
+	 * because make_window_input_target() passes an entry bearing a
+	 * sortgroupref through untouched, and setrefs.c matches a complex
+	 * expression against that input before it descends to Vars.  Stopping
+	 * here is what lets a DEFINE clause repeat a GROUP BY expression: taking
+	 * the expression apart would offer the grouping logic a column that
+	 * grouping does not make available on its own.
+	 */
+	if (!IsA(node, Var))
+	{
+		Node	   *stripped = strip_implicit_coercions(node);
+
+		foreach_node(TargetEntry, tle, *ctx->targetlist)
+		{
+			if (tle->ressortgroupref == 0)
+				continue;
+			if (equal(strip_implicit_coercions((Node *) tle->expr), stripped))
+				return false;
+		}
+	}
+
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
+
+		foreach_node(TargetEntry, tle, *ctx->targetlist)
+		{
+			if (equal(tle->expr, var))
+				return false;
+		}
+
+		*ctx->targetlist =
+			lappend(*ctx->targetlist,
+					makeTargetEntry((Expr *) copyObject(var),
+									(AttrNumber) ctx->pstate->p_next_resno++,
+									NULL,
+									true));
+		return false;
+	}
+
+	return expression_tree_walker(node, ensure_define_inputs_walker, ctx);
+}
+
+/*
+ * ensure_define_inputs -
+ *		Make sure the targetlist carries what a DEFINE expression reads.
+ *
+ * The whole expression cannot go in the targetlist, since it may contain
+ * RPRNavExpr nodes that only the owning WindowAgg can evaluate.  So walk it,
+ * leave alone any part a sort/group clause already computes, and add a
+ * resjunk entry for every Var that is not covered.
+ */
+static void
+ensure_define_inputs(ParseState *pstate, Node *expr, List **targetlist)
+{
+	EnsureDefineInputsCtx ctx;
+
+	ctx.pstate = pstate;
+	ctx.targetlist = targetlist;
+	(void) ensure_define_inputs_walker(expr, &ctx);
+}
+
 /*
  * transformDefineClause
  *		Process DEFINE clause and transform ResTarget into list of TargetEntry.
@@ -340,14 +419,13 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 	{
 		TargetEntry *teDefine;
 		Node	   *expr;
-		List	   *vars;
 
 		/*
 		 * Transform the DEFINE expression and coerce it to boolean.  We must
 		 * NOT add the whole expression to the query targetlist, because it
 		 * may contain RPRNavExpr nodes (PREV/NEXT/FIRST/LAST) that can only
 		 * be evaluated inside the owning WindowAgg.  Coercing here, before
-		 * pull_var_clause, keeps pull_var_clause operating on the final
+		 * the targetlist walk, keeps that walk operating on the final
 		 * expression form and surfaces a type mismatch before the targetlist
 		 * is touched.
 		 */
@@ -365,36 +443,11 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		defineClause = lappend(defineClause, teDefine);
 
 		/*
-		 * Pull out Var nodes from the transformed expression and ensure each
-		 * one is present in the targetlist.  This is needed so the planner
-		 * propagates the referenced columns through the plan tree, making
-		 * them available to the WindowAgg's DEFINE evaluation.
+		 * Ensure the targetlist carries what this expression reads, so that
+		 * the planner propagates it through the plan tree and it is there for
+		 * the WindowAgg's DEFINE evaluation.
 		 */
-		vars = pull_var_clause(expr, 0);
-		foreach_node(Var, var, vars)
-		{
-			bool		found = false;
-
-			foreach_node(TargetEntry, tle, *targetlist)
-			{
-				if (equal(tle->expr, var))
-				{
-					found = true;
-					break;
-				}
-			}
-			if (!found)
-			{
-				TargetEntry *newtle;
-
-				newtle = makeTargetEntry((Expr *) copyObject(var),
-										 (AttrNumber) pstate->p_next_resno++,
-										 NULL,
-										 true);
-				*targetlist = lappend(*targetlist, newtle);
-			}
-		}
-		list_free(vars);
+		ensure_define_inputs(pstate, expr, targetlist);
 	}
 	pstate->p_rpr_pattern_vars = NIL;
 
@@ -628,4 +681,121 @@ define_walker(Node *node, void *context)
 	}
 
 	return expression_tree_walker(node, define_walker, ctx);
+}
+
+/*
+ * checkRPRDefineGrouping -
+ *	  Refuse the row pattern DEFINE clauses that grouping cannot serve yet.
+ *
+ * A DEFINE clause is the only part of a WindowClause holding an expression
+ * tree of its own: partitionClause and orderClause carry just a sortgroupref
+ * into the target list, and the frame offsets are checked to be Var-free.
+ * substitute_grouped_columns() therefore never reaches wc->defineClause, and
+ * its Vars stay plain relation Vars while the target list copies of the same
+ * columns become Vars of the RTE_GROUP RTE.  One shape makes that divergence
+ * reach the user, and it is refused here: a grouping column that is not part
+ * of every grouping set can be nulled by the grouping step, the target list
+ * copy records that in varnullingrels and the DEFINE copy does not, and
+ * setrefs.c would later notice.
+ *
+ * Called from parseCheckAggregates() before it substitutes the target list,
+ * with that function's own working state: groupClauses is the TargetEntry list
+ * for the acceptable GROUP BY expressions with join aliases flattened, and
+ * gset_common holds the ressortgroupref values present in every grouping set.
+ *
+ * XXX This whole function is a stopgap and should be deleted once the DEFINE
+ * clause takes part in grouping.  That needs three things: a third
+ * substitute_grouped_columns() call over wc->defineClause, a matching
+ * flatten_group_exprs() over it in subquery_planner(), and the same in
+ * get_query_def() so that a view over grouped input still deparses.
+ *
+ * XXX Checking during parse analysis over-rejects a DEFINE clause whose only
+ * reference to the column is dead code, as in "true OR c IS NOT NULL": the
+ * planner folds that Var away and nothing would have broken.  Moving the
+ * check next to the volatility check in subquery_planner() would fix that,
+ * but CREATE VIEW does not plan, so it would leave behind a view that cannot
+ * be selected from.
+ */
+void
+checkRPRDefineGrouping(ParseState *pstate, Query *qry,
+					   List *groupClauses, List *gset_common,
+					   bool hasJoinRTEs)
+{
+	ListCell   *lc;
+
+	/*
+	 * Without an RTE_GROUP RTE nothing is substituted, so the two copies
+	 * cannot diverge.  This is what lets GROUP BY () through.
+	 */
+	if (!qry->hasGroupRTE)
+		return;
+
+	foreach(lc, qry->windowClause)
+	{
+		WindowClause *wc = (WindowClause *) lfirst(lc);
+		Node	   *defineClause;
+		List	   *vars;
+		ListCell   *lv;
+
+		if (wc->rpPattern == NULL || wc->defineClause == NIL)
+			continue;
+
+		/* groupClauses has been flattened already; match that here */
+		defineClause = (Node *) wc->defineClause;
+		if (hasJoinRTEs)
+			defineClause = flatten_join_alias_for_parser(qry, defineClause, 0);
+
+		/*
+		 * flags == 0 is safe: a DEFINE clause rejects aggregates, window
+		 * functions and subqueries at parse time, and no PlaceHolderVar
+		 * exists yet.
+		 */
+		vars = pull_var_clause(defineClause, 0);
+
+		foreach(lv, vars)
+		{
+			Var		   *var = (Var *) lfirst(lv);
+			TargetEntry *gtle = NULL;
+			RangeTblEntry *rte;
+			char	   *attname;
+			ListCell   *lg;
+
+			/* an outer reference cannot occur: parse_expr.c rejects it */
+			Assert(var->varlevelsup == 0);
+
+			foreach(lg, groupClauses)
+			{
+				TargetEntry *tle = (TargetEntry *) lfirst(lg);
+
+				if (IsA(tle->expr, Var) && equal(tle->expr, var))
+				{
+					gtle = tle;
+					break;
+				}
+			}
+
+			/*
+			 * A column that is not a grouping column of its own is either
+			 * covered by a grouping expression the DEFINE clause named as a
+			 * whole, or not grouped at all.  substitute_grouped_columns()
+			 * reports the second, and correctly.
+			 */
+			if (gtle == NULL)
+				continue;
+
+			/* a grouping column is nullable only under grouping sets */
+			if (!qry->groupingSets ||
+				list_member_int(gset_common, gtle->ressortgroupref))
+				continue;
+
+			rte = rt_fetch(var->varno, qry->rtable);
+			attname = get_rte_attribute_name(rte, var->varattno);
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("cannot use column \"%s.%s\" in a DEFINE clause with grouping sets",
+						   rte->eref->aliasname, attname),
+					errdetail("ROLLUP, CUBE and GROUPING SETS can set this column to null, which a DEFINE clause cannot represent."),
+					parser_errposition(pstate, var->location));
+		}
+	}
 }

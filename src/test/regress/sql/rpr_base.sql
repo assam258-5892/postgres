@@ -5028,6 +5028,355 @@ WINDOW w AS (
 ORDER BY id
 LIMIT 3 OFFSET 1;
 
+-- ------------------------------------------------------------
+-- RPR over grouped input
+-- ------------------------------------------------------------
+-- A DEFINE clause is the only part of a WindowClause that holds an
+-- expression tree of its own, so parseCheckAggregates() never rewrites it
+-- and its Vars stay plain relation Vars.  These pin which grouping shapes
+-- that divergence reaches and which are unaffected.
+
+CREATE TABLE rpr_grp (id int PRIMARY KEY, category text, val int);
+INSERT INTO rpr_grp VALUES (1, 'A', 10), (2, 'B', 20);
+
+-- Grouped input works; the pattern matches over the grouped rows
+SELECT category, sum(val) AS total, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY category
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category;
+
+-- Navigation over a grouping column
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY category
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B*)
+    DEFINE B AS category > PREV(category))
+ORDER BY category;
+
+-- GROUP BY () builds no RTE_GROUP, so the two copies cannot diverge
+SELECT count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ()
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS true);
+
+-- A single grouping set collapses to a plain GROUP BY
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY GROUPING SETS ((category))
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category;
+
+-- Duplicated sets leave the column in every set
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY GROUPING SETS ((category), (category))
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category;
+
+-- ROLLUP is fine while the DEFINE clause holds no column reference
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS true)
+ORDER BY category NULLS LAST;
+
+-- and while it names only a column that every grouping set contains
+SELECT category, val, count(*) OVER w AS cnt
+FROM rpr_sort
+WHERE val < 30
+GROUP BY category, ROLLUP(val)
+WINDOW w AS (
+    ORDER BY category, val
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category, val NULLS LAST;
+
+-- The window's own PARTITION BY and ORDER BY reference the target list,
+-- so a nullable grouping column reaches them unharmed
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    PARTITION BY category
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS true)
+ORDER BY category NULLS LAST;
+
+-- An aggregate query without GROUP BY produces one grouped row
+SELECT count(*) OVER w AS cnt
+FROM rpr_sort
+HAVING count(*) > 0
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS true);
+
+SELECT count(*) OVER w AS cnt, sum(val) AS total
+FROM rpr_sort
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS true);
+
+-- GROUP BY together with HAVING
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY category
+HAVING count(*) > 1
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category;
+
+-- A grouping key that is not a plain Var does not stand in the way of a
+-- DEFINE clause that names a plain-Var grouping key
+SELECT category, val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val + 1, category
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category;
+
+-- Grouping by the primary key exposes the dependent columns
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY id
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val > 0)
+ORDER BY id;
+
+-- An aggregate is available to the window's ORDER BY
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY category
+WINDOW w AS (
+    ORDER BY sum(val)
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL)
+ORDER BY category;
+
+-- Grouping in a subquery leaves the outer RPR window alone
+SELECT category, total, count(*) OVER w AS cnt
+FROM (SELECT category, sum(val) AS total FROM rpr_sort GROUP BY category) s
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B*)
+    DEFINE B AS total > PREV(total))
+ORDER BY category;
+
+-- A view over grouped input round-trips
+CREATE VIEW rpr_grp_v AS
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY category
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS category IS NOT NULL);
+
+SELECT pg_get_viewdef('rpr_grp_v'::regclass, true);
+SELECT * FROM rpr_grp_v ORDER BY category;
+DROP VIEW rpr_grp_v;
+
+-- ERROR: ROLLUP can null the grouping column that the DEFINE clause names
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL);
+
+-- ERROR: the same for CUBE
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY CUBE(category)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL);
+
+-- ERROR: the same for an explicit set list containing the empty set
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY GROUPING SETS ((category), ())
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL);
+
+-- ERROR: the same when a second set simply omits the column
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY GROUPING SETS ((category), (val))
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL);
+
+-- ERROR: within one grouping shape it is the column, not the query, that
+-- decides: naming val is refused where naming category was accepted
+SELECT category, val, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY category, ROLLUP(val)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val > 0);
+
+-- ERROR: navigation does not hide the reference
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B*)
+    DEFINE B AS PREV(category) IS NOT NULL);
+
+-- ERROR: nor does a compound navigation
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    ORDER BY category
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B*)
+    DEFINE B AS PREV(LAST(category)) IS NOT NULL);
+
+-- ERROR: the same one query level down
+SELECT * FROM (
+    SELECT category, count(*) OVER w AS cnt
+    FROM rpr_sort
+    GROUP BY ROLLUP(category)
+    WINDOW w AS (
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A)
+        DEFINE A AS category IS NOT NULL)) s;
+
+-- ERROR: and in a view definition
+CREATE VIEW rpr_grp_v2 AS
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL);
+
+-- A DEFINE clause may spell a GROUP BY expression: the whole expression is
+-- matched against the grouping target entry, so the columns underneath it
+-- need no entry of their own
+SELECT val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val + 1
+WINDOW w AS (
+    ORDER BY val + 1
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val + 1 > 0)
+ORDER BY bumped;
+
+-- the same for a function call
+SELECT upper(category) AS u, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY upper(category)
+WINDOW w AS (
+    ORDER BY upper(category)
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS upper(category) = 'A')
+ORDER BY u;
+
+-- the same for a cast
+SELECT val::text AS t, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val::text
+WINDOW w AS (
+    ORDER BY val::text
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val::text > '0')
+ORDER BY t;
+
+-- and through a navigation operation, whose argument is matched the same way
+SELECT val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val + 1
+WINDOW w AS (
+    ORDER BY val + 1
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B*)
+    DEFINE B AS PREV(val + 1) > 0)
+ORDER BY bumped;
+
+-- ERROR: the bare column is another matter; grouping by an expression does
+-- not make the columns inside it available on their own
+SELECT val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val + 1
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val > 0);
+
+-- ERROR: a column that was never grouped is still reported as one
+SELECT category, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY category
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val > 0);
+
+-- ERROR: an unreferenced window is checked like any other DEFINE clause
+SELECT category
+FROM rpr_sort
+GROUP BY ROLLUP(category)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS category IS NOT NULL);
+
+DROP TABLE rpr_grp;
+
 DROP TABLE rpr_sort;
 
 -- SQL function inlining: $1 in DEFINE must be substituted by

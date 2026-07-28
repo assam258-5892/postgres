@@ -27,6 +27,7 @@
 #include "parser/parse_coerce.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_relation.h"
+#include "parser/parse_rpr.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "utils/builtins.h"
@@ -1311,6 +1312,14 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 			groupClauseCommonVars = lappend(groupClauseCommonVars, tle->expr);
 		}
 	}
+
+	/*
+	 * Refuse the row pattern DEFINE clauses that grouping cannot serve yet.
+	 * This has to run before the substitution below, which would otherwise
+	 * report one of them as an ungrouped column.
+	 */
+	checkRPRDefineGrouping(pstate, qry, groupClauses, gset_common,
+						   hasJoinRTEs);
 
 	/*
 	 * Replace grouped variables in the targetlist and HAVING clause with Vars

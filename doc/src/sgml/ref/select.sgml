@@ -1221,6 +1221,17 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
+    Row pattern recognition may be applied to grouped input: the pattern
+    matches over the rows that <literal>GROUP BY</literal> produces, and a
+    <literal>DEFINE</literal> clause may reference the grouping columns and
+    repeat the grouping expressions.  It cannot, however, reference a
+    grouping column that a grouping set can set to null, as the grouping-set
+    forms <literal>ROLLUP</literal>, <literal>CUBE</literal>
+    and <literal>GROUPING SETS</literal> can; such a query is rejected with
+    an error.
+   </para>
+
+   <para>
     Row pattern recognition cannot appear anywhere in a common table
     expression that belongs to a <literal>WITH RECURSIVE</literal> clause;
     such a query is rejected with an error.  The same restriction reaches

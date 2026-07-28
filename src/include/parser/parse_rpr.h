@@ -18,5 +18,8 @@
 
 extern void transformRPR(ParseState *pstate, WindowClause *wc,
 						 WindowDef *windef, List **targetlist);
+extern void checkRPRDefineGrouping(ParseState *pstate, Query *qry,
+								   List *groupClauses, List *gset_common,
+								   bool hasJoinRTEs);
 
 #endif							/* PARSE_RPR_H */
