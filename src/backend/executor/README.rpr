@@ -1594,44 +1594,7 @@ XII-5. Execution Optimization Summary
     level, achieving O(n^2) -> O(n) time complexity. Without this,
     performance degrades sharply on long partitions.
 
-Appendix A. Key Function Index
-============================================================================
-
-  Function                      File                  Role
-  --------------------------------------------------------------------------
-  transformRPR                  parse_rpr.c           Parser entry point
-  transformDefineClause         parse_rpr.c           DEFINE transformation
-  buildRPRPattern               rpr.c                 NFA compilation main
-  optimizeRPRPattern            rpr.c                 parse tree optimization
-  fillRPRPattern                rpr.c                 NFA element generation
-  finalizeRPRPattern            rpr.c                 Finalization
-  computeAbsorbability          rpr.c                 Absorption analysis
-  update_reduced_frame          nodeWindowAgg.c       Execution main loop
-  rpr_prepare_row               nodeWindowAgg.c       Row prep (lazy DEFINE)
-  nfa_eval_var_match            execRPR.c             Lazy DEFINE evaluation
-  ExecRPRStartContext           execRPR.c             Context creation
-  ExecRPRProcessRow             execRPR.c             3-phase processing
-  nfa_match                     execRPR.c             Phase 1
-  nfa_absorb_contexts           execRPR.c             Phase 2
-  nfa_advance                   execRPR.c             Phase 3
-  nfa_advance_state             execRPR.c             Per-state branching
-  nfa_route_to_elem             execRPR.c             Element routing
-  nfa_advance_alt               execRPR.c             ALT handling
-  nfa_advance_begin             execRPR.c             BEGIN handling
-  nfa_advance_end               execRPR.c             END handling
-  nfa_advance_var               execRPR.c             VAR handling
-  nfa_add_state_unique          execRPR.c             Deduplication
-  nfa_states_covered            execRPR.c             Absorption check
-  nfa_reevaluate_dependent_vars execRPR.c             Per-context re-eval
-  ExecRPRGetHeadContext         execRPR.c             Context lookup
-  ExecRPRFreeContext            execRPR.c             Context deallocation
-  ExecRPRCleanupDeadContexts    execRPR.c             Dead context cleanup
-  ExecRPRFinalizeAllContexts    execRPR.c             Partition-end finalize
-  ExecRPRRecordContextSuccess   execRPR.c             Stats: match success
-  ExecRPRRecordContextFailure   execRPR.c             Stats: match failure
-  compute_define_metadata       createplan.c          Trim offset computation
-
-Appendix B. Data Structure Relationship Diagram
+Appendix A. Data Structure Relationship Diagram
 ============================================================================
 
   Parser Layer
@@ -1692,7 +1655,7 @@ Appendix B. Data Structure Relationship Diagram
     |--- nfaContextFree (recycling pool)
     +--- nfaStateFree (recycling pool)
 
-Appendix C. NFA Element Array Examples
+Appendix B. NFA Element Array Examples
 ============================================================================
 
 C-1. PATTERN (A B C)
