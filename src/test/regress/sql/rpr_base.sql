@@ -1614,6 +1614,15 @@ SELECT id FROM (
                                   ELSE val > 5 END)) s
 ORDER BY id;
 
+-- accepted for the same reason: the planner discards the subquery before the
+-- check runs, so the volatile never reaches it and never executes
+SELECT id FROM (
+ SELECT id FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) s
+WHERE false;
+
 -- error: a volatile spliced in by folding after the gate -- a STABLE function
 -- whose default argument is volatile -- is still caught by the post-fold check
 CREATE FUNCTION rpr_off_leak(n bigint DEFAULT (random() * 5)::bigint)
