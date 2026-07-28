@@ -18,5 +18,8 @@
 
 extern void transformRPR(ParseState *pstate, WindowClause *wc,
 						 WindowDef *windef, List **targetlist);
+extern void validateRPRDefineColumnRef(ParseState *pstate, ColumnRef *cref);
+extern void validateRPRDefineResolvedRef(ParseState *pstate, Node *node,
+										 ColumnRef *cref);
 
 #endif							/* PARSE_RPR_H */

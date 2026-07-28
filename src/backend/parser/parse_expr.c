@@ -32,6 +32,7 @@
 #include "parser/parse_graphtable.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_relation.h"
+#include "parser/parse_rpr.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
 #include "utils/builtins.h"
@@ -628,56 +629,11 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	if (node != NULL)
 		return node;
 
-	/*----------
-	 * Qualified references in DEFINE need a tri-classification:
-	 *
-	 *	  pattern variable qualifier (e.g. UP.price): valid per
-	 *	  ISO/IEC 19075-5 6.15 / 4.16 but not yet implemented --
-	 *	  raise FEATURE_NOT_SUPPORTED.
-	 *
-	 *	  FROM-clause range variable qualifier: prohibited by
-	 *	  ISO/IEC 19075-5 6.5 -- raise SYNTAX_ERROR.
-	 *
-	 *	  any other qualifier (typo, undefined name): fall through and let
-	 *	  normal column resolution produce a sensible error.
-	 *
-	 * The quoted text reflects only the ColumnRef portion; a trailing field
-	 * selection on a composite type (e.g. ".amount" in "(A.items).amount")
-	 * lives in the surrounding A_Indirection node and is not included here.
-	 * That can be revisited when MEASURES support adds indirection-aware
-	 * traversal.
-	 *----------
+	/*
+	 * A DEFINE clause allows only unqualified column names; reject the
+	 * qualified forms before normal resolution sees them.
 	 */
-	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE &&
-		list_length(cref->fields) != 1)
-	{
-		char	   *qualifier = strVal(linitial(cref->fields));
-		bool		is_pattern_var = false;
-
-		foreach_node(String, pv, pstate->p_rpr_pattern_vars)
-		{
-			if (strcmp(strVal(pv), qualifier) == 0)
-			{
-				is_pattern_var = true;
-				break;
-			}
-		}
-
-		if (is_pattern_var)
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
-						   NameListToString(cref->fields)),
-					parser_errposition(pstate, cref->location));
-		else if (refnameNamespaceItem(pstate, NULL, qualifier,
-									  cref->location, NULL) != NULL)
-			ereport(ERROR,
-					errcode(ERRCODE_SYNTAX_ERROR),
-					errmsg("range variable qualified expression \"%s\" is not allowed in DEFINE clause",
-						   NameListToString(cref->fields)),
-					parser_errposition(pstate, cref->location));
-		/* else: unknown qualifier -- fall through to normal resolution */
-	}
+	validateRPRDefineColumnRef(pstate, cref);
 
 	/*----------
 	 * The allowed syntaxes are:
@@ -947,28 +903,10 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	}
 
 	/*
-	 * Restrict column references in a row pattern DEFINE clause.  node is now
-	 * a successfully resolved reference, so reject the two forms RPR does not
-	 * allow: a correlated reference to an outer query's column, and a
-	 * schema/catalog-qualified reference (three or more name parts).  Simple
-	 * two-part qualifiers (pattern or range variable) are handled earlier,
-	 * before resolution.
+	 * node is now a successfully resolved reference; reject the forms a
+	 * DEFINE clause does not allow.
 	 */
-	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
-	{
-		if (IsA(node, Var) && ((Var *) node)->varlevelsup > 0)
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("cannot use outer query column in DEFINE clause"),
-					parser_errposition(pstate, cref->location));
-
-		if (list_length(cref->fields) >= 3)
-			ereport(ERROR,
-					errcode(ERRCODE_SYNTAX_ERROR),
-					errmsg("qualified expression \"%s\" is not allowed in DEFINE clause",
-						   NameListToString(cref->fields)),
-					parser_errposition(pstate, cref->location));
-	}
+	validateRPRDefineResolvedRef(pstate, node, cref);
 
 	return node;
 }

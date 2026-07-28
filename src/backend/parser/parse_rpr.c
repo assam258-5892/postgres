@@ -22,6 +22,7 @@
 
 #include "postgres.h"
 
+#include "catalog/namespace.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -30,6 +31,7 @@
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
+#include "parser/parse_relation.h"
 #include "parser/parse_rpr.h"
 #include "parser/parse_target.h"
 
@@ -181,6 +183,99 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	wc->rpPattern = windef->rpCommonSyntax->rpPattern;
 }
 
+/*----------
+ * validateRPRDefineColumnRef
+ *		Reject qualified column references that DEFINE does not allow.
+ *
+ * Qualified references in DEFINE need a tri-classification:
+ *
+ *	  pattern variable qualifier (e.g. UP.price): valid per
+ *	  ISO/IEC 19075-5 6.15 / 4.16 but not yet implemented --
+ *	  raise FEATURE_NOT_SUPPORTED.
+ *
+ *	  FROM-clause range variable qualifier: prohibited by
+ *	  ISO/IEC 19075-5 6.5 -- raise SYNTAX_ERROR.
+ *
+ *	  any other qualifier (typo, undefined name): return and let the caller's
+ *	  normal column resolution produce a sensible error.
+ *
+ * The quoted text reflects only the ColumnRef portion; a trailing field
+ * selection on a composite type (e.g. ".amount" in "(A.items).amount")
+ * lives in the surrounding A_Indirection node and is not included here.
+ * That can be revisited when MEASURES support adds indirection-aware
+ * traversal.
+ *
+ * Does nothing outside DEFINE, or for an unqualified reference.
+ *----------
+ */
+void
+validateRPRDefineColumnRef(ParseState *pstate, ColumnRef *cref)
+{
+	char	   *qualifier;
+	bool		is_pattern_var = false;
+
+	if (pstate->p_expr_kind != EXPR_KIND_RPR_DEFINE ||
+		list_length(cref->fields) == 1)
+		return;
+
+	qualifier = strVal(linitial(cref->fields));
+
+	foreach_node(String, pv, pstate->p_rpr_pattern_vars)
+	{
+		if (strcmp(strVal(pv), qualifier) == 0)
+		{
+			is_pattern_var = true;
+			break;
+		}
+	}
+
+	if (is_pattern_var)
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
+					   NameListToString(cref->fields)),
+				parser_errposition(pstate, cref->location));
+	else if (refnameNamespaceItem(pstate, NULL, qualifier,
+								  cref->location, NULL) != NULL)
+		ereport(ERROR,
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("range variable qualified expression \"%s\" is not allowed in DEFINE clause",
+					   NameListToString(cref->fields)),
+				parser_errposition(pstate, cref->location));
+}
+
+/*
+ * validateRPRDefineResolvedRef
+ *		Reject resolved column references that DEFINE does not allow.
+ *
+ * node is a successfully resolved reference, so reject the two forms RPR does
+ * not allow: a correlated reference to an outer query's column, and a
+ * schema/catalog-qualified reference (three or more name parts).  Simple
+ * two-part qualifiers (pattern or range variable) are handled before
+ * resolution, in validateRPRDefineColumnRef.
+ *
+ * Does nothing outside DEFINE.
+ */
+void
+validateRPRDefineResolvedRef(ParseState *pstate, Node *node, ColumnRef *cref)
+{
+	if (pstate->p_expr_kind != EXPR_KIND_RPR_DEFINE)
+		return;
+
+	if (IsA(node, Var) && ((Var *) node)->varlevelsup > 0)
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot use outer query column in DEFINE clause"),
+				parser_errposition(pstate, cref->location));
+
+	if (list_length(cref->fields) >= 3)
+		ereport(ERROR,
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("qualified expression \"%s\" is not allowed in DEFINE clause",
+					   NameListToString(cref->fields)),
+				parser_errposition(pstate, cref->location));
+}
+
 /*
  * validateRPRPatternVarCount
  *		Validate that PATTERN variable count fits the varId range.
@@ -190,9 +285,9 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
  * greater than RPR_VARID_MAX.
  *
  * varNames collects the unique PATTERN variable names, which is what
- * transformColumnRef checks via p_rpr_pattern_vars to identify pattern
- * variable qualifiers.  Cross-checking DEFINE variable names against this
- * list is the caller's responsibility, since it only needs to run once.
+ * validateRPRDefineColumnRef checks via p_rpr_pattern_vars to identify
+ * pattern variable qualifiers.  Cross-checking DEFINE variable names against
+ * this list is the caller's responsibility, since it only needs to run once.
  */
 static void
 validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
