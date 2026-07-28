@@ -17938,8 +17938,9 @@ row_pattern_quantifier_opt:
 					if (strcmp($1, "?") != 0)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("invalid quantifier combination: \"%s%s\"", $1, $2),
-								errhint("Did you mean \"??\" for reluctant quantifier?"),
+								errmsg("invalid quantifier combination: \"%s%s\"",
+									   $1, rpr_invalid_quantifier_token($2)),
+								errhint("Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions."),
 								parser_errposition(@1));
 					if (strcmp($2, "?") == 0)
 						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
