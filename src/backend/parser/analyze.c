@@ -1855,6 +1855,23 @@ transformSelectStmt(ParseState *pstate, SelectStmt *stmt,
 												   pstate->p_windowdefs,
 												   &qry->targetList);
 
+	/*
+	 * Window functions (an RPR window included) are evaluated after grouping,
+	 * so an RPR window could in principle pattern-match over the grouped
+	 * output.  Supporting it, though, needs additional work we haven't done
+	 * or tested.
+	 */
+	if (qry->groupClause || qry->groupingSets)
+	{
+		foreach_node(WindowClause, wc, qry->windowClause)
+		{
+			if (wc->rpPattern != NULL)
+				ereport(ERROR,
+						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("row pattern recognition is not supported with GROUP BY"));
+		}
+	}
+
 	/* resolve any still-unresolved output columns as being type text */
 	if (pstate->p_resolve_unknowns)
 		resolveTargetListUnknowns(pstate, qry->targetList);

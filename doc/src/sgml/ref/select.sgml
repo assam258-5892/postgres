@@ -1221,7 +1221,11 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
-    Row pattern recognition cannot appear anywhere in a common table
+    Row pattern recognition is not supported in a query that
+    has <literal>GROUP BY</literal>, including the grouping-set forms
+    <literal>ROLLUP</literal>, <literal>CUBE</literal>
+    and <literal>GROUPING SETS</literal>.
+    It also cannot appear anywhere in a common table
     expression that belongs to a <literal>WITH RECURSIVE</literal> clause;
     such a query is rejected with an error.  The same restriction reaches
     <command>CREATE RECURSIVE VIEW</command>, which is rewritten
