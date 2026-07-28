@@ -85,6 +85,33 @@ INSERT INTO stock_price VALUES
     ('2024-01-04', 'AAPL', 160, 1500),
     ('2024-01-05', 'AAPL', 158, 1100);
 
+-- error
+SELECT symbol, count(*) OVER w
+FROM stock_price
+GROUP BY symbol
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS symbol IS NOT NULL);
+
+-- error
+SELECT symbol, count(*) OVER w
+FROM stock_price
+GROUP BY ROLLUP(dt)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS symbol IS NOT NULL);
+
+-- error
+SELECT symbol, count(*) OVER w
+FROM stock_price
+GROUP BY GROUPING SETS ((symbol))
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS symbol IS NOT NULL);
+
 -- Simple column reference
 SELECT dt, price, COUNT(*) OVER w as cnt
 FROM stock_price
