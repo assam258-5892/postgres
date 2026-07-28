@@ -186,6 +186,31 @@ ORDER BY dt;
  01-05-2024 |   158 |   1100 |   0
 (5 rows)
 
+-- price not used in final result, WindowAgg should transform it a null Const 
+EXPLAIN (VERBOSE, COSTS OFF, BUFFERS OFF)
+SELECT cnt FROM (
+    SELECT count(*) OVER w1 AS cnt, price
+    FROM stock_price
+    WINDOW w1 AS (ORDER BY dt),
+           w2 AS (ORDER BY dt
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (a b)
+        DEFINE b AS price > PREV(price))
+) t;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Subquery Scan on t
+   Output: t.cnt
+   ->  WindowAgg
+         Output: count(*) OVER w1, NULL::numeric, stock_price.dt
+         Window: w1 AS (ORDER BY stock_price.dt)
+         ->  Sort
+               Output: stock_price.dt
+               Sort Key: stock_price.dt
+               ->  Seq Scan on public.stock_price
+                     Output: stock_price.dt
+(10 rows)
+
 DROP TABLE stock_price;
 -- Auto-generated DEFINE
 CREATE TABLE rpr_auto (id INT, val INT);
