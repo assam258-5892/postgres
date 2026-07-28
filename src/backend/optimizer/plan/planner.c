@@ -1082,7 +1082,9 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 		/*
 		 * Reject volatile expressions in an RPR DEFINE clause.  This is done
 		 * here, not during parse analysis, to follow the convention of not
-		 * checking expression volatility while parsing.
+		 * checking expression volatility while parsing.  A subquery the
+		 * planner discards before reaching this point is therefore not
+		 * checked, which is the same rule that lets a volatile fold away.
 		 */
 		if (contain_volatile_functions((Node *) wc->defineClause))
 			ereport(ERROR,
