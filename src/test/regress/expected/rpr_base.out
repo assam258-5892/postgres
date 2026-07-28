@@ -1632,6 +1632,35 @@ WINDOW w AS (
      0
 (3 rows)
 
+-- Two operator tokens where the first is not "?" reach the Op Op arm.  It
+-- reports the pair rather than one token, so neither half names a quantifier
+-- to suggest.
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *? ?)
+    DEFINE A AS val > 0
+);
+ERROR:  invalid quantifier combination: "*??"
+LINE 6:     PATTERN (A *? ?)
+                       ^
+HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+-- The trailing "|" belongs to the alternation, not to the quantifier, so it
+-- is dropped from the report the same way the single-token arms drop it.
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? ?|B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+ERROR:  invalid quantifier combination: "???"
+LINE 6:     PATTERN (A ?? ?|B)
+                       ^
+HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
 DROP TABLE rpr_reluctant;
 -- Quantifier boundary conditions
 CREATE TABLE rpr_bounds (id INT);
