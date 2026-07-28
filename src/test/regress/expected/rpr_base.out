@@ -158,6 +158,32 @@ ORDER BY dt;
  01-05-2024 |   158 |   1100 |   0
 (5 rows)
 
+-- w2 is declared but no window function references it, so its DEFINE must
+-- not keep price alive: the subquery output for price becomes a null Const
+EXPLAIN (VERBOSE, COSTS OFF, BUFFERS OFF)
+SELECT cnt FROM (
+    SELECT count(*) OVER w1 AS cnt, price
+    FROM stock_price
+    WINDOW w1 AS (ORDER BY dt),
+           w2 AS (ORDER BY dt
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (a b)
+        DEFINE b AS price > PREV(price))
+) t;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Subquery Scan on t
+   Output: t.cnt
+   ->  WindowAgg
+         Output: count(*) OVER w1, NULL::numeric, stock_price.dt
+         Window: w1 AS (ORDER BY stock_price.dt)
+         ->  Sort
+               Output: stock_price.dt
+               Sort Key: stock_price.dt
+               ->  Seq Scan on public.stock_price
+                     Output: stock_price.dt
+(10 rows)
+
 DROP TABLE stock_price;
 -- Pattern variables with no DEFINE entry
 CREATE TABLE rpr_auto (id INT, val INT);

@@ -131,6 +131,18 @@ WINDOW w AS (
     DEFINE CALC AS (price + volume / 100) > 160
 )
 ORDER BY dt;
+-- w2 is declared but no window function references it, so its DEFINE must
+-- not keep price alive: the subquery output for price becomes a null Const
+EXPLAIN (VERBOSE, COSTS OFF, BUFFERS OFF)
+SELECT cnt FROM (
+    SELECT count(*) OVER w1 AS cnt, price
+    FROM stock_price
+    WINDOW w1 AS (ORDER BY dt),
+           w2 AS (ORDER BY dt
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (a b)
+        DEFINE b AS price > PREV(price))
+) t;
 
 DROP TABLE stock_price;
 
