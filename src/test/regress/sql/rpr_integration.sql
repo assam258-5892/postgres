@@ -215,13 +215,12 @@ FROM rpr_integ
 ORDER BY id;
 
 -- ============================================================
--- A5. Unused window removal prevention
+-- A5. Removal of unused RPR window functions
 -- ============================================================
--- Verify that remove_unused_subquery_outputs() does not drop an RPR
--- window function when the outer query does not reference its result.
--- The WindowAgg node performs the pattern match itself; without it,
--- the match would be silently skipped.  The plan must contain a
--- WindowAgg node beneath the outer Aggregate.
+-- the outer query only counts rows and never reads count(*) OVER w, so the
+-- window function is replaced with NULL, the window becomes inactive, and its
+-- WindowAgg is dropped -- leaving a plain Aggregate over the scan.  The row
+-- count (and thus count(*)) is unchanged.
 EXPLAIN (COSTS OFF)
 SELECT count(*) FROM (
     SELECT count(*) OVER w FROM rpr_integ
@@ -239,30 +238,29 @@ SELECT count(*) FROM (
         DEFINE A AS val > PREV(val))
 ) t;
 
--- The DEFINE expression references PREV(val), so the window must be
--- preserved even if the outer query only aggregates over the count.
--- The plan must still contain a WindowAgg with the PATTERN/DEFINE
--- intact.
-EXPLAIN (COSTS OFF)
-SELECT count(*), sum(c) FROM (
-    SELECT count(*) OVER w AS c FROM rpr_integ
+-- sum(cnt) reads the window function's value, so the column cannot be removed.
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT count(*), sum(cnt) FROM (
+    SELECT count(*) OVER w as cnt FROM rpr_integ
     WINDOW w AS (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A+)
         DEFINE A AS val > PREV(val))
 ) t;
 
-SELECT count(*), sum(c) FROM (
-    SELECT count(*) OVER w AS c FROM rpr_integ
+SELECT count(*), sum(cnt) FROM (
+    SELECT count(*) OVER w as cnt FROM rpr_integ
     WINDOW w AS (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A+)
         DEFINE A AS val > PREV(val))
 ) t;
 
--- The DEFINE expression contains no navigation, but the RPR window
--- must still be preserved because the match structure itself affects
--- the count.  The plan must retain the WindowAgg.
+-- Navigation-free DEFINE: DEFINE A AS TRUE matches every row, so PATTERN (A+)
+-- still reduces the frame (to the whole remaining partition) even without a
+-- PREV/NEXT navigation.  sum(c) reads the window value, so the WindowAgg is
+-- retained; this checks that a trivial DEFINE still drives frame reduction
+-- and yields the expected counts.
 EXPLAIN (COSTS OFF)
 SELECT count(*), sum(c) FROM (
     SELECT count(*) OVER w AS c FROM rpr_integ
@@ -280,40 +278,13 @@ SELECT count(*), sum(c) FROM (
         DEFINE A AS TRUE)
 ) t;
 
--- XXX: "val" is non-resjunk in the subquery output and is not
--- referenced by the outer query.  Without a guard,
--- remove_unused_subquery_outputs() would replace it with NULL in
--- the subquery output, and that replacement propagates to the
--- scan's targetlist -- DEFINE would then evaluate with NULL
--- inputs.  The targetlist has no way to distinguish "exposed to
--- the outer query" from "referenced only by DEFINE", so the
--- optimization cannot be applied selectively.  The column guard
--- in allpaths.c blocks this replacement for any column referenced
--- by an RPR DEFINE clause, keeping the WindowAgg with DEFINE
--- active in the plan.
-EXPLAIN (COSTS OFF)
-SELECT count(*) FROM (
-    SELECT val, count(*) OVER w FROM rpr_integ
-    WINDOW w AS (ORDER BY id
-        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-        PATTERN (A B+)
-        DEFINE B AS val > PREV(val))
-) t;
-
-SELECT count(*) FROM (
-    SELECT val, count(*) OVER w FROM rpr_integ
-    WINDOW w AS (ORDER BY id
-        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-        PATTERN (A B+)
-        DEFINE B AS val > PREV(val))
-) t;
-
--- The same guard must also cover a whole-row Var.  Writing the bare
--- relation name (rpr_integ) in DEFINE resolves to a whole-row Var, whose
--- attribute number is 0.  remove_unused_subquery_outputs() matches the
--- guard on attribute number, so the whole-row Var is retained as a single
--- entry while the unused scalar "val" output is still replaced with NULL;
--- DEFINE evaluates against the intact row, and the match is unchanged.
+-- Whole-row Var in DEFINE.  Writing the bare relation name (rpr_integ) in
+-- DEFINE resolves to a whole-row Var (attribute number 0).
+-- make_window_input_target() pulls that Var into the WindowAgg's input
+-- target, so the pattern match sees the full row regardless of what the
+-- subquery projects.  The unused scalar output "val" is therefore free to be
+-- replaced with NULL (nothing reads it), while c is kept because sum(c) reads
+-- it; the match result is unchanged.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ

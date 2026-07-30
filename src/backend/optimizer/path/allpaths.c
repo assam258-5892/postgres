@@ -4838,7 +4838,6 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 {
 	Bitmapset  *attrs_used;
 	ListCell   *lc;
-	WindowFuncLists *wflists = NULL;
 
 	/*
 	 * Just point directly to extra_used_attrs. No need to bms_copy as none of
@@ -4888,18 +4887,6 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		return;
 
 	/*
-	 * If the subquery uses row pattern recognition, collect its window
-	 * functions so we can tell which window clauses are active (i.e.
-	 * referenced by a window function).  An RPR window that no window
-	 * function references will be dropped by select_active_windows when the
-	 * subquery is planned, so below we should not let such a dead window's
-	 * DEFINE clause retain otherwise-unused output columns.
-	 */
-	if (subquery->hasRPR)
-		wflists = find_window_functions((Node *) subquery->targetList,
-										list_length(subquery->windowClause));
-
-	/*
 	 * Run through the tlist and zap entries we don't need.  It's okay to
 	 * modify the tlist items in-place because set_subquery_pathlist made a
 	 * copy of the subquery.
@@ -4941,82 +4928,6 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		 */
 		if (contain_volatile_functions(texpr))
 			continue;
-
-		/*
-		 * If any RPR (Row Pattern Recognition) window clause references this
-		 * column in its DEFINE clause, don't remove it.  The DEFINE
-		 * expression needs these columns in the tuplestore slot for pattern
-		 * matching evaluation, even if the outer query doesn't reference
-		 * them.
-		 */
-		if (IsA(texpr, Var))
-		{
-			Var		   *var = (Var *) texpr;
-			bool		needed_by_define = false;
-
-			foreach_node(WindowClause, wc, subquery->windowClause)
-			{
-				if (wc->defineClause != NIL &&
-					wflists != NULL &&
-					wflists->windowFuncs[wc->winref] != NIL)
-				{
-					/*
-					 * flags == 0 is safe: DEFINE rejects aggregates, window
-					 * functions and subqueries at parse time, and this runs
-					 * before any PlaceHolderVar could be planted.
-					 */
-					List	   *vars = pull_var_clause((Node *) wc->defineClause, 0);
-
-					foreach_node(Var, dvar, vars)
-					{
-						/*
-						 * Match varno too: varattno alone can collide with an
-						 * unrelated column of another relation. varlevelsup
-						 * is paranoia, since DEFINE rejects outer references
-						 * at parse time.
-						 */
-						if (dvar->varno == var->varno &&
-							dvar->varattno == var->varattno &&
-							dvar->varlevelsup == var->varlevelsup)
-						{
-							needed_by_define = true;
-							break;
-						}
-					}
-					list_free(vars);
-					if (needed_by_define)
-						break;
-				}
-			}
-			if (needed_by_define)
-				continue;
-		}
-
-		/*
-		 * If it's a window function referencing a window clause with RPR,
-		 * don't remove it.  Even when the window function result is unused by
-		 * the outer query, the RPR pattern matching (frame reduction via
-		 * DEFINE/PATTERN) must still execute.  Replacing this with NULL would
-		 * leave no active window functions for the WindowClause, causing the
-		 * planner to omit the WindowAgg node entirely.
-		 */
-		if (IsA(texpr, WindowFunc))
-		{
-			bool		is_rpr = false;
-			WindowFunc *wfunc = (WindowFunc *) texpr;
-
-			foreach_node(WindowClause, wc, subquery->windowClause)
-			{
-				if (wc->winref == wfunc->winref && wc->defineClause != NIL)
-				{
-					is_rpr = true;
-					break;
-				}
-			}
-
-			if (is_rpr)
-				continue;
-		}
 
 		/*
 		 * OK, we don't need it.  Replace the expression with a NULL constant.
