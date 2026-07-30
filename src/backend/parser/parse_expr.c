@@ -2694,6 +2694,19 @@ transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
 					 int sublevels_up, int location)
 {
 	/*
+	 * A DEFINE clause cannot use a whole-row reference: ISO/IEC 19075-5 6.5
+	 * limits the range variables in scope to the row pattern variables, and
+	 * the same rule bars a FROM-clause range variable qualifier, which
+	 * validateRPRDefineColumnRef rejects.
+	 */
+	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
+		ereport(ERROR,
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("whole-row reference is not allowed in DEFINE clause"),
+				errhint("A DEFINE condition may reference individual columns only."),
+				parser_errposition(pstate, location));
+
+	/*
 	 * Build the appropriate referencing node.  Normally this can be a
 	 * whole-row Var, but if the nsitem is a JOIN USING alias then it contains
 	 * only a subset of the columns of the underlying join RTE, so that will
