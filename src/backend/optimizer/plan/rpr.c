@@ -237,9 +237,12 @@ flattenSeqChildren(List *children)
 	{
 		RPRPatternNode *opt = optimizeRPRPattern(child);
 
-		/* GROUP{1,1} should have been unwrapped by optimizeGroupPattern */
+		/*
+		 * GROUP{1,1} should have been unwrapped by optimizeGroupPattern;
+		 * tryUnwrapGroup() does so regardless of reluctance.
+		 */
 		Assert(!(opt->nodeType == RPR_PATTERN_GROUP &&
-				 opt->min == 1 && opt->max == 1 && opt->reluctant == false));
+				 opt->min == 1 && opt->max == 1));
 
 		if (opt->nodeType == RPR_PATTERN_SEQ)
 		{
@@ -1032,25 +1035,41 @@ optimizeGroupPattern(RPRPatternNode *pattern)
 static RPRPatternNode *
 optimizeRPRPattern(RPRPatternNode *pattern)
 {
+	RPRPatternNode *result = pattern;
+
 	/* Pattern nodes from parser are never NULL */
 	Assert(pattern != NULL);
 
 	check_stack_depth();
 
+	/*
+	 * A fixed count leaves reluctance nothing to decide.  Drop it here, since
+	 * every rewrite below declines a reluctant node: {n,n}? would otherwise
+	 * miss the merges and multiplication that {n,n} gets.
+	 */
+	if (pattern->min == pattern->max)
+		pattern->reluctant = false;
+
 	switch (pattern->nodeType)
 	{
 		case RPR_PATTERN_VAR:
-			return pattern;
+			break;
 		case RPR_PATTERN_SEQ:
-			return optimizeSeqPattern(pattern);
+			result = optimizeSeqPattern(pattern);
+			break;
 		case RPR_PATTERN_ALT:
-			return optimizeAltPattern(pattern);
+			result = optimizeAltPattern(pattern);
+			break;
 		case RPR_PATTERN_GROUP:
-			return optimizeGroupPattern(pattern);
+			result = optimizeGroupPattern(pattern);
+			break;
 	}
 
-	pg_unreachable();
-	return pattern;
+	/* Again: a rewrite may have produced a fixed count of its own */
+	if (result->min == result->max)
+		result->reluctant = false;
+
+	return result;
 }
 
 /*
@@ -1798,10 +1817,15 @@ isFixedLengthChildren(RPRPattern *pattern, RPRElemIdx idx, RPRDepth scopeDepth)
  *
  * Returns false for patterns where absorption cannot work:
  *   - A B+ (unbounded not at start)
- *   - A+? B (reluctant quantifier)
+ *   - A+? B (the unbounded quantifier itself is reluctant)
  *   - (A | B)+ (ALT inside group)
  *   - (A B+)+ (variable-length element inside group)
  *   - (A B{2,5})+ (min != max inside group)
+ *
+ * The reluctance test covers only the quantifier examined here.  A
+ * reluctant quantifier on an enclosing group -- (A+)??, where A+ itself
+ * is greedy -- is rejected at that group's BEGIN by
+ * computeAbsorbabilityRecursive(), before this function is reached.
  */
 static bool
 isUnboundedStart(RPRPattern *pattern, RPRElemIdx idx)
@@ -1866,11 +1890,15 @@ isUnboundedStart(RPRPattern *pattern, RPRElemIdx idx)
  * computeAbsorbabilityRecursive
  *		Recursively check absorbability starting from given index.
  *
- * If the element at startIdx is ALT, recursively checks each branch independently.
- * Each branch gets its own absorbability status, and if any branch is absorbable,
- * the ALT element itself is marked with RPR_ELEM_ABSORBABLE_BRANCH.
+ * If the element at startIdx is ALT, recursively checks each branch
+ * independently.  Each branch gets its own absorbability status, and if
+ * any branch is absorbable, the ALT element itself is marked with
+ * RPR_ELEM_ABSORBABLE_BRANCH.
  *
- * If BEGIN, skips to first child.
+ * If BEGIN, skips to first child -- but only when the group's own
+ * quantifier is greedy.  Absorption assumes an earlier context subsumes a
+ * later one, which a reluctant group inverts; isUnboundedStart() sees only
+ * the quantifier it is handed, so the greedy A+ in (A+)?? needs this check.
  *
  * Otherwise (VAR), checks if the element starts an unbounded sequence via
  * isUnboundedStart.
@@ -1916,6 +1944,13 @@ computeAbsorbabilityRecursive(RPRPattern *pattern, RPRElemIdx startIdx,
 	else if (RPRElemIsBegin(elem))
 	{
 		/*
+		 * Not an absorbable region.  The group's quantifier sits on its BEGIN
+		 * as well as its END, so this element answers for the group.
+		 */
+		if (RPRElemIsReluctant(elem))
+			return;
+
+		/*
 		 * BEGIN: first try to treat this BEGIN's children as an unbounded
 		 * group directly (handles nested fixed-length groups like ((A{2}
 		 * B{3}){2})+).  If that fails, skip to first child and recurse as
@@ -1956,7 +1991,8 @@ computeAbsorbabilityRecursive(RPRPattern *pattern, RPRElemIdx startIdx,
  *
  * Only greedy unbounded quantifiers at pattern start can be absorbable.
  * Reluctant quantifiers are excluded because they don't maintain monotonic
- * decrease property required for safe absorption.
+ * decrease property required for safe absorption -- both the unbounded
+ * quantifier itself and any group quantifier enclosing it.
  *
  * This function sets two flags:
  *   RPR_ELEM_ABSORBABLE: Absorption comparison point
