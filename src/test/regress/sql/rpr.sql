@@ -701,6 +701,32 @@ LATERAL (
     )
 ) s;
 
+-- An outer range variable is subject to the same two rules as a local one: a
+-- whole-row reference is rejected as one, and a name that does not resolve
+-- keeps its own diagnosis rather than being reported as a qualifier problem.
+SELECT * FROM (VALUES (95)) AS o(threshold),
+LATERAL (
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS (o.*) IS NOT NULL
+    )
+) s;
+SELECT * FROM (VALUES (95)) AS o(threshold),
+LATERAL (
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS o.threshhold > 0
+    )
+) s;
+
 -- DEFINE rejects a schema-qualified column reference (three or more name
 -- parts) once it resolves; the qualified form itself is not allowed.  (stock
 -- is a temp table, so it is qualified with pg_temp here.)
@@ -733,6 +759,146 @@ WINDOW w AS (
     INITIAL
     PATTERN (A)
     DEFINE A AS (stock.*) IS NOT NULL
+);
+
+-- A row constructor reaches the same references through
+-- transformExpressionList(), which expanded the star by RTE before either
+-- check could see it.  The first four below were accepted and returned rows;
+-- the fifth was rejected, but as a missing FROM-clause entry.
+-- ROW(schema.table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(pg_temp.stock.*) IS NOT NULL
+);
+-- ROW(table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(stock.*) IS NOT NULL
+);
+-- the ROW keyword is optional, so the bare constructor needs the same
+-- treatment:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS (stock.*, 1) IS NOT NULL
+);
+-- redundant parentheses are not a way around it:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW((stock.*)) IS NOT NULL
+);
+-- a pattern variable qualifier is a separate class of rejection:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(A.*) IS NOT NULL
+);
+-- Each rejection above classifies the reference only after it resolves, so a
+-- misspelled column keeps the diagnosis and the suggestion it gets anywhere
+-- else.  The two-part form used to be reported as a range variable problem,
+-- and the three-part form as a whole-row reference, because both gates fired
+-- on the qualifier alone.
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS stock.pric > 0
+);
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS pg_temp.stock.pric > 0
+);
+-- the same typo outside a DEFINE clause, for comparison:
+SELECT price FROM stock WHERE stock.pric > 0;
+
+-- Retrying an unresolved column as a function call on the whole row builds a
+-- whole-row reference the query does not contain.  That must not be reported
+-- as one, and must not let the reference through either: rpr_tag(rpr_stock)
+-- below resolves, so the retry succeeds and the result is rejected by the
+-- qualifier rules rather than by the whole-row check.
+CREATE FUNCTION rpr_tag(rpr_stock) RETURNS int
+    LANGUAGE sql IMMUTABLE AS $$SELECT 1$$;
+SELECT price FROM rpr_stock
+WINDOW w AS (
+    PARTITION BY part_id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS rpr_stock.rpr_tag > 0
+);
+SELECT price FROM rpr_stock
+WINDOW w AS (
+    PARTITION BY part_id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS public.rpr_stock.rpr_tag > 0
+);
+DROP FUNCTION rpr_tag(rpr_stock);
+
+-- A JOIN USING alias has no whole-row Var of its own, so the same retry
+-- expands it to a row constructor instead.  That arm is only reachable inside
+-- DEFINE now that the retry is no longer rejected on sight.
+CREATE TEMP TABLE rpr_j_l (x int, y int);
+CREATE TEMP TABLE rpr_j_r (x int, z int);
+SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
+WINDOW w AS (
+    ORDER BY x
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS j.yy > 0
+);
+SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
+WINDOW w AS (
+    ORDER BY x
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS j.y > 0
+);
+SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
+WINDOW w AS (
+    ORDER BY x
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS (j.*) IS NOT NULL
+);
+DROP TABLE rpr_j_l, rpr_j_r;
+
+-- A row constructor over plain columns is unaffected.
+SELECT company, tdate, count(*) OVER w AS cnt
+FROM stock
+WHERE company = 'company2' AND tdate <= '2023-07-03'
+WINDOW w AS (
+    PARTITION BY company
+    ORDER BY tdate
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A+)
+    DEFINE A AS ROW(price, price) IS NOT NULL
 );
 
 --

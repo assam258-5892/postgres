@@ -16,7 +16,7 @@
 --    A2. Run condition pushdown bypass
 --    A3. Window dedup prevention (RPR vs non-RPR)
 --    A4. Window dedup prevention (same PATTERN, different DEFINE)
---    A5. Unused window removal prevention
+--    A5. Unused output removal around an RPR window
 --    A6. Inverse transition bypass
 --    A7. Cost estimation RPR awareness
 --    A8. Subquery flattening prevention
@@ -876,14 +876,7 @@ SELECT c FROM (
 (18 rows)
 
 DROP TABLE rpr_integ_two;
--- Whole-row Var in DEFINE.  Writing the bare relation name (rpr_integ) in
--- DEFINE resolves to a whole-row Var (attribute number 0).  The parser's junk
--- targetlist entry carries it into the WindowAgg's input like any other
--- DEFINE column, so the pattern match sees the full row regardless of what
--- the subquery projects.  The unused scalar output "val" is therefore free to
--- be replaced with NULL (nothing reads it), while c is kept because sum(c)
--- reads it; the match result is unchanged.
-EXPLAIN (VERBOSE, COSTS OFF)
+-- Whole-row Var in DEFINE is not allowed
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ
     WINDOW w AS (ORDER BY id
@@ -891,27 +884,49 @@ SELECT sum(c) FROM (
         PATTERN (A B+)
         DEFINE B AS rpr_integ IS NOT NULL)
 ) t;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Aggregate
-   Output: sum((count(*) OVER w))
-   ->  WindowAgg
-         Output: NULL::integer, count(*) OVER w, rpr_integ.id, rpr_integ.*
-         Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-         Pattern: a b+
-         ->  Sort
-               Output: rpr_integ.id, rpr_integ.*
-               Sort Key: rpr_integ.id
-               ->  Seq Scan on public.rpr_integ
-                     Output: rpr_integ.id, rpr_integ.*
-(11 rows)
-
+ERROR:  whole-row reference is not allowed in DEFINE clause
+LINE 6:         DEFINE B AS rpr_integ IS NOT NULL)
+                            ^
+HINT:  A DEFINE condition may reference individual columns only.
+-- It still reaches a DEFINE clause without being written there: pulling up a
+-- subquery substitutes that subquery's output expressions into defineClause,
+-- and one of them can be a whole-row Var (attribute number 0).  The parser's
+-- junk targetlist entry carries it into the WindowAgg's input like any other
+-- DEFINE column, so the pattern match sees the full row regardless of what
+-- the subquery projects.  The unused scalar output "val" is therefore free to
+-- be replaced with NULL (nothing reads it), while c is kept because sum(c)
+-- reads it; the match result is unchanged.
+EXPLAIN (VERBOSE, COSTS OFF)
 SELECT sum(c) FROM (
-    SELECT val, count(*) OVER w AS c FROM rpr_integ
+    SELECT val, count(*) OVER w AS c
+    FROM (SELECT r, r.id AS id, r.val AS val FROM rpr_integ r) s
     WINDOW w AS (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
-        DEFINE B AS rpr_integ IS NOT NULL)
+        DEFINE B AS r IS NOT NULL)
+) t;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: sum((count(*) OVER w))
+   ->  WindowAgg
+         Output: NULL::integer, count(*) OVER w, r.id, r.*
+         Window: w AS (ORDER BY r.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+         Pattern: a b+
+         ->  Sort
+               Output: r.id, r.*
+               Sort Key: r.id
+               ->  Seq Scan on public.rpr_integ r
+                     Output: r.id, r.*
+(11 rows)
+
+SELECT sum(c) FROM (
+    SELECT val, count(*) OVER w AS c
+    FROM (SELECT r, r.id AS id, r.val AS val FROM rpr_integ r) s
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS r IS NOT NULL)
 ) t;
  sum 
 -----
