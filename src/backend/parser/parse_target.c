@@ -235,9 +235,18 @@ transformExpressionList(ParseState *pstate, List *exprlist,
 		{
 			ColumnRef  *cref = (ColumnRef *) e;
 
-			if (IsA(llast(cref->fields), A_Star))
+			/*
+			 * It is something.*, expand into multiple items -- except in a
+			 * DEFINE clause, where a reference to a FROM-clause relation is
+			 * not allowed at all.  Expanding here binds by RTE rather than by
+			 * name, so it would bypass the checks in transformColumnRef() and
+			 * transformWholeRowRef().  Fall through instead and let
+			 * transformExpr() reach them, so that ROW(t.*) is rejected the
+			 * same way (t.*) already is.
+			 */
+			if (IsA(llast(cref->fields), A_Star) &&
+				exprKind != EXPR_KIND_RPR_DEFINE)
 			{
-				/* It is something.*, expand into multiple items */
 				result = list_concat(result,
 									 ExpandColumnRefStar(pstate, cref,
 														 false));
