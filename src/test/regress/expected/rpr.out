@@ -1351,9 +1351,10 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (pg_temp.stock.*) IS NOT NULL
 );
-ERROR:  qualified expression "pg_temp.stock.*" is not allowed in DEFINE clause
+ERROR:  whole-row reference is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS (pg_temp.stock.*) IS NOT NULL
                          ^
+HINT:  A DEFINE condition may reference individual columns only.
 -- A two-part table-qualified whole-row reference is rejected as well, through
 -- a separate range-variable check (a bare relation name is instead accepted
 -- as a whole-row Var).
