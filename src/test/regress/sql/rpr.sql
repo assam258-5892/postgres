@@ -701,6 +701,232 @@ LATERAL (
     )
 ) s;
 
+-- An outer range variable is subject to the same two rules as a local one: a
+-- whole-row reference is rejected as one, and a name that does not resolve
+-- keeps its own diagnosis rather than being reported as a qualifier problem.
+SELECT * FROM (VALUES (95)) AS o(threshold),
+LATERAL (
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS (o.*) IS NOT NULL
+    )
+) s;
+SELECT * FROM (VALUES (95)) AS o(threshold),
+LATERAL (
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS o.threshhold > 0
+    )
+) s;
+
+-- A two-part name is not always a range variable qualifier: a SQL function's
+-- parameter and a PL/pgSQL variable both resolve through
+-- p_post_columnref_hook.  The qualifier slot is reserved all the same, so
+-- these are rejected for the spelling, not for what they name.
+CREATE FUNCTION rpr_sqlfn(threshold int) RETURNS SETOF int
+LANGUAGE sql AS $$
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS price > rpr_sqlfn.threshold)
+$$;
+
+CREATE FUNCTION rpr_plfn(threshold int) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+    n bigint;
+BEGIN
+    SELECT count(*) INTO n FROM (
+        SELECT price FROM stock
+        WINDOW w AS (
+            PARTITION BY company
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+            INITIAL
+            PATTERN (A)
+            DEFINE A AS price > rpr_plfn.threshold)
+    ) s;
+    RETURN n;
+END
+$$;
+SELECT rpr_plfn(0);
+DROP FUNCTION rpr_plfn(int);
+
+-- Unqualified, the same parameter is readable.
+CREATE FUNCTION rpr_sqlfn(threshold int) RETURNS SETOF int
+LANGUAGE sql AS $$
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS price > threshold)
+$$;
+SELECT count(*) FROM rpr_sqlfn(0);
+DROP FUNCTION rpr_sqlfn(int);
+
+-- The qualifier slot is decided on the qualifier alone, before resolution, so
+-- a pattern variable takes the slot even from the routine that contains the
+-- query.  Naming a pattern variable after the function makes rpr_pv.threshold
+-- the pattern variable's, and the reservation is reported; that the function
+-- has a parameter of that name, and the query has no such column, does not
+-- enter into it.
+CREATE FUNCTION rpr_pv(threshold int) RETURNS SETOF int
+LANGUAGE sql AS $$
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (rpr_pv)
+        DEFINE rpr_pv AS price > rpr_pv.threshold)
+$$;
+
+-- The collision is in the qualifier, not in the DEFINE variable being
+-- defined: any pattern variable of that name reserves it.
+CREATE FUNCTION rpr_pv(threshold int) RETURNS SETOF int
+LANGUAGE sql AS $$
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (rpr_pv A)
+        DEFINE A AS price > rpr_pv.threshold)
+$$;
+
+-- A field of a composite parameter has no unqualified spelling, so it is
+-- reached by parenthesizing the value: "(p).lo" selects a field rather than
+-- qualifying a name, and occupies no qualifier slot.
+CREATE TYPE rpr_pair AS (lo int, hi int);
+CREATE FUNCTION rpr_compfn(p rpr_pair) RETURNS SETOF int
+LANGUAGE sql AS $$
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS price > p.lo)
+$$;
+CREATE FUNCTION rpr_compfn(p rpr_pair) RETURNS SETOF int
+LANGUAGE sql AS $$
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS price > (p).lo)
+$$;
+SELECT count(*) FROM rpr_compfn(ROW(0, 0)::rpr_pair);
+DROP FUNCTION rpr_compfn(rpr_pair);
+DROP TYPE rpr_pair;
+
+-- The DEFINE rules apply to the names the ref hooks leave to the query
+-- parser.  Under use_variable resolution PL/pgSQL answers first and keeps
+-- any name one of its variables owns, so the qualified spelling rejected
+-- above is resolved by PL/pgSQL here and never reaches the rule.
+CREATE FUNCTION rpr_plfn_var(threshold int) RETURNS bigint
+LANGUAGE plpgsql AS $$
+#variable_conflict use_variable
+DECLARE
+    n bigint;
+BEGIN
+    SELECT count(*) INTO n FROM (
+        SELECT price FROM stock
+        WINDOW w AS (
+            PARTITION BY company
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+            INITIAL
+            PATTERN (A)
+            DEFINE A AS price > rpr_plfn_var.threshold)
+    ) s;
+    RETURN n;
+END
+$$;
+SELECT rpr_plfn_var(0);
+DROP FUNCTION rpr_plfn_var(int);
+
+-- The same applies to a pattern variable's name.  Under the default
+-- resolution PL/pgSQL declines the name, so the reservation is reached and
+-- the collision is reported rather than resolved.
+CREATE FUNCTION rpr_conflictfn_err() RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+    a stock%ROWTYPE;
+    n bigint;
+BEGIN
+    a.price := 95;
+    SELECT count(*) INTO n FROM (
+        SELECT price FROM stock
+        WINDOW w AS (
+            PARTITION BY company
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+            INITIAL
+            PATTERN (A)
+            DEFINE A AS price > a.price)
+    ) s;
+    RETURN n;
+END
+$$;
+SELECT rpr_conflictfn_err();
+DROP FUNCTION rpr_conflictfn_err();
+
+CREATE FUNCTION rpr_conflictfn() RETURNS bigint
+LANGUAGE plpgsql AS $$
+#variable_conflict use_variable
+DECLARE
+    a stock%ROWTYPE;
+    n bigint;
+BEGIN
+    a.price := 95;
+    SELECT count(*) INTO n FROM (
+        SELECT price FROM stock
+        WINDOW w AS (
+            PARTITION BY company
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+            INITIAL
+            PATTERN (A)
+            DEFINE A AS price > a.price)
+    ) s;
+    RETURN n;
+END
+$$;
+SELECT rpr_conflictfn();
+DROP FUNCTION rpr_conflictfn();
+
+-- An outer range variable used as a function-call qualifier reaches DEFINE as
+-- a FuncExpr rather than a Var, so the level the qualifier resolved at, not
+-- the shape of the resulting node, is what identifies the outer reference.
+CREATE TABLE rpr_outer (threshold int);
+INSERT INTO rpr_outer VALUES (95);
+CREATE FUNCTION rpr_rowfn(rpr_outer) RETURNS int LANGUAGE sql AS 'SELECT 1';
+SELECT * FROM rpr_outer AS o,
+LATERAL (
+    SELECT price FROM stock
+    WINDOW w AS (
+        PARTITION BY company
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        INITIAL
+        PATTERN (A)
+        DEFINE A AS o.rpr_rowfn > 0
+    )
+) s;
+DROP FUNCTION rpr_rowfn(rpr_outer);
+DROP TABLE rpr_outer;
+
 -- DEFINE rejects a schema-qualified column reference (three or more name
 -- parts) once it resolves; the qualified form itself is not allowed.  (stock
 -- is a temp table, so it is qualified with pg_temp here.)
@@ -722,9 +948,9 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (pg_temp.stock.*) IS NOT NULL
 );
--- A two-part table-qualified whole-row reference is rejected as well, through
--- a separate range-variable check (a bare relation name is instead accepted
--- as a whole-row Var).
+-- A two-part table-qualified whole-row reference is rejected as well, and by
+-- the whole-row check rather than by a qualifier rule: the error names the
+-- whole-row reference, not the qualifier.
 -- 2-part (table.*):
 SELECT price FROM stock
 WINDOW w AS (
@@ -733,6 +959,167 @@ WINDOW w AS (
     INITIAL
     PATTERN (A)
     DEFINE A AS (stock.*) IS NOT NULL
+);
+
+-- A row constructor reaches the same references through
+-- transformExpressionList(), which expanded the star by RTE before either
+-- check could see it.  The first four below were accepted and returned rows;
+-- the fifth was rejected, but as a missing FROM-clause entry.
+-- ROW(schema.table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(pg_temp.stock.*) IS NOT NULL
+);
+-- ROW(table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(stock.*) IS NOT NULL
+);
+-- the ROW keyword is optional, so the bare constructor needs the same
+-- treatment:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS (stock.*, 1) IS NOT NULL
+);
+-- redundant parentheses are not a way around it:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW((stock.*)) IS NOT NULL
+);
+-- a pattern variable qualifier is a separate class of rejection:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(A.*) IS NOT NULL
+);
+-- The plain two-part form is the one the standard writes its DEFINE examples
+-- with, and it is decided on the qualifier alone, before resolution.
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS A.price > 100
+);
+-- Deciding on the qualifier alone means a pattern variable takes a name a
+-- range variable would otherwise answer to: the rejection names the pattern
+-- variable, not the alias, even though "a" is a live alias here.
+SELECT price FROM stock AS a
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS a.price > 100
+);
+-- Each rejection above classifies the reference only after it resolves, so a
+-- misspelled column keeps the diagnosis and the suggestion it gets anywhere
+-- else.  Only the two-part form changed: its gate used to fire on the
+-- qualifier alone and report a range variable problem before the rest of the
+-- name was looked at.  The three-part gate already ran after resolution.
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS stock.pric > 0
+);
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS pg_temp.stock.pric > 0
+);
+-- the same typo outside a DEFINE clause, for comparison:
+SELECT price FROM stock WHERE stock.pric > 0;
+
+-- Retrying an unresolved column as a function call on the whole row builds a
+-- whole-row reference the query does not contain.  That must not be reported
+-- as one, and must not let the reference through either: rpr_tag(rpr_stock)
+-- below resolves, so the retry succeeds and the result is rejected by the
+-- qualifier rules rather than by the whole-row check.
+CREATE FUNCTION rpr_tag(rpr_stock) RETURNS int
+    LANGUAGE sql IMMUTABLE AS $$SELECT 1$$;
+SELECT price FROM rpr_stock
+WINDOW w AS (
+    PARTITION BY part_id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS rpr_stock.rpr_tag > 0
+);
+SELECT price FROM rpr_stock
+WINDOW w AS (
+    PARTITION BY part_id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS public.rpr_stock.rpr_tag > 0
+);
+DROP FUNCTION rpr_tag(rpr_stock);
+
+-- A JOIN USING alias has no whole-row Var of its own, so the same retry
+-- expands it to a row constructor instead.  That arm is only reachable inside
+-- DEFINE now that the retry is no longer rejected on sight.
+CREATE TEMP TABLE rpr_j_l (x int, y int);
+CREATE TEMP TABLE rpr_j_r (x int, z int);
+SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
+WINDOW w AS (
+    ORDER BY x
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS j.yy > 0
+);
+SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
+WINDOW w AS (
+    ORDER BY x
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS j.y > 0
+);
+SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
+WINDOW w AS (
+    ORDER BY x
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS (j.*) IS NOT NULL
+);
+DROP TABLE rpr_j_l, rpr_j_r;
+
+-- A row constructor over plain columns is unaffected.
+SELECT company, tdate, count(*) OVER w AS cnt
+FROM stock
+WHERE company = 'company2' AND tdate <= '2023-07-03'
+WINDOW w AS (
+    PARTITION BY company
+    ORDER BY tdate
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A+)
+    DEFINE A AS ROW(price, price) IS NOT NULL
 );
 
 --
