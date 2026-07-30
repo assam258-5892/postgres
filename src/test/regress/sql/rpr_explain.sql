@@ -868,6 +868,54 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0 AND PREV(FIRST(v), 1) IS NOT NULL
 );');
 
+-- Variable-length group body absorption: (A+ B)+ C
+-- Body is not fixed-length, so the leading A+ is the comparison point
+-- (Case 3); the group's own END gets no flag.
+CREATE VIEW rpr_ev_ctx_absorb_group_greedy AS
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B)+ C)
+    DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_group_greedy'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B)+ C)
+    DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
+);');
+
+-- No absorption when the enclosing group is reluctant: (A+ B)+? C
+-- Same body, DEFINE and rows as above; only the group quantifier differs.
+-- Compare: absorbed count 0 and no marker on a+, vs >0 and a+# above.
+CREATE VIEW rpr_ev_ctx_no_absorb_reluctant_group AS
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B)+? C)
+    DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_no_absorb_reluctant_group'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B)+? C)
+    DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
+);');
+
 -- Alternation, non-absorbable branch match survives absorption: A+ B | C
 -- The dominating A+ run absorbs redundant contexts, but the recorded C matches
 -- are not absorbable, so they survive (2 matched, not 0)
