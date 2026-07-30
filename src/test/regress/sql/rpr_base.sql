@@ -2463,6 +2463,18 @@ CREATE VIEW rpr_pin_v2 AS
 SELECT pg_get_viewdef('rpr_pin_v'::regclass, true)
      = pg_get_viewdef('rpr_pin_v2'::regclass, true) AS identical;
 
+-- The hazard this section guards against cannot be written in the first
+-- place: a whole-row reference through a row constructor is rejected in
+-- DEFINE, so no view can carry one as far as the deparser.
+CREATE VIEW rpr_pin_row_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_pin, rpr_pin_other
+WHERE rpr_pin.id = rpr_pin_other.id
+WINDOW w AS (ORDER BY rpr_pin.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS ROW(rpr_pin.*) IS NOT NULL);
+
 -- a column merged by USING is pinned the same way
 CREATE TABLE rpr_pin_l (x INT, y INT);
 CREATE TABLE rpr_pin_r (x INT, z INT);
@@ -3204,6 +3216,18 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS (rpr_composite.items).amount > 10
+);
+
+-- A trailing star on a composite column is a different thing from a trailing
+-- star on a relation: it names no relation, so the row constructor keeps
+-- expanding it and the DEFINE restrictions do not apply.
+SELECT COUNT(*) OVER w
+FROM rpr_composite
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS ROW((items).*) IS NOT NULL
 );
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
