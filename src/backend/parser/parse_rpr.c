@@ -369,6 +369,12 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		 * one is present in the targetlist.  This is needed so the planner
 		 * propagates the referenced columns through the plan tree, making
 		 * them available to the WindowAgg's DEFINE evaluation.
+		 *
+		 * Every DEFINE Var must have a targetlist entry:
+		 * make_window_input_target() derives the WindowAgg's input from
+		 * final_target and adds nothing of its own for DEFINE, and
+		 * remove_unused_subquery_outputs() relies on the entry being resjunk,
+		 * or on its own guard, to keep the column alive.
 		 */
 		vars = pull_var_clause(expr, 0);
 		foreach_node(Var, var, vars)
