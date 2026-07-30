@@ -4993,32 +4993,6 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		}
 
 		/*
-		 * If it's a window function referencing a window clause with RPR,
-		 * don't remove it.  Even when the window function result is unused by
-		 * the outer query, the RPR pattern matching (frame reduction via
-		 * DEFINE/PATTERN) must still execute.  Replacing this with NULL would
-		 * leave no active window functions for the WindowClause, causing the
-		 * planner to omit the WindowAgg node entirely.
-		 */
-		if (IsA(texpr, WindowFunc))
-		{
-			bool		is_rpr = false;
-			WindowFunc *wfunc = (WindowFunc *) texpr;
-
-			foreach_node(WindowClause, wc, subquery->windowClause)
-			{
-				if (wc->winref == wfunc->winref && wc->defineClause != NIL)
-				{
-					is_rpr = true;
-					break;
-				}
-			}
-
-			if (is_rpr)
-				continue;
-		}
-
-		/*
 		 * OK, we don't need it.  Replace the expression with a NULL constant.
 		 * Preserve the exposed type of the expression, in case something
 		 * looks at the rowtype of the subquery's result.
