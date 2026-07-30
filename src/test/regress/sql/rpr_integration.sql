@@ -16,7 +16,7 @@
 --    A2. Run condition pushdown bypass
 --    A3. Window dedup prevention (RPR vs non-RPR)
 --    A4. Window dedup prevention (same PATTERN, different DEFINE)
---    A5. Unused window removal prevention
+--    A5. Unused output removal around an RPR window
 --    A6. Inverse transition bypass
 --    A7. Cost estimation RPR awareness
 --    A8. Subquery flattening prevention
@@ -548,14 +548,7 @@ SELECT c FROM (
 
 DROP TABLE rpr_integ_two;
 
--- Whole-row Var in DEFINE.  Writing the bare relation name (rpr_integ) in
--- DEFINE resolves to a whole-row Var (attribute number 0).  The parser's junk
--- targetlist entry carries it into the WindowAgg's input like any other
--- DEFINE column, so the pattern match sees the full row regardless of what
--- the subquery projects.  The unused scalar output "val" is therefore free to
--- be replaced with NULL (nothing reads it), while c is kept because sum(c)
--- reads it; the match result is unchanged.
-EXPLAIN (VERBOSE, COSTS OFF)
+-- Whole-row Var in DEFINE is not allowed
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ
     WINDOW w AS (ORDER BY id
@@ -564,12 +557,31 @@ SELECT sum(c) FROM (
         DEFINE B AS rpr_integ IS NOT NULL)
 ) t;
 
+-- It still reaches a DEFINE clause without being written there: pulling up a
+-- subquery substitutes that subquery's output expressions into defineClause,
+-- and one of them can be a whole-row Var (attribute number 0).  The parser's
+-- junk targetlist entry carries it into the WindowAgg's input like any other
+-- DEFINE column, so the pattern match sees the full row regardless of what
+-- the subquery projects.  The unused scalar output "val" is therefore free to
+-- be replaced with NULL (nothing reads it), while c is kept because sum(c)
+-- reads it; the match result is unchanged.
+EXPLAIN (VERBOSE, COSTS OFF)
 SELECT sum(c) FROM (
-    SELECT val, count(*) OVER w AS c FROM rpr_integ
+    SELECT val, count(*) OVER w AS c
+    FROM (SELECT r, r.id AS id, r.val AS val FROM rpr_integ r) s
     WINDOW w AS (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
-        DEFINE B AS rpr_integ IS NOT NULL)
+        DEFINE B AS r IS NOT NULL)
+) t;
+
+SELECT sum(c) FROM (
+    SELECT val, count(*) OVER w AS c
+    FROM (SELECT r, r.id AS id, r.val AS val FROM rpr_integ r) s
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS r IS NOT NULL)
 ) t;
 
 -- ============================================================
