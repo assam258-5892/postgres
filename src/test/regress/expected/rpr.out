@@ -1351,9 +1351,10 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (pg_temp.stock.*) IS NOT NULL
 );
-ERROR:  qualified expression "pg_temp.stock.*" is not allowed in DEFINE clause
+ERROR:  whole-row reference is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS (pg_temp.stock.*) IS NOT NULL
                          ^
+HINT:  A DEFINE condition may reference individual columns only.
 -- A two-part table-qualified whole-row reference is rejected as well, through
 -- a separate range-variable check (a bare relation name is instead accepted
 -- as a whole-row Var).
@@ -1369,6 +1370,91 @@ WINDOW w AS (
 ERROR:  range variable qualified expression "stock.*" is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS (stock.*) IS NOT NULL
                          ^
+-- A row constructor reaches the same references through
+-- transformExpressionList(), which expanded the star by RTE before either
+-- check could see it.  The first four below were accepted and returned rows;
+-- the fifth was rejected, but as a missing FROM-clause entry.
+-- ROW(schema.table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(pg_temp.stock.*) IS NOT NULL
+);
+ERROR:  whole-row reference is not allowed in DEFINE clause
+LINE 7:     DEFINE A AS ROW(pg_temp.stock.*) IS NOT NULL
+                            ^
+HINT:  A DEFINE condition may reference individual columns only.
+-- ROW(table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(stock.*) IS NOT NULL
+);
+ERROR:  range variable qualified expression "stock.*" is not allowed in DEFINE clause
+LINE 7:     DEFINE A AS ROW(stock.*) IS NOT NULL
+                            ^
+-- the ROW keyword is optional, so the bare constructor needs the same
+-- treatment:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS (stock.*, 1) IS NOT NULL
+);
+ERROR:  range variable qualified expression "stock.*" is not allowed in DEFINE clause
+LINE 7:     DEFINE A AS (stock.*, 1) IS NOT NULL
+                         ^
+-- redundant parentheses are not a way around it:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW((stock.*)) IS NOT NULL
+);
+ERROR:  range variable qualified expression "stock.*" is not allowed in DEFINE clause
+LINE 7:     DEFINE A AS ROW((stock.*)) IS NOT NULL
+                             ^
+-- a pattern variable qualifier is a separate class of rejection:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(A.*) IS NOT NULL
+);
+ERROR:  pattern variable qualified expression "a.*" is not supported in DEFINE clause
+LINE 7:     DEFINE A AS ROW(A.*) IS NOT NULL
+                            ^
+-- A row constructor over plain columns is unaffected.
+SELECT company, tdate, count(*) OVER w AS cnt
+FROM stock
+WHERE company = 'company2' AND tdate <= '2023-07-03'
+WINDOW w AS (
+    PARTITION BY company
+    ORDER BY tdate
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A+)
+    DEFINE A AS ROW(price, price) IS NOT NULL
+);
+ company  |   tdate    | cnt 
+----------+------------+-----
+ company2 | 07-01-2023 |   3
+ company2 | 07-02-2023 |   0
+ company2 | 07-03-2023 |   0
+(3 rows)
+
 --
 -- 2-arg PREV/NEXT: functional tests
 --
