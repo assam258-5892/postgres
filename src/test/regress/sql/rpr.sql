@@ -735,6 +735,69 @@ WINDOW w AS (
     DEFINE A AS (stock.*) IS NOT NULL
 );
 
+-- A row constructor reaches the same references through
+-- transformExpressionList(), which expanded the star by RTE before either
+-- check could see it.  The first four below were accepted and returned rows;
+-- the fifth was rejected, but as a missing FROM-clause entry.
+-- ROW(schema.table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(pg_temp.stock.*) IS NOT NULL
+);
+-- ROW(table.*):
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(stock.*) IS NOT NULL
+);
+-- the ROW keyword is optional, so the bare constructor needs the same
+-- treatment:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS (stock.*, 1) IS NOT NULL
+);
+-- redundant parentheses are not a way around it:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW((stock.*)) IS NOT NULL
+);
+-- a pattern variable qualifier is a separate class of rejection:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(A.*) IS NOT NULL
+);
+-- A row constructor over plain columns is unaffected.
+SELECT company, tdate, count(*) OVER w AS cnt
+FROM stock
+WHERE company = 'company2' AND tdate <= '2023-07-03'
+WINDOW w AS (
+    PARTITION BY company
+    ORDER BY tdate
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A+)
+    DEFINE A AS ROW(price, price) IS NOT NULL
+);
+
 --
 -- 2-arg PREV/NEXT: functional tests
 --
