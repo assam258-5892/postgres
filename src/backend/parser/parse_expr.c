@@ -73,7 +73,7 @@ static Node *transformXmlSerialize(ParseState *pstate, XmlSerialize *xs);
 static Node *transformBooleanTest(ParseState *pstate, BooleanTest *b);
 static Node *transformCurrentOfExpr(ParseState *pstate, CurrentOfExpr *cexpr);
 static Node *transformColumnRef(ParseState *pstate, ColumnRef *cref);
-static Node *transformWholeRowRef(ParseState *pstate,
+static Node *transformWholeRowRef(ParseState *pstate, bool for_func_call,
 								  ParseNamespaceItem *nsitem,
 								  int sublevels_up, int location);
 static Node *transformIndirection(ParseState *pstate, A_Indirection *ind);
@@ -629,17 +629,23 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 		return node;
 
 	/*----------
-	 * Qualified references in DEFINE need a tri-classification:
+	 * A pattern variable qualifier (e.g. UP.price) is valid per ISO/IEC
+	 * 19075-5 6.15 / 4.16 but not yet implemented, and has to be recognized
+	 * here: a pattern variable names no range table entry, so leaving it to
+	 * normal resolution would report a missing FROM-clause entry instead.
 	 *
-	 *	  pattern variable qualifier (e.g. UP.price): valid per
-	 *	  ISO/IEC 19075-5 6.15 / 4.16 but not yet implemented --
-	 *	  raise FEATURE_NOT_SUPPORTED.
+	 * Like every other rule below, this one only reaches names the ref hooks
+	 * left for the query parser to resolve.  A PL that answers a name first
+	 * keeps it: under "#variable_conflict use_variable" PL/pgSQL claims any
+	 * name one of its variables owns, so a PL/pgSQL variable sharing a name
+	 * with a pattern variable takes A.price, exactly as it takes a name a
+	 * table column would otherwise own.  That is what asking for
+	 * use_variable means, and the DEFINE rules do not override it.
 	 *
-	 *	  FROM-clause range variable qualifier: prohibited by
-	 *	  ISO/IEC 19075-5 6.5 -- raise SYNTAX_ERROR.
-	 *
-	 *	  any other qualifier (typo, undefined name): fall through and let
-	 *	  normal column resolution produce a sensible error.
+	 * The other qualified forms DEFINE disallows are diagnosed after the
+	 * reference resolves, below.  Classifying them here on the qualifier
+	 * alone would report a misspelled column as a problem with the qualifier
+	 * and lose the "Perhaps you meant" hint normal resolution offers.
 	 *
 	 * The quoted text reflects only the ColumnRef portion; a trailing field
 	 * selection on a composite type (e.g. ".amount" in "(A.items).amount")
@@ -652,31 +658,16 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 		list_length(cref->fields) != 1)
 	{
 		char	   *qualifier = strVal(linitial(cref->fields));
-		bool		is_pattern_var = false;
 
 		foreach_node(String, pv, pstate->p_rpr_pattern_vars)
 		{
 			if (strcmp(strVal(pv), qualifier) == 0)
-			{
-				is_pattern_var = true;
-				break;
-			}
+				ereport(ERROR,
+						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
+							   NameListToString(cref->fields)),
+						parser_errposition(pstate, cref->location));
 		}
-
-		if (is_pattern_var)
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
-						   NameListToString(cref->fields)),
-					parser_errposition(pstate, cref->location));
-		else if (refnameNamespaceItem(pstate, NULL, qualifier,
-									  cref->location, NULL) != NULL)
-			ereport(ERROR,
-					errcode(ERRCODE_SYNTAX_ERROR),
-					errmsg("range variable qualified expression \"%s\" is not allowed in DEFINE clause",
-						   NameListToString(cref->fields)),
-					parser_errposition(pstate, cref->location));
-		/* else: unknown qualifier -- fall through to normal resolution */
 	}
 
 	/*----------
@@ -730,8 +721,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 												  cref->location,
 												  &levels_up);
 					if (nsitem)
-						node = transformWholeRowRef(pstate, nsitem, levels_up,
-													cref->location);
+						node = transformWholeRowRef(pstate, false, nsitem,
+													levels_up, cref->location);
 				}
 				break;
 			}
@@ -755,8 +746,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				/* Whole-row reference? */
 				if (IsA(field2, A_Star))
 				{
-					node = transformWholeRowRef(pstate, nsitem, levels_up,
-												cref->location);
+					node = transformWholeRowRef(pstate, false, nsitem,
+												levels_up, cref->location);
 					break;
 				}
 
@@ -768,8 +759,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				if (node == NULL)
 				{
 					/* Try it as a function call on the whole row */
-					node = transformWholeRowRef(pstate, nsitem, levels_up,
-												cref->location);
+					node = transformWholeRowRef(pstate, true, nsitem,
+												levels_up, cref->location);
 					node = ParseFuncOrColumn(pstate,
 											 list_make1(makeString(colname)),
 											 list_make1(node),
@@ -802,8 +793,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				/* Whole-row reference? */
 				if (IsA(field3, A_Star))
 				{
-					node = transformWholeRowRef(pstate, nsitem, levels_up,
-												cref->location);
+					node = transformWholeRowRef(pstate, false, nsitem,
+												levels_up, cref->location);
 					break;
 				}
 
@@ -815,8 +806,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				if (node == NULL)
 				{
 					/* Try it as a function call on the whole row */
-					node = transformWholeRowRef(pstate, nsitem, levels_up,
-												cref->location);
+					node = transformWholeRowRef(pstate, true, nsitem,
+												levels_up, cref->location);
 					node = ParseFuncOrColumn(pstate,
 											 list_make1(makeString(colname)),
 											 list_make1(node),
@@ -861,8 +852,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				/* Whole-row reference? */
 				if (IsA(field4, A_Star))
 				{
-					node = transformWholeRowRef(pstate, nsitem, levels_up,
-												cref->location);
+					node = transformWholeRowRef(pstate, false, nsitem,
+												levels_up, cref->location);
 					break;
 				}
 
@@ -874,8 +865,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				if (node == NULL)
 				{
 					/* Try it as a function call on the whole row */
-					node = transformWholeRowRef(pstate, nsitem, levels_up,
-												cref->location);
+					node = transformWholeRowRef(pstate, true, nsitem,
+												levels_up, cref->location);
 					node = ParseFuncOrColumn(pstate,
 											 list_make1(makeString(colname)),
 											 list_make1(node),
@@ -948,18 +939,76 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 
 	/*
 	 * Restrict column references in a row pattern DEFINE clause.  node is now
-	 * a successfully resolved reference, so reject the two forms RPR does not
-	 * allow: a correlated reference to an outer query's column, and a
-	 * schema/catalog-qualified reference (three or more name parts).  Simple
-	 * two-part qualifiers (pattern or range variable) are handled earlier,
-	 * before resolution.
+	 * a successfully resolved reference, so the qualified forms RPR does not
+	 * allow can be rejected without mistaking a name that does not resolve at
+	 * all for one of them: a correlated reference to an outer query's column,
+	 * a range variable qualifier, and a schema/catalog-qualified reference.
+	 *
+	 * The error class follows the division the neighbouring restrictions use:
+	 * ERRCODE_FEATURE_NOT_SUPPORTED for what the standard allows and this
+	 * implementation does not, ERRCODE_SYNTAX_ERROR for every other rejected
+	 * spelling, whether the standard forbids it or never gave it at all.
 	 */
 	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
 	{
-		if (IsA(node, Var) && ((Var *) node)->varlevelsup > 0)
+		ParseNamespaceItem *qual_nsitem = NULL;
+		int			qual_levels_up = 0;
+
+		if (list_length(cref->fields) == 2)
+			qual_nsitem = refnameNamespaceItem(pstate, NULL,
+											   strVal(linitial(cref->fields)),
+											   cref->location,
+											   &qual_levels_up);
+
+		/*
+		 * Ask which level the qualifier resolved at, not merely whether it
+		 * resolved.  A two-part name whose second part is not a column is
+		 * retried as a function call on the whole row, and that yields a
+		 * FuncExpr rather than a Var, so the outer reference its argument
+		 * carries is invisible to the varlevelsup test.
+		 *
+		 * The level counts levels searched, not levels found, so it means
+		 * nothing unless the search succeeded.
+		 */
+		if ((IsA(node, Var) && ((Var *) node)->varlevelsup > 0) ||
+			(qual_nsitem != NULL && qual_levels_up > 0))
 			ereport(ERROR,
 					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					errmsg("cannot use outer query column in DEFINE clause"),
+					parser_errposition(pstate, cref->location));
+
+		if (qual_nsitem != NULL)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("range variable qualified expression \"%s\" is not allowed in DEFINE clause",
+						   NameListToString(cref->fields)),
+					parser_errposition(pstate, cref->location));
+
+		/*
+		 * ISO/IEC 19075-5 6.5 reserves the qualifier slot for a row pattern
+		 * variable, so a name is rejected for occupying it whatever the
+		 * qualifier turns out to name.  What is left here resolved through
+		 * p_post_columnref_hook, which reads a two-part name as a routine's
+		 * parameter or variable, or as a field of a composite one, and the
+		 * hook is public enough that an extension may add readings of its
+		 * own; the message names none of them.  Selecting a field from an
+		 * unqualified value, written "(x).f", occupies no qualifier slot and
+		 * remains the way to reach a composite.
+		 *
+		 * The pre hook's readings never arrive here, so this rule is not the
+		 * last word on a qualified name: in a PL/pgSQL function written with
+		 * "#variable_conflict use_variable", plpgsql_pre_column_ref() answers
+		 * fn.var and rec.field itself and returns before any of this runs,
+		 * leaving those spellings usable there.  The pragma redirects name
+		 * resolution wholesale -- it takes names a table column would
+		 * otherwise own too -- and DEFINE does not carve itself out of it.
+		 */
+		if (list_length(cref->fields) == 2)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("qualified expression \"%s\" is not allowed in DEFINE clause",
+						   NameListToString(cref->fields)),
+					errhint("Write the name without its qualifier, or write \"(x).field\" to select a field of a composite value."),
 					parser_errposition(pstate, cref->location));
 
 		if (list_length(cref->fields) >= 3)
@@ -1986,8 +2035,16 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 			 * are doable with the existing infrastructure -- they are
 			 * left as future work, not blocked on any other feature.
 			 * Until then this blanket rejection is intentional
-			 * over-rejection, not a standard fit; it subsumes both (a)
-			 * and (b) by making the subquery itself unreachable.
+			 * over-rejection, not a standard fit.
+			 *
+			 * It rejects the SubLink, which is not the same as keeping
+			 * the subquery unanalyzed: a construct that analyzes its
+			 * query before building the SubLink, as
+			 * transformJsonArrayQueryConstructor() does, has already
+			 * resolved names and opened relations inside it by the time
+			 * we get here, and reports its own errors first.  Whoever
+			 * implements (a) and (b) must not read this rejection as
+			 * proof that nothing inside a DEFINE subquery runs.
 			 *----------
 			 */
 		case EXPR_KIND_RPR_DEFINE:
@@ -2750,11 +2807,29 @@ transformCurrentOfExpr(ParseState *pstate, CurrentOfExpr *cexpr)
 
 /*
  * Construct a whole-row reference to represent the notation "relation.*".
+ *
+ * for_func_call is true when transformColumnRef is building the reference
+ * speculatively, to retry a name that did not resolve as a column as a
+ * function call on the composite value.  The query does not contain a
+ * whole-row reference in that case, so restrictions on writing one must not
+ * fire; whatever the retry resolves to is diagnosed by the caller.
  */
 static Node *
-transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
-					 int sublevels_up, int location)
+transformWholeRowRef(ParseState *pstate, bool for_func_call,
+					 ParseNamespaceItem *nsitem, int sublevels_up,
+					 int location)
 {
+	/*
+	 * A DEFINE clause cannot use a whole-row reference: ISO/IEC 19075-5 6.5
+	 * limits the range variables in scope to the row pattern variables.
+	 */
+	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE && !for_func_call)
+		ereport(ERROR,
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("whole-row reference is not allowed in DEFINE clause"),
+				errhint("A DEFINE condition may reference individual columns only."),
+				parser_errposition(pstate, location));
+
 	/*
 	 * Build the appropriate referencing node.  Normally this can be a
 	 * whole-row Var, but if the nsitem is a JOIN USING alias then it contains

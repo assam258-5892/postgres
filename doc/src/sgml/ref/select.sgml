@@ -1241,6 +1241,31 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
+    The same applies to names that are not columns.  A parameter or
+    variable of the routine whose body contains the query is readable from
+    a <literal>DEFINE</literal> condition, but only unqualified: the
+    <productname>PostgreSQL</productname> spellings that qualify one with
+    the routine name or a block label occupy the reserved slot and are
+    rejected there.  To read a field of a composite parameter or record
+    variable, parenthesize it, as in <literal>(p).amount</literal>; that is
+    field selection on a value rather than a qualified name, so the slot
+    stays free.
+   </para>
+
+   <para>
+    A <application>PL/pgSQL</application> function written with
+    <literal>#variable_conflict use_variable</literal> is an exception, as
+    it is everywhere else: that setting makes
+    <application>PL/pgSQL</application> resolve any name one of its
+    variables owns before the query does, so inside such a function
+    qualified spellings such as <literal>fn.threshold</literal> keep
+    working, and a variable whose name matches a pattern variable takes
+    <literal>A.price</literal> as well.  This is the same shadowing the
+    setting applies to table columns; see
+    <xref linkend="plpgsql-var-subst"/>.
+   </para>
+
+   <para>
     The purpose of a <literal>WINDOW</literal> clause is to specify the
     behavior of <firstterm>window functions</firstterm> appearing in the query's
     <link linkend="sql-select-list"><command>SELECT</command> list</link> or
