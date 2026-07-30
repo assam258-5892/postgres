@@ -326,6 +326,13 @@ ensure_define_inputs_walker(Node *node, EnsureDefineInputsCtx *ctx)
  * RPRNavExpr nodes that only the owning WindowAgg can evaluate.  So walk it,
  * leave alone any part a sort/group clause already computes, and add a
  * resjunk entry for every Var that is not covered.
+ *
+ * Whatever is left standing has to reach the WindowAgg's input on its own:
+ * make_window_input_target() derives that input from final_target and adds
+ * nothing of its own for DEFINE, and remove_unused_subquery_outputs() keeps a
+ * column alive only for an entry that is resjunk or bears a sortgroupref, or
+ * that its own DEFINE guard matches.  Both of the entries relied on here
+ * qualify.
  */
 static void
 ensure_define_inputs(ParseState *pstate, Node *expr, List **targetlist)
