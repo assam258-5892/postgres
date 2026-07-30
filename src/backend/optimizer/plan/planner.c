@@ -6550,6 +6550,27 @@ make_window_input_target(PlannerInfo *root,
 									   PVC_INCLUDE_PLACEHOLDERS);
 	add_new_columns_to_pathtarget(input_target, flattenable_vars);
 
+	/*
+	 * A column referenced only in a window's DEFINE clause (row pattern
+	 * recognition) is not part of final_target, but the WindowAgg has to
+	 * evaluate the DEFINE conditions against its input rows, so those columns
+	 * must be present in the input target as well.
+	 */
+	foreach_node(WindowClause, wc, activeWindows)
+	{
+		List	   *define_vars;
+
+		if (wc->defineClause == NIL)
+			continue;
+
+		define_vars = pull_var_clause((Node *) wc->defineClause,
+									  PVC_RECURSE_AGGREGATES |
+									  PVC_RECURSE_WINDOWFUNCS |
+									  PVC_INCLUDE_PLACEHOLDERS);
+		add_new_columns_to_pathtarget(input_target, define_vars);
+		list_free(define_vars);
+	}
+
 	/* clean up cruft */
 	list_free(flattenable_vars);
 	list_free(flattenable_cols);
