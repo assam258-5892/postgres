@@ -3068,8 +3068,9 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){3}) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: reluctant GROUP child (((A B){2}?){3}) stays nested
--- a reluctant quantifier on a GROUP is not subject to multiplication
+-- Quantifier multiply: (((A B){2}?){3}) -> (a b){6}
+-- {2}? has a fixed count, so reluctance is normalized away and the
+-- multiplication that (((A B){2}){3}) gets applies here too
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3341,14 +3342,21 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+? (A B)) DEFINE A AS val <= 50, B AS val > 50);
 
 -- Reluctant optimization bypass: quantifier multiply (outer reluctant)
--- (A{2}){3}? stays as (a{2}){3}? (greedy merges to a{6})
+-- (A{2,3}){2,3}? stays nested (greedy (A{2,3}){2,3} stays too, but the
+-- reluctance is what blocks it here)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN ((A{2}){3}?) DEFINE A AS val > 0);
+             PATTERN ((A{2,3}){2,3}?) DEFINE A AS val > 0);
 
 -- Reluctant optimization bypass: quantifier multiply (inner reluctant)
--- (A{2}?){3} stays as (a{2}?){3} (greedy merges to a{6})
+-- (A{2,3}?){3} stays as (a{2,3}?){3} (greedy (A{2,3}){3} merges to a{6,9})
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN ((A{2,3}?){3}) DEFINE A AS val > 0);
+
+-- Fixed count normalizes away: (A{2}?){3} -> a{6}, same as (A{2}){3}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3577,10 +3585,7 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+) DEFINE A AS val > 0);
 
--- Reluctant {1}? quantifier deparse
--- A{1}? is a reluctant {1,1} quantifier.  The deparse code must
--- output "{1}" explicitly to disambiguate from a bare "?" quantifier
--- (which would mean {0,1}).
+-- Reluctant {1}? quantifier: min == max, so the plan normalizes it away
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM rpr_plan
 WINDOW w AS (
