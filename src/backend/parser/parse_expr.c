@@ -2757,9 +2757,7 @@ transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
 {
 	/*
 	 * A DEFINE clause cannot use a whole-row reference: ISO/IEC 19075-5 6.5
-	 * limits the range variables in scope to the row pattern variables, and
-	 * the same rule bars a FROM-clause range variable qualifier, which
-	 * validateRPRDefineColumnRef rejects.
+	 * limits the range variables in scope to the row pattern variables.
 	 */
 	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
 		ereport(ERROR,
