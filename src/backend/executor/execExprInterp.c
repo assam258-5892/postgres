@@ -6175,7 +6175,6 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 		return;
 	}
 
-	/* Fetch target row slot (returns nav_null_slot if out of range) */
 	target_slot = ExecRPRNavGetSlot(winstate, target_pos);
 
 	/*
@@ -6185,7 +6184,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	 * definitive false otherwise, since resnull may still hold a stale value
 	 * from a previous evaluation.
 	 */
-	if (target_slot == winstate->nav_null_slot)
+	if (target_slot == NULL)
 	{
 		*op->resvalue = (Datum) 0;
 		*op->resnull = true;

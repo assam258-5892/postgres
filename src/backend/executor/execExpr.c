@@ -1227,8 +1227,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				ExprEvalPushStep(state, &scratch);
 
 				/*
-				 * If the target row does not exist, the EEOP_RPR_NAV_SET step
-				 * has already stored a nav_null_slot; skip evaluation of the
+				 * If the target row does not exist, skip evaluation of the
 				 * argument expression and go straight to RESTORE.  The
 				 * EEOP_RPR_NAV_SET step writes a definitive resnull (false
 				 * when the target row exists), so the jump condition is

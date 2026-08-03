@@ -2804,7 +2804,6 @@ typedef struct WindowAggState
 								 * PREV/NEXT/FIRST/LAST) */
 
 	TupleTableSlot *nav_saved_outertuple;	/* saved slot during nav swap */
-	TupleTableSlot *nav_null_slot;	/* all NULL slot */
 	int64		nav_match_start;	/* match_start for FIRST/LAST nav */
 
 	/* RPR current match result */
