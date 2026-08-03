@@ -1294,16 +1294,16 @@ prepare_tuplestore(WindowAggState *winstate)
 		 * When the trim offset is FIXED we advance the mark based on
 		 * (currentpos - navMaxOffset) and optionally
 		 * (nfaContext->matchStartRow + navFirstOffset), allowing
-		 * tuplestore_trim() to free rows that are no longer reachable.  A
-		 * parameterized offset is still NEEDS_EVAL here and gets resolved at
-		 * execution by resolve_nav_offsets(); RETAIN_ALL disables trim.
+		 * tuplestore_trim() to free rows that are no longer reachable.
+		 * resolve_nav_offsets() runs before the first begin_partition(), so
+		 * the kind here is FIXED or RETAIN_ALL even for a parameterized
+		 * offset; RETAIN_ALL disables trim.
 		 */
 		winstate->nav_winobj->markptr =
 			tuplestore_alloc_read_pointer(winstate->buffer, 0);
 		winstate->nav_winobj->readptr =
 			tuplestore_alloc_read_pointer(winstate->buffer,
 										  EXEC_FLAG_BACKWARD);
-		winstate->nav_winobj->markpos = 0;
 	}
 
 	/*
@@ -2855,16 +2855,6 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->temp_slot_2 = ExecInitExtraTupleSlot(estate, scanDesc,
 												   &TTSOpsMinimalTuple);
 
-	if (node->rpPattern != NULL)
-	{
-		winstate->nav_slot = ExecInitExtraTupleSlot(estate, scanDesc,
-													&TTSOpsMinimalTuple);
-		winstate->nav_slot_pos = -1;
-
-		winstate->nav_saved_outertuple = NULL;
-		winstate->nav_match_start = 0;
-	}
-
 	/*
 	 * create frame head and tail slots only if needed (must create slots in
 	 * exactly the same cases that update_frameheadpos and update_frametailpos
@@ -3030,23 +3020,6 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		winstate->agg_winobj = agg_winobj;
 	}
 
-	/*
-	 * Set up WindowObject for RPR navigation opcodes.  This is separate from
-	 * agg_winobj because it needs its own read pointer to avoid interfering
-	 * with aggregate processing.
-	 */
-	if (node->rpPattern != NULL)
-	{
-		WindowObject nav_winobj = makeNode(WindowObjectData);
-
-		nav_winobj->winstate = winstate;
-		nav_winobj->argstates = NIL;
-		nav_winobj->localmem = NULL;
-		nav_winobj->markptr = -1;
-		nav_winobj->readptr = -1;
-		winstate->nav_winobj = nav_winobj;
-	}
-
 	/* Set the status to running */
 	winstate->status = WINDOWAGG_RUN;
 
@@ -3065,80 +3038,131 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->inRangeAsc = node->inRangeAsc;
 	winstate->inRangeNullsFirst = node->inRangeNullsFirst;
 
-	/* Set up SKIP TO type */
-	winstate->rpSkipTo = node->rpSkipTo;
-	/* Set up row pattern recognition PATTERN clause (compiled NFA) */
-	winstate->rpPattern = node->rpPattern;
-	/* Build nav offset bookkeeping; values are resolved per scan */
-	build_define_offsets(winstate, node->defineClause);
-
-	/* Copy match_start dependency bitmapset for per-context evaluation */
-	winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
-
-	/* Calculate NFA state size and allocate cycle detection bitmap */
-	if (node->rpPattern != NULL)
-	{
-		int			nfaVisitedNWords;
-
-		winstate->nfaStateSize = offsetof(RPRNFAState, counts) +
-			sizeof(int32) * node->rpPattern->maxDepth;
-		nfaVisitedNWords =
-			(node->rpPattern->numElements - 1) / BITS_PER_BITMAPWORD + 1;
-		winstate->nfaVisitedEnds = palloc0(sizeof(bitmapword) *
-										   nfaVisitedNWords);
-		/* High-water mark sentinels: no bits set yet. */
-		winstate->nfaVisitedMinWord = PG_INT16_MAX;
-		winstate->nfaVisitedMaxWord = -1;
-	}
-
-	/* Set up row pattern recognition DEFINE clause */
-	winstate->defineClauseExprs = NIL;
-
-	/*
-	 * Compile DEFINE clause expressions.  PREV/NEXT navigation is handled by
-	 * EEOP_RPR_NAV_SET/RESTORE opcodes emitted during ExecInitExpr, so no
-	 * varno rewriting is needed here.  Expressions are kept in DEFINE order,
-	 * so their list index equals the variable's varId.
-	 */
-	foreach_node(TargetEntry, te, node->defineClause)
-	{
-		ExprState  *exprstate;
-
-		exprstate = ExecInitExpr(te->expr, (PlanState *) winstate);
-
-		winstate->defineClauseExprs =
-			lappend(winstate->defineClauseExprs, exprstate);
-	}
-
-	/* Initialize NFA free lists for row pattern matching */
-	winstate->nfaContext = NULL;
-	winstate->nfaContextTail = NULL;
-	winstate->nfaContextFree = NULL;
-	winstate->nfaStateFree = NULL;
-	winstate->nfaLastProcessedRow = -1;
-	winstate->nfaStatesActive = 0;
-	winstate->nfaContextsActive = 0;
-
-	/*
-	 * Allocate varMatched array for NFA evaluation. With the new varNames
-	 * ordering (DEFINE order first), varId == defineIdx for all defined
-	 * variables, so no mapping is needed.
-	 */
-	if (winstate->defineClauseExprs != NIL)
-		winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
-										  list_length(winstate->defineClauseExprs));
-	else
-		winstate->nfaVarMatched = NULL;
 	winstate->all_first = true;
-
-	/*
-	 * Nav offsets are resolved (and validated) at execution, like frame
-	 * offsets: on the first scan and after each rescan, for every RPR window.
-	 */
-	winstate->navResolvePending = (winstate->rprNavOffsets != NIL);
 	winstate->partition_spooled = false;
 	winstate->more_partitions = false;
 	winstate->next_partition = true;
+
+	/*
+	 * RPR stuff, in struct declaration order except for the nav offsets,
+	 * which build_define_offsets() below accumulates into; the four
+	 * NFALengthStats members keep the zeroes palloc0 gave them.
+	 */
+	if (node->rpPattern != NULL)
+	{
+		int			nfaVisitedNWords;
+		WindowObject nav_winobj;
+
+		winstate->rpSkipTo = node->rpSkipTo;
+		winstate->rpPattern = node->rpPattern;
+		winstate->defineClauseExprs = NIL;
+
+		winstate->rprNavOffsets = NIL;
+		winstate->navMaxOffset = 0;
+		winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
+		winstate->hasMaxNav = false;
+		winstate->hasFirstNav = false;
+		winstate->navFirstOffset = 0;
+		winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
+
+		/*
+		 * Must run this before the ExecInitExpr() loop over defineClause:
+		 * while compiling each RPRNavExpr, ExecInitExpr() reads
+		 * winstate->rprNavOffsets to link the RPRNavState to its entry and
+		 * seed the offset, and this call is what fills that list
+		 */
+		build_define_offsets(winstate, node->defineClause);
+
+		/*
+		 * Compile DEFINE clause expressions.  PREV/NEXT navigation is handled
+		 * by EEOP_RPR_NAV_SET/RESTORE opcodes emitted during ExecInitExpr, so
+		 * no varno rewriting is needed here.  Expressions are kept in DEFINE
+		 * order, so their list index equals the variable's varId.
+		 */
+		foreach_node(TargetEntry, te, node->defineClause)
+		{
+			ExprState  *exprstate;
+
+			exprstate = ExecInitExpr(te->expr, (PlanState *) winstate);
+
+			winstate->defineClauseExprs =
+				lappend(winstate->defineClauseExprs, exprstate);
+		}
+
+		/* Initialize NFA free lists for row pattern matching */
+		winstate->nfaContext = NULL;
+		winstate->nfaContextTail = NULL;
+		winstate->nfaContextFree = NULL;
+		winstate->nfaStateFree = NULL;
+		winstate->nfaStateSize = offsetof(RPRNFAState, counts) +
+			sizeof(int32) * node->rpPattern->maxDepth;
+
+		/*
+		 * Allocate varMatched array for NFA evaluation. With the new varNames
+		 * ordering (DEFINE order first), varId == defineIdx for all defined
+		 * variables, so no mapping is needed.
+		 */
+		if (winstate->defineClauseExprs != NIL)
+			winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
+											  list_length(winstate->defineClauseExprs));
+		else
+			winstate->nfaVarMatched = NULL;
+
+		/* Copy match_start dependency bitmapset for per-context evaluation */
+		winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
+
+		nfaVisitedNWords =
+			(node->rpPattern->numElements - 1) / BITS_PER_BITMAPWORD + 1;
+
+		winstate->nfaVisitedEnds = palloc0(sizeof(bitmapword) *
+										   nfaVisitedNWords);
+
+		/* High-water mark sentinels: no bits set yet. */
+		winstate->nfaVisitedMinWord = PG_INT16_MAX;
+		winstate->nfaVisitedMaxWord = -1;
+
+		winstate->nfaLastProcessedRow = -1;
+		winstate->nfaStatesActive = 0;
+		winstate->nfaStatesMax = 0;
+		winstate->nfaStatesTotalCreated = 0;
+		winstate->nfaStatesMerged = 0;
+		winstate->nfaContextsActive = 0;
+		winstate->nfaContextsMax = 0;
+		winstate->nfaContextsTotalCreated = 0;
+		winstate->nfaContextsAbsorbed = 0;
+		winstate->nfaContextsSkipped = 0;
+		winstate->nfaContextsPruned = 0;
+		winstate->nfaMatchesSucceeded = 0;
+		winstate->nfaMatchesFailed = 0;
+
+		/*
+		 * Nav offsets are resolved (and validated) at execution, like frame
+		 * offsets: on the first scan and after each rescan, for every RPR
+		 * window.
+		 */
+		winstate->navResolvePending = (winstate->rprNavOffsets != NIL);
+
+		/*
+		 * Set up WindowObject for RPR navigation opcodes.  This is separate
+		 * from agg_winobj because it needs its own read pointer to avoid
+		 * interfering with aggregate processing.
+		 */
+		nav_winobj = makeNode(WindowObjectData);
+		nav_winobj->winstate = winstate;
+		nav_winobj->argstates = NIL;
+		nav_winobj->localmem = NULL;
+		nav_winobj->markptr = -1;
+		nav_winobj->readptr = -1;
+		winstate->nav_winobj = nav_winobj;
+
+		winstate->nav_slot_pos = -1;
+		winstate->nav_slot = ExecInitExtraTupleSlot(estate, scanDesc,
+													&TTSOpsMinimalTuple);
+		winstate->nav_saved_outertuple = NULL;
+		winstate->nav_match_start = 0;
+		winstate->rpr_match_start = -1;
+		winstate->rpr_match_length = -1;
+	}
 
 	return winstate;
 }
@@ -4139,21 +4163,14 @@ RPRNavExpr_walker(Node *node, WindowAggState *winstate)
  * numbered them in, so entry i is the navigation with navno i.
  *
  * The concrete offset values -- and the tuplestore trim bounds derived from
- * them -- are resolved later, per scan, by resolve_nav_offsets().  A non-RPR
- * window has an empty DEFINE clause and falls through to the defaults.
+ * them -- are resolved later, per scan, by resolve_nav_offsets().  Only an RPR
+ * window reaches here, and the fields this fills are left at their palloc0
+ * defaults on the paths that return early.
  */
 static void
 build_define_offsets(WindowAggState *winstate, List *defineClause)
 {
 	EvalDefineOffsetsContext ctx;
-
-	winstate->navMaxOffset = 0;
-	winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
-	winstate->hasMaxNav = false;
-	winstate->hasFirstNav = false;
-	winstate->navFirstOffset = 0;
-	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
-	winstate->rprNavOffsets = NIL;
 
 	if (defineClause == NIL)
 		return;
