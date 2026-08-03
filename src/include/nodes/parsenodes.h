@@ -226,8 +226,8 @@ typedef struct Query
 	Node	   *havingQual;		/* qualifications applied to groups */
 
 	List	   *windowClause;	/* a list of WindowClause's */
-	bool		hasRPR;			/* was ROW PATTERN RECOGNITION used in
-								 * windowClause */
+	/* was ROW PATTERN RECOGNITION used in windowClause? */
+	bool		hasRPR pg_node_attr(query_jumble_ignore);
 
 	List	   *distinctClause; /* a list of SortGroupClause's */
 
@@ -1766,7 +1766,7 @@ typedef struct WindowClause
 	/* Row Pattern AFTER MATCH SKIP clause */
 	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
 	/* Row Pattern DEFINE clause (list of TargetEntry) */
-	List	   *defineClause;
+	List	   *defineClause pg_node_attr(custom_query_jumble);
 	/* Row Pattern PATTERN parse tree */
 	RPRPatternNode *rpPattern;
 } WindowClause;
