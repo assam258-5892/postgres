@@ -124,6 +124,25 @@ SELECT * FROM pgss_a JOIN pgss_b ON pgss_b.a_id = pgss_a.id FOR UPDATE SKIP LOCK
 
 SELECT calls, query FROM pg_stat_statements ORDER BY query COLLATE "C";
 
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
+SELECT count(*) OVER w FROM pgss_a
+WINDOW w AS (
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  AFTER MATCH SKIP PAST LAST ROW
+  PATTERN (A B)
+  DEFINE A AS id > 50, B AS id < 50);
+
+SELECT count(*) OVER w FROM pgss_a
+WINDOW w AS (
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  AFTER MATCH SKIP PAST LAST ROW
+  PATTERN (A B)
+  DEFINE A AS id < 50, B AS id > 50);
+
+SELECT calls, query FROM pg_stat_statements ORDER BY query COLLATE "C";
+
+
 DROP TABLE pgss_a, pgss_b CASCADE;
 
 --
