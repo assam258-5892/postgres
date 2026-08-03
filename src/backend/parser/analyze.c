@@ -1862,12 +1862,8 @@ transformSelectStmt(ParseState *pstate, SelectStmt *stmt,
 	 * so an RPR window could in principle pattern-match over the grouped
 	 * output.  Supporting it, though, needs additional work we haven't done
 	 * or tested.
-	 *
-	 * XXX this rejects more than it must: only more than one grouping set
-	 * actually fails, and only because defineClause sits outside the grouping
-	 * substitution.  Narrow it in the patch that puts defineClause there.
 	 */
-	if (qry->groupClause && qry->hasRPR)
+	if ((qry->groupClause || qry->groupingSets) && qry->hasRPR)
 		ereport(ERROR,
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				errmsg("row pattern recognition is not supported with GROUP BY"));
