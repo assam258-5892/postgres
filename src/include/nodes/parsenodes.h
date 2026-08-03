@@ -1756,7 +1756,7 @@ typedef struct WindowClause
 	bool		initial;		/* true if <row pattern initial or seek> is
 								 * initial */
 	/* Row Pattern DEFINE clause (list of TargetEntry) */
-	List	   *defineClause;
+	List	   *defineClause pg_node_attr(custom_query_jumble);
 	/* Row Pattern PATTERN parse tree */
 	RPRPatternNode *rpPattern;
 } WindowClause;
