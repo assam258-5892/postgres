@@ -204,7 +204,6 @@ static void nfa_reevaluate_dependent_vars(WindowAggState *winstate,
  *
  * Allocate an NFA state, reusing from freeList if available.
  * freeList is stored in WindowAggState for reuse across match attempts.
- * Uses flexible array member for counts[].
  */
 static RPRNFAState *
 nfa_state_make(WindowAggState *winstate)
