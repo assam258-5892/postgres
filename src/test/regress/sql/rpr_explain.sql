@@ -184,7 +184,7 @@ WINDOW w AS (
     DEFINE R AS TRUE
 );');
 
--- Regression test: Space before parenthesis in pattern deparse
+-- Space before parenthesis in pattern deparse
 -- Verifies that "A (B | C)" correctly outputs as "a (b | c)" with space
 CREATE VIEW rpr_ev_basic_deparse_space AS
 SELECT count(*) OVER w
@@ -226,7 +226,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 1, B AS v % 5 = 2, C AS v % 5 = 3, D AS v % 5 = 4, E AS v % 5 = 0
 );');
 
--- Regression test: ALT branch whose tail is a group
+-- ALT branch whose tail is a group
 -- (A | (B C)+ (D E)+) means A | ((B C)+ (D E)+) by precedence, so the two
 -- trailing groups must deparse inside one branch, not as separate branches.
 CREATE VIEW rpr_ev_basic_deparse_alttail AS
@@ -250,7 +250,7 @@ WINDOW w AS (
     DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
 );');
 
--- Regression test: Quoted identifiers in EXPLAIN pattern deparse
+-- Quoted identifiers in EXPLAIN pattern deparse
 -- Mixed case names must be quoted to preserve round-trip safety
 SELECT rpr_explain_filter('
 EXPLAIN (COSTS OFF)
