@@ -643,8 +643,6 @@ typedef struct RPCommonSyntax
 {
 	NodeTag		type;
 	RPSkipTo	rpSkipTo;		/* Row Pattern AFTER MATCH SKIP type */
-	bool		initial;		/* true if <row pattern initial or seek> is
-								 * initial */
 	RPRPatternNode *rpPattern;	/* PATTERN parse tree */
 	List	   *rpDefs;			/* row pattern definitions clause (list of
 								 * ResTarget) */
@@ -666,10 +664,10 @@ typedef struct WindowDef
 	char	   *refname;		/* referenced window name, if any */
 	List	   *partitionClause;	/* PARTITION BY expression list */
 	List	   *orderClause;	/* ORDER BY (list of SortBy) */
-	RPCommonSyntax *rpCommonSyntax; /* row pattern common syntax */
 	int			frameOptions;	/* frame_clause options, see below */
 	Node	   *startOffset;	/* expression for starting bound, if any */
 	Node	   *endOffset;		/* expression for ending bound, if any */
+	RPCommonSyntax *rpCommonSyntax; /* row pattern common syntax */
 	ParseLoc	location;		/* parse location, or -1 if none/unknown */
 	ParseLoc	frameLocation;	/* ROWS/RANGE/GROUPS location, or -1 */
 	ParseLoc	excludeLocation;	/* EXCLUDE location, or -1 */
@@ -1753,8 +1751,6 @@ typedef struct WindowClause
 	bool		copiedOrder pg_node_attr(query_jumble_ignore);
 	/* Row Pattern AFTER MATCH SKIP clause */
 	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
-	bool		initial;		/* true if <row pattern initial or seek> is
-								 * initial */
 	/* Row Pattern DEFINE clause (list of TargetEntry) */
 	List	   *defineClause pg_node_attr(custom_query_jumble);
 	/* Row Pattern PATTERN parse tree */
