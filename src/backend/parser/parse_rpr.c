@@ -535,18 +535,19 @@ define_walker(Node *node, void *context)
 				{
 					RPRNavExpr *inner;
 
-					/* Reject triple-or-deeper nesting */
-					if (ctx->nav_count > 1)
-						ereport(ERROR,
-								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("cannot nest row pattern navigation more than two levels deep"),
-								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
-								parser_errposition(ctx->pstate, nav->location));
-
+					/* Reject an inner nav that is not the whole argument */
 					if (!IsA(nav->arg, RPRNavExpr))
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
 								errmsg("row pattern navigation operation must be a direct argument of the outer navigation"),
+								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
+								parser_errposition(ctx->pstate, nav->location));
+
+					/* Reject triple-or-deeper nesting; siblings caught above */
+					if (ctx->nav_count > 1)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("cannot nest row pattern navigation more than two levels deep"),
 								errhint("Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."),
 								parser_errposition(ctx->pstate, nav->location));
 
