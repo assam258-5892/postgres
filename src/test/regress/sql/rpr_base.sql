@@ -1290,6 +1290,106 @@ CREATE TABLE rpr_nav (id INT, val INT);
 INSERT INTO rpr_nav VALUES
     (1, 10), (2, 20), (3, 15), (4, 25), (5, 30);
 
+-- Avoid evaluating the inner argument expression when the target row is out
+-- of range or does not exist.  PREV misses on the first row of the partition
+-- and NEXT on the last, so the two directions are checked separately.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is not null) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val is not null) is null);
+
+-- FIRST and LAST cannot miss under PATTERN (A): the match is one row long, so
+-- the target is the current row and the slot swap is elided.  These two run
+-- that path; the query further down is what pins what it writes.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val is not null) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS FIRST(val is not null) is null);
+
+-- The elided path has to report the target row as present, since resnull may
+-- still be null from a scan whose navigation missed.  Here the navigation is
+-- the whole DEFINE, so nothing overwrites resnull in between, and inlining the
+-- function makes the offset a parameter: 1 misses, then 0 elides.
+CREATE FUNCTION rpr_nav_off(k int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w FROM rpr_nav WHERE id = 1
+  WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A) DEFINE A AS PREV(val > 0, k)) $$;
+SELECT o.k, f FROM (VALUES (1), (0)) o(k), LATERAL rpr_nav_off(o.k) f;
+DROP FUNCTION rpr_nav_off(int);
+
+-- Under a longer pattern FIRST and LAST can miss.  On the first row of a
+-- match currentpos equals match_start, so an offset of one falls outside the
+-- match in either direction, and the compound forms miss on their inner
+-- navigation, which is a separate bound from the one the plain forms cross.
+-- The argument does not propagate null, so a missing row is told apart from
+-- a row of nulls.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS LAST(val is not null, 1) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS FIRST(val is not null, 1) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(FIRST(val is not null, 1), 2) is null);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(LAST(val is not null, 1), 2) is null);
+
+-- Not a duplicate of the PREV(val is not null) case: the argument here is
+-- true where that one is false, and a missing row still has to win over both.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is null) is null);
+
+-- Skipping the argument is data-dependent: restricted to the row PREV misses
+-- on, a division by zero in it never runs; over the whole table NEXT reaches
+-- a row for all but the last and it does.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val / 0) > 0);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val / 0) > 0);
+
+-- Here the null reaches the DEFINE predicate itself instead of an IS NULL
+-- test: an all-NULL target row would have made v IS NULL true and matched the
+-- first row, so this pins the predicate side of the same behaviour.
+WITH t(id, v) AS (VALUES (1, 10), (2, 20))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+
+-- Constant folding can leave a navigation argument with no column reference
+-- at all (v folds to 10, so PREV(v IS NULL) becomes PREV(false)), which the
+-- planner has to accept rather than re-run the parse-time rejection.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+
+-- XXX Folding evaluates the argument while planning, with the current row's
+-- value standing in for the target row's, so this divides by zero even though
+-- PREV has no row to navigate to.  A separate patch will deal with it.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
 -- PREV function - reference previous row in pattern
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
