@@ -1300,7 +1300,8 @@ typedef struct RPRPattern
 	int			numVars;		/* number of pattern variables */
 	char	  **varNames;		/* array of variable names (DEFINE order
 								 * first) */
-	RPRDepth	maxDepth;		/* maximum group nesting depth */
+	RPRDepth	maxDepth;		/* deepest group nesting depth plus one, i.e.
+								 * the length of a state's counts[] */
 	int			numElements;	/* number of elements */
 	RPRPatternElement *elements;	/* array of pattern elements */
 
@@ -1317,13 +1318,16 @@ typedef struct RPRPattern
 	 * computeAbsorbability() marks the absorbable cases (see isUnboundedStart):
 	 *   - simple unbounded VAR at the start:                    A+ B C
 	 *   - unbounded GROUP with fixed-length children:           (A B)+, (A B{2})+
-	 *   - top-level ALT with independently absorbable branches: A+ | B+
-	 *     (handled in computeAbsorbabilityRecursive)
+	 *   - greedy GROUP whose body starts with one of those:     (A+ B)+
+	 *   - ALT with independently absorbable branches:           A+ | B+
+	 *     (handled in computeAbsorbabilityRecursive, at any nesting: the
+	 *     branches of (A+ | B)+ are judged the same way)
 	 *
 	 * Not absorbable: an unbounded element not at the start (A B+), a
-	 * reluctant quantifier (A+?), or an ALT inside a group ((A|B)+) -- there
-	 * different start positions yield different match contents, so later
-	 * matches are not suffixes of earlier ones.
+	 * reluctant quantifier (A+?), or an alternation no branch of which starts
+	 * with an unbounded greedy element ((A|B)+) -- there different start
+	 * positions yield different match contents, so later matches are not
+	 * suffixes of earlier ones.
 	 */
 	bool		isAbsorbable;	/* true if pattern supports context absorption */
 } RPRPattern;

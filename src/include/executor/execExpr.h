@@ -274,7 +274,7 @@ typedef enum ExprEvalOp
 	EEOP_MERGE_SUPPORT_FUNC,
 	EEOP_SUBPLAN,
 
-	/* row pattern navigation (RPR PREV/NEXT) */
+	/* row pattern navigation (all eight RPRNavKind kinds) */
 	EEOP_RPR_NAV_SET,
 	EEOP_RPR_NAV_RESTORE,
 

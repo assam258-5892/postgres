@@ -5,7 +5,8 @@
  *
  * This file transforms RPR-related clauses from raw parse tree to planner
  * structures during query analysis:
- *   - Validates frame options (must start at CURRENT ROW, no EXCLUDE)
+ *   - Validates frame options (ROWS only, must start at CURRENT ROW, no
+ *     EXCLUDE, and CURRENT ROW is not accepted as the frame end)
  *   - Validates PATTERN variable count (max RPR_VARID_MAX + 1)
  *   - Transforms DEFINE clause
  *   - Stores the PATTERN parse tree and the SKIP TO/INITIAL flags
@@ -63,7 +64,8 @@ static bool define_walker(Node *node, void *context);
  *		Process Row Pattern Recognition related clauses.
  *
  * Validates and transforms RPR clauses from parse tree to planner structures:
- *   - Validates frame options (must start at CURRENT ROW, no EXCLUDE)
+ *   - Validates frame options (ROWS only, must start at CURRENT ROW, no
+ *     EXCLUDE, and CURRENT ROW is not accepted as the frame end)
  *   - Set AFTER MATCH SKIP TO flag
  *   - Set SEEK/INITIAL flag
  *   - Transforms DEFINE clause into TargetEntry list
@@ -279,8 +281,8 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 	List	   *patternVarNames = NIL;
 
 	/*
-	 * If Row Definition Common Syntax exists, DEFINE clause must exist. (the
-	 * raw parser should have already checked it.)
+	 * The grammar builds an RPCommonSyntax only for a window specification
+	 * that carries DEFINE, so the list is never empty here.
 	 */
 	Assert(windef->rpCommonSyntax->rpDefs != NULL);
 
@@ -426,27 +428,6 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 }
 
 /*
- * Single-pass DEFINE clause validator.
- *
- * One walker function (define_walker) visits every node in a DEFINE
- * expression exactly once and enforces, for each outer RPRNavExpr (per
- * ISO/IEC 19075-5 5.6.4 nesting rules):
- *   - arg must contain at least one column reference
- *   - PREV/NEXT wrapping FIRST/LAST flattens to a compound kind
- *   - Other nestings are rejected (FIRST(PREV()), PREV(PREV()), ...)
- *   - offset_arg / compound_offset_arg must not contain column refs
- *     or nested navigation operations
- *
- * The walker uses a phase tag to know which subtree it is in: DEFINE
- * body (top-level), inside a nav.arg, or inside a nav.offset_arg /
- * compound_offset_arg.  When entering an outer nav (PHASE_BODY), it
- * walks nav.arg in PHASE_NAV_ARG to collect nesting/column-ref state,
- * applies compound flatten or raises a nesting error, then walks the
- * (post-flatten) offset(s) in PHASE_NAV_OFFSET to enforce the
- * constant-offset and no-nested-nav rules.  No subtree is walked twice.
- */
-
-/*
  * define_walker
  *		Single-pass DEFINE clause validator.  At each node, enforces:
  *
@@ -461,10 +442,16 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  *			  - must be a run-time constant (no column references)
  *			  - must not contain a row pattern navigation operation
  *
+ * Entering an outer nav, the walker walks nav.arg in PHASE_NAV_ARG to collect
+ * nesting and column-ref state, flattens a compound form or raises a nesting
+ * error, then walks the post-flatten offset(s) in PHASE_NAV_OFFSET.  A
+ * compound form's inner offset is walked in both passes: PHASE_NAV_ARG only
+ * asks whether nav.arg as a whole holds a column reference, so the offset is
+ * walked again to catch one it would have leaked.
+ *
  * Var sightings feed the column-ref rule for the enclosing nav scope;
  * RPRNavExpr sightings inside PHASE_NAV_ARG feed the nesting decision.
- * See the comment block above DefinePhase for the overall design and
- * how each subtree is walked exactly once.
+ * The phases themselves are described where DefinePhase is declared.
  */
 static bool
 define_walker(Node *node, void *context)
