@@ -1601,6 +1601,35 @@ WINDOW w AS (
      0
 (3 rows)
 
+-- Two operator tokens where the first is not "?" reach the Op Op arm.  It
+-- reports the pair rather than one token, so neither half names a quantifier
+-- to suggest.
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *? ?)
+    DEFINE A AS val > 0
+);
+ERROR:  invalid quantifier combination: "*??"
+LINE 6:     PATTERN (A *? ?)
+                       ^
+HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+-- The trailing "|" belongs to the alternation, not to the quantifier, so it
+-- is dropped from the report the same way the single-token arms drop it.
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? ?|B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+ERROR:  invalid quantifier combination: "???"
+LINE 6:     PATTERN (A ?? ?|B)
+                       ^
+HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
 DROP TABLE rpr_reluctant;
 -- Quantifier boundary conditions
 CREATE TABLE rpr_bounds (id INT);
@@ -3898,8 +3927,8 @@ LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* *?|B) DEFI...
                                                              ^
 HINT:  Did you mean "*?" for reluctant quantifier?
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFINE A AS val > 0, B AS val <= 0);
-ERROR:  invalid quantifier combination
-LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DE...
+ERROR:  invalid token "*?" after "?" quantifier
+LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFI...
                                                              ^
 HINT:  Did you mean "??" for reluctant quantifier?
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2}*?|B) DEFINE A AS val > 0, B AS val <= 0);
@@ -3971,8 +4000,8 @@ LINE 1: ...S BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A* ?+) DEFINE...
                                                              ^
 HINT:  Did you mean "*?" for reluctant quantifier?
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE A AS TRUE);
-ERROR:  invalid quantifier combination
-LINE 1: ...OWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFI...
+ERROR:  invalid token "??" after "?" quantifier
+LINE 1: ...S BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE...
                                                              ^
 HINT:  Did you mean "??" for reluctant quantifier?
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A {1,2}??) DEFINE A AS TRUE);

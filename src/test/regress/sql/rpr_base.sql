@@ -1161,6 +1161,29 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
+-- Two operator tokens where the first is not "?" reach the Op Op arm.  It
+-- reports the pair rather than one token, so neither half names a quantifier
+-- to suggest.
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *? ?)
+    DEFINE A AS val > 0
+);
+
+-- The trailing "|" belongs to the alternation, not to the quantifier, so it
+-- is dropped from the report the same way the single-token arms drop it.
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? ?|B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+
 DROP TABLE rpr_reluctant;
 
 -- Quantifier boundary conditions
