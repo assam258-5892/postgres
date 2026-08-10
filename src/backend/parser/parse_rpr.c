@@ -379,9 +379,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 
 			foreach_node(TargetEntry, tle, *targetlist)
 			{
-				if (IsA(tle->expr, Var) &&
-					((Var *) tle->expr)->varno == var->varno &&
-					((Var *) tle->expr)->varattno == var->varattno)
+				if (equal(tle->expr, var))
 				{
 					found = true;
 					break;
@@ -392,7 +390,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 				TargetEntry *newtle;
 
 				newtle = makeTargetEntry((Expr *) copyObject(var),
-										 list_length(*targetlist) + 1,
+										 (AttrNumber) pstate->p_next_resno++,
 										 NULL,
 										 true);
 				*targetlist = lappend(*targetlist, newtle);
