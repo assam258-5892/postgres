@@ -42,24 +42,24 @@ SET client_min_messages = WARNING;
 -- Keyword Usage Tests
 -- ============================================================
 -- RPR keywords as column names
--- Keywords: define, initial, past, pattern, seek
+-- Keywords: define, initial, past, pattern, permute, seek
 CREATE TABLE rpr_keywords (
     id INT,
     define INT,      -- DEFINE keyword
     initial INT,     -- INITIAL keyword
     past INT,        -- PAST keyword
     pattern INT,     -- PATTERN keyword
+    permute INT,     -- PERMUTE keyword
     seek INT,        -- SEEK keyword
--- ERROR: SEEK is not supported
     skip INT         -- SKIP keyword (pre-existing)
 );
-INSERT INTO rpr_keywords VALUES (1, 10, 20, 30, 40, 50, 60);
-SELECT id, define, initial, past, pattern, seek, skip
+INSERT INTO rpr_keywords VALUES (1, 10, 20, 30, 40, 45, 50, 60);
+SELECT id, define, initial, past, pattern, permute, seek, skip
 FROM rpr_keywords
 ORDER BY id;
- id | define | initial | past | pattern | seek | skip 
-----+--------+---------+------+---------+------+------
-  1 |     10 |      20 |   30 |      40 |   50 |   60
+ id | define | initial | past | pattern | permute | seek | skip 
+----+--------+---------+------+---------+---------+------+------
+  1 |     10 |      20 |   30 |      40 |      45 |   50 |   60
 (1 row)
 
 DROP TABLE rpr_keywords;
@@ -2921,6 +2921,152 @@ LINE 6:     SEEK
             ^
 HINT:  Use INITIAL instead.
 DROP TABLE rpr_seek;
+-- PERMUTE
+CREATE TABLE rpr_permute (id INT, val INT);
+INSERT INTO rpr_permute VALUES (1, 10);
+-- PERMUTE syntax is recognized, but the feature is not supported
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (PERMUTE(A))
+    DEFINE A AS val > 0
+);
+ERROR:  PERMUTE is not supported
+LINE 6:     PATTERN (PERMUTE(A))
+                     ^
+HINT:  Write the alternations out instead, or write "permute" to use it as a pattern variable.
+-- rejected the same way for a list, and for sub-patterns of any shape
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (PERMUTE(A+ B, C | D))
+    DEFINE A AS val > 0, B AS val > 1, C AS val > 2, D AS val > 3
+);
+ERROR:  PERMUTE is not supported
+LINE 6:     PATTERN (PERMUTE(A+ B, C | D))
+                     ^
+HINT:  Write the alternations out instead, or write "permute" to use it as a pattern variable.
+-- PERMUTE stays unreserved, so it is still usable as a pattern variable
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (PERMUTE A)
+    DEFINE PERMUTE AS val > 5, A AS val > 0
+);
+ count 
+-------
+     0
+(1 row)
+
+-- Except immediately before a group: PERMUTE shifts on "(" whether or not a
+-- comma follows, so such a variable lands on the not-supported error, and for
+-- that user the alternations advice is beside the point.  The hint has to name
+-- the way out too.
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (PERMUTE (A | B))
+    DEFINE PERMUTE AS val > 5, A AS val > 0, B AS val > 9
+);
+ERROR:  PERMUTE is not supported
+LINE 6:     PATTERN (PERMUTE (A | B))
+                     ^
+HINT:  Write the alternations out instead, or write "permute" to use it as a pattern variable.
+-- quoted, the same query runs
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ("permute" (A | B))
+    DEFINE PERMUTE AS val > 5, A AS val > 0, B AS val > 9
+);
+ count 
+-------
+     0
+(1 row)
+
+-- Deparse must quote such a variable, or a view holding one would reparse as
+-- the PERMUTE syntax; other variables stay unquoted
+CREATE VIEW rpr_permute_v AS
+  SELECT COUNT(*) OVER w AS cnt FROM rpr_permute
+  WINDOW w AS (
+      ORDER BY id
+      ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+      PATTERN ("permute" (A))
+      DEFINE PERMUTE AS val > 5, A AS val > 0
+  );
+SELECT pg_get_viewdef('rpr_permute_v'::regclass);
+                                pg_get_viewdef                                
+------------------------------------------------------------------------------
+  SELECT count(*) OVER w AS cnt                                              +
+    FROM rpr_permute                                                         +
+   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING +
+   AFTER MATCH SKIP PAST LAST ROW                                            +
+   INITIAL                                                                   +
+   PATTERN ("permute" (a))                                                   +
+   DEFINE                                                                    +
+   permute AS (val > 5),                                                     +
+   a AS (val > 0) );
+(1 row)
+
+-- Quoted even where no group follows: the deparser quotes the name wherever
+-- it appears rather than looking ahead for the "(" that would make it
+-- ambiguous
+CREATE VIEW rpr_permute_v2 AS
+  SELECT COUNT(*) OVER w AS cnt FROM rpr_permute
+  WINDOW w AS (
+      ORDER BY id
+      ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+      PATTERN (PERMUTE A)
+      DEFINE PERMUTE AS val > 5, A AS val > 0
+  );
+SELECT pg_get_viewdef('rpr_permute_v2'::regclass);
+                                pg_get_viewdef                                
+------------------------------------------------------------------------------
+  SELECT count(*) OVER w AS cnt                                              +
+    FROM rpr_permute                                                         +
+   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING +
+   AFTER MATCH SKIP PAST LAST ROW                                            +
+   INITIAL                                                                   +
+   PATTERN ("permute" a)                                                     +
+   DEFINE                                                                    +
+   permute AS (val > 5),                                                     +
+   a AS (val > 0) );
+(1 row)
+
+-- EXPLAIN deparses the compiled pattern with a printer of its own, so it has
+-- to quote the same names ruleutils does.  The alternation keeps the group
+-- from being flattened away, which is what puts a "(" after the variable.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ("permute" (A | B))
+    DEFINE PERMUTE AS val > 5, A AS val > 0, B AS val > 9
+);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: "permute" (a | b)
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_permute
+(6 rows)
+
+DROP VIEW rpr_permute_v, rpr_permute_v2;
+DROP TABLE rpr_permute;
 -- ============================================================
 -- Serialization/Deserialization Tests
 -- ============================================================
@@ -3451,6 +3597,33 @@ SELECT pg_get_viewdef('rpr_serial_quoted'::regclass);
    DEFINE                                                                    +
    "Start" AS true,                                                          +
    "Up" AS (val > PREV(val)) );
+(1 row)
+
+-- Quoting the deparser adds on its own: permute is unreserved, so the stored
+-- rule holds a plain name and only the deparser knows it has to come back
+-- quoted.  Restoring this view is what proves it does.
+CREATE VIEW rpr_serial_permute AS
+SELECT id, val, count(*) OVER w
+FROM rpr_serial
+WINDOW w AS (ORDER BY id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN ("permute" (A | B))
+             DEFINE PERMUTE AS val > 0, A AS val > 10, B AS val > 20);
+SELECT pg_get_viewdef('rpr_serial_permute'::regclass);
+                                pg_get_viewdef                                
+------------------------------------------------------------------------------
+  SELECT id,                                                                 +
+     val,                                                                    +
+     count(*) OVER w AS count                                                +
+    FROM rpr_serial                                                          +
+   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING +
+   AFTER MATCH SKIP PAST LAST ROW                                            +
+   INITIAL                                                                   +
+   PATTERN ("permute" (a | b))                                               +
+   DEFINE                                                                    +
+   permute AS (val > 0),                                                     +
+   a AS (val > 10),                                                          +
+   b AS (val > 20) );
 (1 row)
 
 -- Inline OVER round-trip: inline window spec (no WINDOW alias) deparses inside OVER (...)

@@ -91,6 +91,10 @@ Example:
 
 This pattern matches "a span where prices rise consecutively then drop."
 
+PERMUTE is not supported (the parser raises an error).  Its syntax is in the
+grammar so that the standard spelling is diagnosed rather than read as a
+pattern variable followed by a group; write the alternations out instead.
+
 Chapter II  Overall Processing Pipeline
 ============================================================================
 
