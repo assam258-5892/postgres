@@ -1161,6 +1161,61 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
+-- Two operator tokens where the first is not "?": the offending one is the
+-- second, so that is what gets named and what the cursor points at
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *? ?)
+    DEFINE A AS val > 0
+);
+
+-- The first token is quoted as typed: stripping its "|" would name "*", and
+-- "A* ?" is accepted, so the error would describe a pair the grammar takes
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *| ?)
+    DEFINE A AS val > 0
+);
+
+-- A first token that is no quantifier at all is itself the offending one, so it
+-- is reported the same way as when it stands alone
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?+ ?)
+    DEFINE A AS val > 0
+);
+
+-- The two tokens are reported separately, so the report cannot glue them into
+-- a spelling that was never typed
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? || B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+
+-- The trailing "|" belongs to the alternation, not to the quantifier, so the
+-- report drops it
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? ?|B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+
 DROP TABLE rpr_reluctant;
 
 -- Quantifier boundary conditions
@@ -2629,6 +2684,8 @@ ORDER BY id;
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A&B) DEFINE A AS val > 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|) DEFINE A AS val > 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*| |B) DEFINE A AS val > 0, B AS val <= 0);
+-- the dangling operator is blamed on the element it hangs off, not on the first
+SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A B*|) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*||B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A||B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B|) DEFINE A AS val > 0, B AS val <= 0);
