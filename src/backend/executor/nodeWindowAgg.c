@@ -2822,10 +2822,6 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 													&TTSOpsMinimalTuple);
 		winstate->nav_slot_pos = -1;
 
-		winstate->nav_null_slot = ExecInitExtraTupleSlot(estate, scanDesc,
-														 &TTSOpsMinimalTuple);
-		winstate->nav_null_slot = ExecStoreAllNullTuple(winstate->nav_null_slot);
-
 		winstate->nav_saved_outertuple = NULL;
 		winstate->nav_match_start = 0;
 	}
@@ -3111,7 +3107,7 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
  * ExecRPRNavGetSlot
  *
  * Fetch tuple at given position for RPR navigation opcodes.
- * Returns nav_slot with the tuple loaded, or nav_null_slot if out of range.
+ * Returns nav_slot with the tuple loaded, or NULL if out of range.
  */
 TupleTableSlot *
 ExecRPRNavGetSlot(WindowAggState *winstate, int64 pos)
@@ -3120,7 +3116,7 @@ ExecRPRNavGetSlot(WindowAggState *winstate, int64 pos)
 	TupleTableSlot *slot = winstate->nav_slot;
 
 	if (pos < 0)
-		return winstate->nav_null_slot;
+		return NULL;
 
 	/*
 	 * If nav_slot already holds this position, return it without re-fetching.
@@ -3135,7 +3131,7 @@ ExecRPRNavGetSlot(WindowAggState *winstate, int64 pos)
 	if (!window_gettupleslot(winobj, pos, slot))
 	{
 		winstate->nav_slot_pos = -1;
-		return winstate->nav_null_slot;
+		return NULL;
 	}
 
 	winstate->nav_slot_pos = pos;
