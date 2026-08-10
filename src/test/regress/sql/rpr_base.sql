@@ -3404,7 +3404,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | (B | C))+?) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
 -- Reluctant optimization bypass: absorption flags
--- A+? with SKIP PAST LAST ROW - no absorption markers (greedy A+ gets a+")
+-- A+? with SKIP PAST LAST ROW - no absorption markers (greedy A+ gets a+#)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3477,34 +3477,34 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -- Absorption Flag Display Tests
 -- ============================================================
 -- Tests absorption marker display in EXPLAIN output
--- Markers: ' = branch element, " = comparison point
+-- Markers: ~ = branch element, # = comparison point
 -- Files: explain.c (append_rpr_quantifier, deparse_rpr_pattern)
 
--- Simple VAR: A+ -> a+" (comparison point)
+-- Simple VAR: A+ -> a+# (comparison point)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+) DEFINE A AS val > 0);
 
--- GROUP unbounded: (A B)+ -> (a' b')+" (branch + comparison)
+-- GROUP unbounded: (A B)+ -> (a~ b~)+# (branch + comparison)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- ALT both absorbable: A+ | B+ -> (a+" | b+")
+-- ALT both absorbable: A+ | B+ -> (a+# | b+#)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+ | B+) DEFINE A AS val <= 50, B AS val > 50);
 
--- ALT one absorbable: A+ | B -> (a+" | b)
+-- ALT one absorbable: A+ | B -> (a+# | b)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+ | B) DEFINE A AS val <= 50, B AS val > 50);
 
--- Sequence with absorbable start: A+ B -> a+" b
+-- Sequence with absorbable start: A+ B -> a+# b
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3517,28 +3517,28 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A+ B) | C) D | A B C)
              DEFINE A AS val <= 30, B AS val <= 60, C AS val <= 80, D AS val > 80);
 
--- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b' c')+" (d e)+)
+-- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b~ c~)+# (d e)+)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A | (B C)+ (D E)+)
              DEFINE A AS val <= 20, B AS val <= 40, C AS val <= 60, D AS val <= 80, E AS val > 80);
 
--- Nested unbounded: (A+ | B)+ -> (a+" | b)+ (first iteration absorbable)
+-- Nested unbounded: (A+ | B)+ -> (a+# | b)+ (first iteration absorbable)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A+ | B)+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- ALT inside unbounded GROUP: (A+ B | A B)* -> (a+" b | a b)* (first iteration absorbable)
+-- ALT inside unbounded GROUP: (A+ B | A B)* -> (a+# b | a b)* (first iteration absorbable)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A+ B | A B)*)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Fixed-length group absorbable: (A{2} B{3})+ -> (a{2}' b{3}'){2,}"
+-- Fixed-length group absorbable: (A{2} B{3})+ -> (a{2}~ b{3}~)+#
 -- All children have min == max, equivalent to unrolling to {1,1}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
