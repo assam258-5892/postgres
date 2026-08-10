@@ -731,9 +731,10 @@ variables are consumed.
 
 VI-4. Per-Context Invalidation (match_start_dependent variables)
 
-DEFINE variables that depend on match_start (those containing FIRST,
-LAST-with-offset, or compound PREV_FIRST/NEXT_FIRST/PREV_LAST/NEXT_LAST)
-are identified at plan time via defineMatchStartDependent.  For the head
+DEFINE variables that depend on match_start -- those containing FIRST or a
+compound PREV_FIRST/NEXT_FIRST, or a LAST that carries an offset of its own,
+whether plain or inside a compound PREV_LAST/NEXT_LAST -- are identified at
+plan time via defineMatchStartDependent.  For the head
 context, advance_reduced_frame_nfa sets nav_match_start to its
 matchStartRow before matching, so lazy evaluation uses the correct
 FIRST/LAST base position.
@@ -770,15 +771,16 @@ VI-5. Tuplestore Mark and Trim (nodeWindowAgg.c)
 
 Navigation functions require access to past rows via the tuplestore.
 To allow tuplestore_trim() to free rows that are no longer reachable,
-the planner computes two offsets (see compute_define_metadata):
+the executor computes two offsets at init (see build_define_offsets):
 
   navMaxOffset (Nav Mark Lookback):
     Maximum backward reach from currentpos.  Contributed by PREV,
-    LAST-with-offset, and compound PREV_LAST/NEXT_LAST.
+    LAST (any offset, including the default 0), and compound
+    PREV_LAST/NEXT_LAST.
     Mark position: currentpos - navMaxOffset.
 
   navFirstOffset (Nav Mark Lookahead):
-    Minimum forward offset from match_start.  Contributed by FIRST
+    Minimum forward reach from match_start.  Contributed by FIRST
     and compound PREV_FIRST/NEXT_FIRST.  Can be negative when
     compound PREV_FIRST looks before match_start.
     Mark position: oldest_context->matchStartRow + navFirstOffset.
@@ -786,10 +788,18 @@ the planner computes two offsets (see compute_define_metadata):
 The actual mark is set to: min(lookback_mark, lookahead_mark).
 This ensures all rows reachable by any navigation function are retained.
 
-When offsets contain non-constant expressions (Param), the planner sets
-navMaxOffsetKind/navFirstOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL and the
-executor evaluates them at init time.  On overflow, the kind is set to
-RPR_NAV_OFFSET_RETAIN_ALL, disabling trim for that dimension.
+When offsets contain non-constant expressions (Param), the executor sets
+navMaxOffsetKind/navFirstOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL.  A constant
+offset is resolved at init, as is a bind parameter the planner folded to a
+Const for a custom plan; under a generic plan that parameter stays a Param and
+resolves per scan, as a PARAM_EXEC offset does.  Either way every navigation is
+settled again per scan by resolve_nav_offsets(), which is where a null or
+negative offset is rejected.  On overflow, the kind is set to
+RPR_NAV_OFFSET_RETAIN_ALL, disabling trim for that dimension.  An offset that
+resolves negative is rejected at execution, so that navigation can never run and
+is left out of both reaches; it behaves exactly as if it were not in the DEFINE.
+Each dimension is reported only when some navigation feeds it (hasMaxNav,
+hasFirstNav), so an empty one prints nothing rather than a reach of zero.
 
 VI-6. ExecRPRProcessRow(): 3-Phase Processing
 
@@ -1661,7 +1671,6 @@ Appendix A. Key Function Index
   ExecRPRFinalizeAllContexts    execRPR.c             Partition-end finalize
   ExecRPRRecordContextSuccess   execRPR.c             Stats: match success
   ExecRPRRecordContextFailure   execRPR.c             Stats: match failure
-  compute_define_metadata       createplan.c          Trim offset computation
 
 Appendix B. Data Structure Relationship Diagram
 ============================================================================
