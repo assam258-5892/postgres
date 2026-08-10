@@ -7153,6 +7153,28 @@ append_pattern_quantifier(StringInfo buf, RPRPatternNode *node)
 }
 
 /*
+ * quote_pattern_variable
+ *		Like quote_identifier(), but also quotes PERMUTE.
+ *
+ * PERMUTE is unreserved, so quote_identifier() leaves it bare, but a bare
+ * permute followed by '(' in a PATTERN would be re-read as the unsupported
+ * PERMUTE syntax.
+ *
+ * EXPLAIN deparses the compiled pattern with its own printer, so it calls
+ * this too; both spellings of a pattern must agree.
+ */
+const char *
+quote_pattern_variable(const char *varName)
+{
+	const char *result = quote_identifier(varName);
+
+	if (result == varName && strcmp(varName, "permute") == 0)
+		result = psprintf("\"%s\"", varName);
+
+	return result;
+}
+
+/*
  * Recursive helper to display RPRPatternNode tree
  */
 static void
@@ -7166,7 +7188,7 @@ get_rule_pattern_node(RPRPatternNode *node, deparse_context *context)
 	switch (node->nodeType)
 	{
 		case RPR_PATTERN_VAR:
-			appendStringInfoString(buf, quote_identifier(node->varName));
+			appendStringInfoString(buf, quote_pattern_variable(node->varName));
 			append_pattern_quantifier(buf, node);
 			break;
 
@@ -7236,6 +7258,12 @@ get_rule_define(List *defineClause, deparse_context *context)
 	 * schema-qualified to survive a reparse; see generate_function_name().
 	 */
 	context->inRPRDefine = true;
+
+	/*
+	 * A name here is always followed by AS and so cannot start a PERMUTE
+	 * construct, which is why plain quote_identifier() is enough: the same
+	 * variable may print bare here and quoted in the PATTERN.
+	 */
 
 	foreach_node(TargetEntry, te, defineClause)
 	{
