@@ -2609,25 +2609,26 @@ set_upper_references(PlannerInfo *root, Plan *plan, int rtoffset)
 	 */
 	if (IsA(plan, WindowAgg))
 	{
+		List	   *new_defineClause = NIL;
 		WindowAgg  *wplan = (WindowAgg *) plan;
 
-		if (wplan->defineClause != NIL)
+		foreach_node(TargetEntry, tle, wplan->defineClause)
 		{
-			foreach(l, wplan->defineClause)
-			{
-				TargetEntry *tle = (TargetEntry *) lfirst(l);
+			TargetEntry *newtle;
 
-				tle = flatCopyTargetEntry(tle);
-				tle->expr = (Expr *)
-					fix_upper_expr(root,
-								   (Node *) tle->expr,
-								   subplan_itlist,
-								   OUTER_VAR,
-								   rtoffset,
-								   NUM_EXEC_QUAL(plan));
-				lfirst(l) = tle;
-			}
+			newtle = flatCopyTargetEntry(tle);
+			newtle->expr = (Expr *)
+				fix_upper_expr(root,
+							   (Node *) tle->expr,
+							   subplan_itlist,
+							   OUTER_VAR,
+							   rtoffset,
+							   NUM_EXEC_QUAL(plan));
+
+			new_defineClause = lappend(new_defineClause, newtle);
 		}
+
+		wplan->defineClause = new_defineClause;
 	}
 
 	pfree(subplan_itlist);
