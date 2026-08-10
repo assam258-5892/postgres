@@ -9,7 +9,7 @@
  *     EXCLUDE, and CURRENT ROW is not accepted as the frame end)
  *   - Validates PATTERN variable count (max RPR_VARID_MAX + 1)
  *   - Transforms DEFINE clause
- *   - Stores the PATTERN parse tree and the SKIP TO/INITIAL flags
+ *   - Stores the PATTERN parse tree and the AFTER MATCH SKIP TO flag
  *
  * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -67,7 +67,6 @@ static bool define_walker(Node *node, void *context);
  *   - Validates frame options (ROWS only, must start at CURRENT ROW, no
  *     EXCLUDE, and CURRENT ROW is not accepted as the frame end)
  *   - Set AFTER MATCH SKIP TO flag
- *   - Set SEEK/INITIAL flag
  *   - Transforms DEFINE clause into TargetEntry list
  *   - Stores PATTERN parse tree for deparsing (optimization happens in planner)
  *
@@ -175,9 +174,6 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 
 	/* Assign AFTER MATCH SKIP TO flag */
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
-
-	/* Assign INITIAL flag */
-	wc->initial = windef->rpCommonSyntax->initial;
 
 	/* Transform DEFINE clause into list of TargetEntry's */
 	wc->defineClause = transformDefineClause(pstate, windef, targetlist);
