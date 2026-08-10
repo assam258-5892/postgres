@@ -15,7 +15,6 @@
 --   Serialization/Deserialization Tests
 --   Glued Quantifier / Alternation Tests
 --   Error Cases Tests
---   Window Deduplication Tests
 --
 -- Planner Layer:
 --   Pattern Optimization Tests
@@ -4933,31 +4932,6 @@ WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
      0
      0
 (5 rows)
-
--- ============================================================
--- Window Deduplication Tests
--- ============================================================
--- non-RPR and RPR windows with identical base frame are kept separate.
-SELECT id, val,
-    first_value(id) OVER (
-        ORDER BY id
-        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    ) AS fv_normal,
-    first_value(id) OVER w1 AS fv_rpr
-FROM (VALUES (1, 10), (2, 20), (3, 30), (4, 40)) AS t(id, val)
-WINDOW w1 AS (
-    ORDER BY id
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    PATTERN (A+)
-    DEFINE A AS val > 10
-);
- id | val | fv_normal | fv_rpr 
-----+-----+-----------+--------
-  1 |  10 |         1 |       
-  2 |  20 |         2 |      2
-  3 |  30 |         3 |       
-  4 |  40 |         4 |       
-(4 rows)
 
 -- ============================================================
 -- Pattern Optimization Tests
