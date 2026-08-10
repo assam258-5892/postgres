@@ -1038,6 +1038,27 @@ SELECT cnt FROM (
 ) s;
 DROP TABLE rpr_over1, rpr_over2;
 
+-- A correlated PARAM_EXEC used only inside DEFINE must reach the WindowAgg's
+-- extParam.  Otherwise chgParam never gets to the HashAgg that DISTINCT plans
+-- above it, and its hash table for the first outer row is re-served.
+-- The SRF must be inlined as a lateral subquery for its argument to become a
+-- PARAM_EXEC; a FunctionScan plan would pass either way.
+CREATE TABLE rpr_hcache_thr (threshold int);
+INSERT INTO rpr_hcache_thr VALUES (10), (200);
+CREATE TABLE rpr_hcache_stock (price int);
+INSERT INTO rpr_hcache_stock SELECT g FROM generate_series(1, 100) g;
+CREATE FUNCTION rpr_hcache_fn(th int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $$
+  SELECT DISTINCT count(*) OVER w FROM rpr_hcache_stock
+  WINDOW w AS (ORDER BY price ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               AFTER MATCH SKIP PAST LAST ROW
+               INITIAL PATTERN (a+) DEFINE a AS price > th) $$;
+-- Result: each threshold gets its own answer set (10 -> {0, 90},
+-- 200 -> {0}); a stale cache would add a spurious 200|90.
+SELECT o.threshold, f FROM rpr_hcache_thr o, LATERAL rpr_hcache_fn(o.threshold) f
+ORDER BY 1, 2;
+DROP FUNCTION rpr_hcache_fn(int);
+DROP TABLE rpr_hcache_thr, rpr_hcache_stock;
+
 -- A DEFINE-only column and a later window's sort key both become junk
 -- targetlist entries, so their resno must come from p_next_resno; sharing one
 -- trips the apply_tlist_labeling assertion during planning.
