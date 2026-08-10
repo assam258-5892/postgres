@@ -738,7 +738,7 @@ static const char *rpr_invalid_quantifier_token(const char *tok);
 				row_pattern row_pattern_alt row_pattern_seq
 				row_pattern_term row_pattern_primary
 				row_pattern_quantifier_opt
-%type <list>	row_pattern_definition_list
+%type <list>	row_pattern_definition_list row_pattern_permute_list
 %type <ival>	opt_row_pattern_skip_to
 %type <boolean>	opt_row_pattern_initial_or_seek
 
@@ -826,7 +826,7 @@ static const char *rpr_invalid_quantifier_token(const char *tok);
 	OVER OVERLAPS OVERLAY OVERRIDING OWNED OWNER
 
 	PARALLEL PARAMETER PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PAST PATH
-	PATTERN_P PERIOD PLACING PLAN PLANS POLICY PORTION
+	PATTERN_P PERIOD PERMUTE PLACING PLAN PLANS POLICY PORTION
 	POSITION PRECEDING PRECISION PRESERVE PREPARE PREPARED PRIMARY
 	PRIOR PRIVILEGES PROCEDURAL PROCEDURE PROCEDURES PROGRAM PROPERTIES PROPERTY PUBLICATION
 
@@ -950,11 +950,14 @@ static const char *rpr_invalid_quantifier_token(const char *tok);
  *
  * Like the UNBOUNDED PRECEDING/FOLLOWING case, NESTED is assigned a lower
  * precedence than PATH to fix ambiguity in the json_table production.
+ *
+ * PERMUTE gets the same treatment as CUBE and ROLLUP, so that PERMUTE '('
+ * shifts rather than reducing PERMUTE to a pattern variable.
  */
 %nonassoc	UNBOUNDED NESTED /* ideally would have same precedence as IDENT */
 %nonassoc	IDENT PARTITION RANGE ROWS GROUPS PRECEDING FOLLOWING CUBE ROLLUP
 			SET KEYS OBJECT_P SCALAR TO USING VALUE_P WITH WITHOUT PATH
-			AFTER INITIAL_P SEEK PATTERN_P
+			AFTER INITIAL_P SEEK PATTERN_P PERMUTE
 %left		Op OPERATOR RIGHT_ARROW '|'	/* multi-character ops and user-defined operators */
 %left		'+' '-'
 %left		'*' '/' '%'
@@ -17815,6 +17818,21 @@ row_pattern_primary:
 					n->location = @1;
 					$$ = (Node *) n;
 				}
+			| PERMUTE '(' row_pattern_permute_list ')'
+				{
+					ereport(ERROR,
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("PERMUTE is not supported"),
+							errhint("Write the alternations out instead, or write \"permute\" to use it as a pattern variable."),
+							parser_errposition(@1));
+					$$ = NULL;		/* keep compiler quiet */
+				}
+		;
+
+row_pattern_permute_list:
+			row_pattern							{ $$ = list_make1($1); }
+			| row_pattern_permute_list ',' row_pattern
+				{ $$ = lappend($1, $3); }
 		;
 
 row_pattern_quantifier_opt:
@@ -19572,6 +19590,7 @@ unreserved_keyword:
 			| PATH
 			| PATTERN_P
 			| PERIOD
+			| PERMUTE
 			| PLAN
 			| PLANS
 			| POLICY
@@ -20221,6 +20240,7 @@ bare_label_keyword:
 			| PATH
 			| PATTERN_P
 			| PERIOD
+			| PERMUTE
 			| PLACING
 			| PLAN
 			| PLANS

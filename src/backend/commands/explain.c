@@ -3035,7 +3035,7 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 	{
 		Assert(elem->varId < pattern->numVars);
 		appendStringInfoString(buf,
-							   quote_identifier(pattern->varNames[elem->varId]));
+							   quote_pattern_variable(pattern->varNames[elem->varId]));
 		append_rpr_quantifier(buf, elem);
 		return idx + 1;
 	}
