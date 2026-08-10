@@ -2893,6 +2893,27 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(PREV(v))) > 0
 );
 
+-- Sibling navigations: prohibited, but they are not a deeper nesting,
+-- so the inner navigation must be reported as not being the direct
+-- argument rather than as a third level.
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v) + LAST(v)) > 0
+);
+
+-- Three navigations, but the inner one is again not the whole argument, so
+-- that is what gets reported and the depth is not reached
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(PREV(v)) + 1) > 0
+);
+
 -- A navigation offset must be a run-time constant, not a navigation operation
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
