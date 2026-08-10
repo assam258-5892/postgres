@@ -7246,10 +7246,9 @@ static void
 get_rule_define(List *defineClause, deparse_context *context)
 {
 	StringInfo	buf = context->buf;
-	const char *sep;
+	const char *sep = "  ";
 	bool		save_inrprdefine = context->inRPRDefine;
-
-	sep = "  ";
+	bool		save_varprefix = context->varprefix;
 
 	/*
 	 * Within the DEFINE clause an unqualified prev/next/first/last is a
@@ -7258,6 +7257,12 @@ get_rule_define(List *defineClause, deparse_context *context)
 	 */
 	context->inRPRDefine = true;
 
+	/*
+	 * DEFINE clause referenced columns cannot be table/schema-qualified: the
+	 * qualifier slot is for pattern variables, so print bare column names.
+	 */
+	context->varprefix = false;
+
 	foreach_node(TargetEntry, te, defineClause)
 	{
 		appendStringInfo(buf, "%s%s AS ", sep, quote_identifier(te->resname));
@@ -7265,6 +7270,7 @@ get_rule_define(List *defineClause, deparse_context *context)
 		sep = ",\n  ";
 	}
 
+	context->varprefix = save_varprefix;
 	context->inRPRDefine = save_inrprdefine;
 }
 
@@ -7356,49 +7362,27 @@ get_rule_windowspec(WindowClause *wc, List *targetList,
 		get_window_frame_options(wc->frameOptions,
 								 wc->startOffset, wc->endOffset,
 								 context);
-		needspace = true;
 	}
 
-	/* RPR */
-	if (wc->rpSkipTo == ST_NEXT_ROW)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf,
-							   "\n  AFTER MATCH SKIP TO NEXT ROW ");
-		needspace = true;
-	}
-	else if (wc->rpSkipTo == ST_PAST_LAST_ROW)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf,
-							   "\n  AFTER MATCH SKIP PAST LAST ROW ");
-		needspace = true;
-	}
-	if (wc->initial)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf, "\n  INITIAL");
-		needspace = true;
-	}
+	/* RPR clauses start their own line, so no separator space is wanted */
 	if (wc->rpPattern)
 	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
-		appendStringInfoString(buf, "\n  PATTERN ");
-		get_rule_pattern(wc->rpPattern, context);
-		needspace = true;
-	}
+		if (wc->rpSkipTo == ST_NEXT_ROW)
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP TO NEXT ROW");
+		else
+		{
+			Assert(wc->rpSkipTo == ST_PAST_LAST_ROW);
 
-	if (wc->defineClause)
-	{
-		if (needspace)
-			appendStringInfoChar(buf, ' ');
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP PAST LAST ROW");
+		}
+
+		appendStringInfoString(buf, "\n  INITIAL\n  PATTERN ");
+		get_rule_pattern(wc->rpPattern, context);
+
 		appendStringInfoString(buf, "\n  DEFINE\n");
 		get_rule_define(wc->defineClause, context);
-		appendStringInfoChar(buf, ' ');
 	}
 
 	appendStringInfoChar(buf, ')');
