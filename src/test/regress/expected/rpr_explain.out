@@ -690,6 +690,109 @@ WINDOW w AS (
    ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
 (9 rows)
 
+-- Folding a copy that sits between two GROUPs leaves those GROUPs
+-- adjacent, which nothing had put side by side before, so the GROUP
+-- merge runs once more to collect them.  The copy reaches the fold as
+-- a suffix of the GROUP before it.
+-- (A B)+ A B (A B)+ A B -> (A B){4,}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B)+ A B (A B)+ A B)
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=40.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a' b'){4,}"
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 4 peak, 58 total, 0 merged
+   NFA Contexts: 3 peak, 41 total, 3 pruned
+   NFA: 1 matched (len 40/40/40.0), 0 mismatched
+   NFA: 19 absorbed (len 2/2/2.0), 17 skipped (len 1/1/1.0)
+   ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
+(9 rows)
+
+-- A leading copy reaches the fold as a prefix instead
+-- A B (A B)+ A B (A B)+ -> (A B){4,}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A B (A B)+ A B (A B)+)
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=40.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a' b'){4,}"
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 4 peak, 58 total, 0 merged
+   NFA Contexts: 3 peak, 41 total, 3 pruned
+   NFA: 1 matched (len 40/40/40.0), 0 mismatched
+   NFA: 19 absorbed (len 2/2/2.0), 17 skipped (len 1/1/1.0)
+   ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
+(9 rows)
+
+-- The same with bounded quantifiers
+-- (A B){2} A B (A B){2} -> (A B){5}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B){2} A B (A B){2})
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=40.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a b){5}
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 6 peak, 41 total, 0 merged
+   NFA Contexts: 6 peak, 41 total, 16 pruned
+   NFA: 4 matched (len 10/10/10.0), 0 mismatched
+   NFA: 0 absorbed, 20 skipped (len 1/8/4.2)
+   ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
+(9 rows)
+
+-- Three GROUPs and two copies between them
+-- (A B)+ A B (A B)+ A B (A B)+ -> (A B){5,}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B)+ A B (A B)+ A B (A B)+)
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+                          rpr_explain_filter                          
+----------------------------------------------------------------------
+ WindowAgg (actual rows=40.00 loops=1)
+   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a' b'){5,}"
+   Storage: Memory  Maximum Storage: NkB
+   NFA States: 4 peak, 57 total, 0 merged
+   NFA Contexts: 3 peak, 41 total, 4 pruned
+   NFA: 1 matched (len 40/40/40.0), 0 mismatched
+   NFA: 19 absorbed (len 2/2/2.0), 16 skipped (len 1/1/1.0)
+   ->  Function Scan on generate_series s (actual rows=40.00 loops=1)
+(9 rows)
+
 -- High state count - alternation with plus quantifier
 CREATE VIEW rpr_ev_state_alt_plus AS
 SELECT count(*) OVER w
