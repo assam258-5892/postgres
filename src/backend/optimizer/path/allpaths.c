@@ -4945,6 +4945,11 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 			{
 				if (wc->defineClause != NIL)
 				{
+					/*
+					 * flags == 0 is safe: DEFINE rejects aggregates, window
+					 * functions and subqueries at parse time, and this runs
+					 * before any PlaceHolderVar could be planted.
+					 */
 					List	   *vars = pull_var_clause((Node *) wc->defineClause, 0);
 
 					foreach_node(Var, dvar, vars)
