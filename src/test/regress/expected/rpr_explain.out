@@ -122,9 +122,9 @@ WINDOW w AS (
     DEFINE A AS cat = 'A', B AS cat = 'B'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_simple'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a b) 
+      line       
+-----------------
+   PATTERN (a b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -161,9 +161,9 @@ WINDOW w AS (
     DEFINE X AS cat = 'X', Y AS cat = 'Y', Z AS cat = 'Z'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_nomatch'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (x y z) 
+       line        
+-------------------
+   PATTERN (x y z)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -199,9 +199,9 @@ WINDOW w AS (
     DEFINE R AS TRUE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_allrows'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line      
-----------------
-   PATTERN (r) 
+     line      
+---------------
+   PATTERN (r)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -226,7 +226,7 @@ WINDOW w AS (
    ->  Seq Scan on rpr_nfa_test (actual rows=100.00 loops=1)
 (8 rows)
 
--- Regression test: Space before parenthesis in pattern deparse
+-- Space before parenthesis in pattern deparse
 -- Verifies that "A (B | C)" correctly outputs as "a (b | c)" with space
 CREATE VIEW rpr_ev_basic_deparse_space AS
 SELECT count(*) OVER w
@@ -237,9 +237,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_deparse_space'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN (a (b | c)) 
+         line          
+-----------------------
+   PATTERN (a (b | c))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -275,9 +275,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 1, B AS v % 5 = 2, C AS v % 5 = 3, D AS v % 5 = 4, E AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_deparse_seqalt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-               line                
------------------------------------
-   PATTERN (a ((b | c) (d | e))*) 
+               line               
+----------------------------------
+   PATTERN (a ((b | c) (d | e))*)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -301,7 +301,7 @@ WINDOW w AS (
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
 (8 rows)
 
--- Regression test: ALT branch whose tail is a group
+-- ALT branch whose tail is a group
 -- (A | (B C)+ (D E)+) means A | ((B C)+ (D E)+) by precedence, so the two
 -- trailing groups must deparse inside one branch, not as separate branches.
 CREATE VIEW rpr_ev_basic_deparse_alttail AS
@@ -313,9 +313,9 @@ WINDOW w AS (
     DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_deparse_alttail'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line              
---------------------------------
-   PATTERN (a | (b c)+ (d e)+) 
+             line              
+-------------------------------
+   PATTERN (a | (b c)+ (d e)+)
 (1 row)
 
 -- The viewdef above deparses the parse tree; this one deparses the compiled
@@ -342,7 +342,7 @@ WINDOW w AS (
    ->  Function Scan on generate_series s (actual rows=30.00 loops=1)
 (9 rows)
 
--- Regression test: Quoted identifiers in EXPLAIN pattern deparse
+-- Quoted identifiers in EXPLAIN pattern deparse
 -- Mixed case names must be quoted to preserve round-trip safety
 SELECT rpr_explain_filter('
 EXPLAIN (COSTS OFF)
@@ -376,9 +376,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_simple_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line       
------------------
-   PATTERN (a+) 
+      line      
+----------------
+   PATTERN (a+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -416,9 +416,9 @@ WINDOW w AS (
         D AS cat = 'D', E AS cat = 'E'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_alt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-               line               
-----------------------------------
-   PATTERN ((a | b | c) (d | e)) 
+              line               
+---------------------------------
+   PATTERN ((a | b | c) (d | e))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -460,9 +460,9 @@ WINDOW w AS (
         C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_complex'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN (a+ b* c+) 
+         line         
+----------------------
+   PATTERN (a+ b* c+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -502,9 +502,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_group_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN ((a b)+) 
+        line        
+--------------------
+   PATTERN ((a b)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -541,9 +541,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_explosion'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                                     line                                     
-------------------------------------------------------------------------------
-   PATTERN ((a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b)) 
+                                    line                                     
+-----------------------------------------------------------------------------
+   PATTERN ((a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -581,9 +581,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_alt_merge_alt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                 line                 
---------------------------------------
-   PATTERN ((a | b) (a | b) (c | d)) 
+                line                 
+-------------------------------------
+   PATTERN ((a | b) (a | b) (c | d))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -621,9 +621,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_alt_merge_nonalt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line              
---------------------------------
-   PATTERN ((a | b) (a | b) c) 
+             line              
+-------------------------------
+   PATTERN ((a | b) (a | b) c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -660,9 +660,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 0, B AS v % 2 = 1
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_alt_absorb_group'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                 line                  
----------------------------------------
-   PATTERN ((a | b) (a | b)+ (a | b)) 
+                 line                 
+--------------------------------------
+   PATTERN ((a | b) (a | b)+ (a | b))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -699,9 +699,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 1, B AS v % 4 = 2, C AS v % 4 = 3, D AS v % 4 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_alt_plus'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN ((a | b | c)+ d) 
+            line            
+----------------------------
+   PATTERN ((a | b | c)+ d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -739,9 +739,9 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v > 1
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_alt_prune'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a | a b)+) 
+          line          
+------------------------
+   PATTERN ((a | a b)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -777,9 +777,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_nested_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN (((a | b)+)+) 
+          line           
+-------------------------
+   PATTERN (((a | b)+)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -817,9 +817,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 <> 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nested_quant_no_flatten'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN ((a{2,})*) 
+         line         
+----------------------
+   PATTERN ((a{2,})*)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -858,9 +858,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_state_dedup'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN ((a | b){2,4}) 
+           line           
+--------------------------
+   PATTERN ((a | b){2,4})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -900,9 +900,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_unbounded'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -940,9 +940,9 @@ WINDOW w AS (
     DEFINE A AS v > 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_plus'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line       
------------------
-   PATTERN (a+) 
+      line      
+----------------
+   PATTERN (a+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -980,9 +980,9 @@ WINDOW w AS (
     DEFINE A AS v > 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_star'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line       
------------------
-   PATTERN (a*) 
+      line      
+----------------
+   PATTERN (a*)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1019,9 +1019,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_no_absorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN (a{2,4} b) 
+         line         
+----------------------
+   PATTERN (a{2,4} b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1058,9 +1058,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 = 1, B AS v % 10 = 2, C AS v % 10 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_skip'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (a b c) 
+       line        
+-------------------
+   PATTERN (a b c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1097,9 +1097,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_group'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN ((a b)+ c) 
+         line         
+----------------------
+   PATTERN ((a b)+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1138,9 +1138,9 @@ WINDOW w AS (
     DEFINE A AS v % 7 IN (1, 4), B AS v % 7 IN (2, 3, 5, 6), C AS v % 7 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_fixedvar'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a b b)+ c) 
+          line          
+------------------------
+   PATTERN ((a b b)+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1180,9 +1180,9 @@ WINDOW w AS (
            E AS v % 13 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_nested'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line              
---------------------------------
-   PATTERN ((a (b c){2} d)+ e) 
+             line              
+-------------------------------
+   PATTERN ((a (b c){2} d)+ e)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1228,9 +1228,9 @@ WINDOW w AS (
            F AS v % 41 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_deep'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                   line                    
--------------------------------------------
-   PATTERN ((a ((b c c c){2} d){2} e)+ f) 
+                   line                   
+------------------------------------------
+   PATTERN ((a ((b c c c){2} d){2} e)+ f)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1277,9 +1277,9 @@ WINDOW w AS (
            C AS v % 21 IN (3, 5, 8, 10, 13, 15, 18, 20)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_endchain'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line               
----------------------------------
-   PATTERN (((a (b c){2}){2})+) 
+              line              
+--------------------------------
+   PATTERN (((a (b c){2}){2})+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1320,9 +1320,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0 AND v > FIRST(v)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_no_absorb_first'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1363,9 +1363,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS LAST(v) % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_last'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1439,9 +1439,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_group_greedy'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a+ b)+ c) 
+         line          
+-----------------------
+   PATTERN ((a+ b)+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1480,9 +1480,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_no_absorb_reluctant_group'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a+ b)+? c) 
+          line          
+------------------------
+   PATTERN ((a+ b)+? c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1522,9 +1522,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_fixed_greedy'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a+ b){2}) 
+         line          
+-----------------------
+   PATTERN ((a+ b){2})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1560,9 +1560,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_fixed_reluctant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a+ b){2}?) 
+          line          
+------------------------
+   PATTERN ((a+ b){2}?)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1605,9 +1605,9 @@ WINDOW w AS (
     DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags), C AS 'C' = ANY(flags)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_alt_nonabsorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN (a+ b | c) 
+         line         
+----------------------
+   PATTERN (a+ b | c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1658,9 +1658,9 @@ WINDOW w AS (
     DEFINE A AS 'A' = ANY(flags), B AS 'B' = ANY(flags), C AS 'C' = ANY(flags)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_alt_both'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN (a+ c | b+) 
+         line          
+-----------------------
+   PATTERN (a+ c | b+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1710,9 +1710,9 @@ WINDOW w AS (
         D AS cat = 'D', E AS cat = 'E'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_mlen_fixed'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN (a b c d e) 
+         line          
+-----------------------
+   PATTERN (a b c d e)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1751,9 +1751,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_mlen_variable'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1790,9 +1790,9 @@ WINDOW w AS (
     DEFINE A AS v <= 195, B AS v > 195
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_mlen_long'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1831,9 +1831,9 @@ WINDOW w AS (
         B AS v % 20 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_mlen_with_mismatch'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1883,9 +1883,9 @@ WINDOW w AS (
     DEFINE A AS cat = 'A', B AS cat = 'B', C AS cat = 'C'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_mlen_no_mismatch'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (a+ b+ c) 
+        line         
+---------------------
+   PATTERN (a+ b+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1941,9 +1941,9 @@ WINDOW w AS (
     DEFINE A AS cat = 'A', B AS cat = 'B', C AS cat = 'C'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_mlen_long_partial'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (a+ b+ c) 
+        line         
+---------------------
+   PATTERN (a+ b+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -1995,9 +1995,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_json_basic'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (a+ b+) 
+       line        
+-------------------
+   PATTERN (a+ b+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2072,9 +2072,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_json_matchlen'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2153,9 +2153,9 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v = 2, C AS v = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_json_mismatch'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (a b c) 
+       line        
+-------------------
+   PATTERN (a b c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2233,9 +2233,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_json_skip'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                                     line                                     
-------------------------------------------------------------------------------
-   PATTERN ((a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b)) 
+                                    line                                     
+-----------------------------------------------------------------------------
+   PATTERN ((a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b) (a | b))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2316,9 +2316,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_xml_basic'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a b) 
+      line       
+-----------------
+   PATTERN (a b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2395,9 +2395,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0 AND PREV(v) IS NOT NULL, B AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_xml_absorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (a+ b+) 
+       line        
+-------------------
+   PATTERN (a+ b+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2477,9 +2477,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_xml_mismatch'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN ((a | b){2,4}) 
+           line           
+--------------------------
+   PATTERN ((a | b){2,4})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2565,9 +2565,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_part_multi'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2620,9 +2620,9 @@ WINDOW w AS (
     DEFINE A AS val < 5, B AS val >= 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_part_diff'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2671,9 +2671,9 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a b) 
+      line       
+-----------------
+   PATTERN (a b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2710,9 +2710,9 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_min0'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a?){0,3}) 
+         line          
+-----------------------
+   PATTERN ((a?){0,3})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2748,9 +2748,9 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_min1'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a?){1,3}) 
+         line          
+-----------------------
+   PATTERN ((a?){1,3})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2786,9 +2786,9 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_min2'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a?){2,3}) 
+         line          
+-----------------------
+   PATTERN ((a?){2,3})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2824,9 +2824,9 @@ WINDOW w AS (
     DEFINE A AS v <= 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_mixed'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a?){2,3}) 
+         line          
+-----------------------
+   PATTERN ((a?){2,3})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2862,9 +2862,9 @@ WINDOW w AS (
     DEFINE A AS FALSE, B AS FALSE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_empty_match_multi'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN ((a? b?){2,3}) 
+           line           
+--------------------------
+   PATTERN ((a? b?){2,3})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2900,9 +2900,9 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_single_row'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line      
-----------------
-   PATTERN (a) 
+     line      
+---------------
+   PATTERN (a)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2940,9 +2940,9 @@ WINDOW w AS (
         F AS v = 6, G AS v = 7, H AS v = 8, I AS v = 9, J AS v = 10
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_pattern_longer'), E'\n')) AS line WHERE line ~ 'PATTERN';
-               line               
-----------------------------------
-   PATTERN (a b c d e f g h i j) 
+              line               
+---------------------------------
+   PATTERN (a b c d e f g h i j)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -2980,9 +2980,9 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_edge_single_match'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line       
------------------
-   PATTERN (a+) 
+      line      
+----------------
+   PATTERN (a+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3022,9 +3022,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_cpx_nested'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN (((a b) c)+) 
+          line          
+------------------------
+   PATTERN (((a b) c)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3063,9 +3063,9 @@ WINDOW w AS (
         D AS cat = 'D', E AS cat = 'E'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_cpx_multi_alt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-               line               
-----------------------------------
-   PATTERN ((a | b) (c | d | e)) 
+              line               
+---------------------------------
+   PATTERN ((a | b) (c | d | e))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3104,9 +3104,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 1, B AS v % 4 = 2, C AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_cpx_optional'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a b? c) 
+        line        
+--------------------
+   PATTERN (a b? c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3143,9 +3143,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_cpx_bounded'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN (a{2,5} b) 
+         line         
+----------------------
+   PATTERN (a{2,5} b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3182,9 +3182,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 = 1, B AS v % 10 IN (2,3,4,5,6,7,8), C AS v % 10 = 9
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_cpx_star'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a b* c) 
+        line        
+--------------------
+   PATTERN (a b* c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3224,9 +3224,9 @@ WINDOW w AS (
     DEFINE D AS trend = 'D', U AS trend = 'U'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_real_vshape'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (d+ u+) 
+       line        
+-------------------
+   PATTERN (d+ u+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3263,9 +3263,9 @@ WINDOW w AS (
     DEFINE U AS trend = 'U', S AS trend = 'S', D AS trend = 'D'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_real_peak'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN (u+ s* d+) 
+         line         
+----------------------
+   PATTERN (u+ s* d+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3302,9 +3302,9 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v) OR PREV(v) IS NULL
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_real_increasing'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (a{3,}) 
+       line        
+-------------------
+   PATTERN (a{3,})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3345,9 +3345,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_perf_large_simple'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a b) 
+      line       
+-----------------
+   PATTERN (a b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3384,9 +3384,9 @@ WINDOW w AS (
     DEFINE A AS v % 100 <> 0, B AS v % 100 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_perf_large_absorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3423,9 +3423,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_perf_high_merge'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a | b)+ c) 
+          line          
+------------------------
+   PATTERN ((a | b)+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3466,9 +3466,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_initial_with'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3506,9 +3506,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_initial_without'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3548,9 +3548,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 <> 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_quant_plus'), E'\n')) AS line WHERE line ~ 'PATTERN';
-      line       
------------------
-   PATTERN (a+) 
+      line      
+----------------
+   PATTERN (a+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3587,9 +3587,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 IN (1, 2), B AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_quant_star'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a* b) 
+       line       
+------------------
+   PATTERN (a* b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3626,9 +3626,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 1, B AS v % 4 = 2, C AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_quant_question'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a? b c) 
+        line        
+--------------------
+   PATTERN (a? b c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3665,9 +3665,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_quant_exact'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a{3} b) 
+        line        
+--------------------
+   PATTERN (a{3} b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3704,9 +3704,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_quant_range'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN (a{2,4} b) 
+         line         
+----------------------
+   PATTERN (a{2,4} b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3743,9 +3743,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_quant_atleast'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (a{3,} b) 
+        line         
+---------------------
+   PATTERN (a{3,} b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3786,9 +3786,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_reg_state_count'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3825,9 +3825,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 IN (1,2,3,4,5,6,7), B AS v % 10 = 8, C AS v % 10 = 9
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_reg_ctx_absorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a+ b c) 
+        line        
+--------------------
+   PATTERN (a+ b c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3864,9 +3864,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_reg_matchlen'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line        
---------------------
-   PATTERN (a b c) 
+       line        
+-------------------
+   PATTERN (a b c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3906,9 +3906,9 @@ WINDOW w AS (
     DEFINE A AS cat = 'A', B AS cat = 'B', C AS cat = 'C'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_simple'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a | b) c) 
+         line          
+-----------------------
+   PATTERN ((a | b) c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3947,9 +3947,9 @@ WINDOW w AS (
         D AS cat = 'D', E AS cat = 'E'
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_multi_item'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line              
---------------------------------
-   PATTERN ((a | b | c | d) e) 
+             line              
+-------------------------------
+   PATTERN ((a | b | c | d) e)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -3988,9 +3988,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_with_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a | b)+ c) 
+          line          
+------------------------
+   PATTERN ((a | b)+ c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4026,9 +4026,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 0, B AS v % 5 = 1, C AS v % 5 = 2, D AS v % 5 = 3, E AS v % 5 = 4
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_four_plus'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line              
---------------------------------
-   PATTERN (a | b | c | d | e) 
+             line              
+-------------------------------
+   PATTERN (a | b | c | d | e)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4062,9 +4062,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_at_start'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN ((a | b) c d) 
+          line           
+-------------------------
+   PATTERN ((a | b) c d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4099,9 +4099,9 @@ WINDOW w AS (
     DEFINE A AS v % 6 = 0, B AS v % 6 = 1, C AS v % 6 = 2, D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_sequential'), E'\n')) AS line WHERE line ~ 'PATTERN';
-               line               
-----------------------------------
-   PATTERN ((a | b) c (d | e) f) 
+              line               
+---------------------------------
+   PATTERN ((a | b) c (d | e) f)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4135,9 +4135,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_quantified'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN ((a+ | b+) c) 
+          line           
+-------------------------
+   PATTERN ((a+ | b+) c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4172,9 +4172,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_at_end'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN (a b (c | d)) 
+          line           
+-------------------------
+   PATTERN (a b (c | d))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4210,9 +4210,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 0, B AS v % 5 = 1, C AS v % 5 = 2, D AS v % 5 = 3, E AS v % 5 = 4
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_nested_start'), E'\n')) AS line WHERE line ~ 'PATTERN';
-              line              
---------------------------------
-   PATTERN (a ((b | c) d | e)) 
+             line              
+-------------------------------
+   PATTERN (a ((b | c) d | e))
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4247,9 +4247,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_nested_end'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line            
-----------------------------
-   PATTERN (c (a | b) | d) 
+           line            
+---------------------------
+   PATTERN (c (a | b) | d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4284,9 +4284,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_first'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a b)+ | c) 
+          line          
+------------------------
+   PATTERN ((a b)+ | c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4322,9 +4322,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_last'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN (c | (a b)+) 
+          line          
+------------------------
+   PATTERN (c | (a b)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4360,9 +4360,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_mid'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN (c | (a b)+ | d) 
+            line            
+----------------------------
+   PATTERN (c | (a b)+ | d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4398,9 +4398,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_first3'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN ((a b)+ | c | d) 
+            line            
+----------------------------
+   PATTERN ((a b)+ | c | d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4436,9 +4436,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_bounded'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN ((a b){2} | c) 
+           line           
+--------------------------
+   PATTERN ((a b){2} | c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4473,9 +4473,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_both'), E'\n')) AS line WHERE line ~ 'PATTERN';
-             line             
-------------------------------
-   PATTERN ((a b)+ | (c d)+) 
+            line             
+-----------------------------
+   PATTERN ((a b)+ | (c d)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4511,9 +4511,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_seq_head'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN (((a b)+ | c) d) 
+            line            
+----------------------------
+   PATTERN (((a b)+ | c) d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4549,9 +4549,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_seq_tail'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN ((c | (a b)+) d) 
+            line            
+----------------------------
+   PATTERN ((c | (a b)+) d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4587,9 +4587,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-             line             
-------------------------------
-   PATTERN (((a b){2} | c)+) 
+            line             
+-----------------------------
+   PATTERN (((a b){2} | c)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4625,9 +4625,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_unit'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN ((a b) | c) 
+         line          
+-----------------------
+   PATTERN ((a b) | c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4664,9 +4664,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_var_first'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a+ | c) 
+        line        
+--------------------
+   PATTERN (a+ | c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4701,9 +4701,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_last3'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN (c | d | (a b)+) 
+            line            
+----------------------------
+   PATTERN (c | d | (a b)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4739,9 +4739,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 0, B AS v % 5 = 1, D AS v % 5 = 2, E AS v % 5 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_inner_bounded'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line            
-----------------------------
-   PATTERN (d (a | b) | e) 
+           line            
+---------------------------
+   PATTERN (d (a | b) | e)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4776,9 +4776,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_grp_then_seq'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN (c | (a b)+ d) 
+           line           
+--------------------------
+   PATTERN (c | (a b)+ d)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4813,9 +4813,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_lone_alt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line          
------------------------
-   PATTERN ((a | b)+) 
+         line         
+----------------------
+   PATTERN ((a | b)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4851,9 +4851,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_seq_alt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN ((a (b | c))+) 
+           line           
+--------------------------
+   PATTERN ((a (b | c))+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4889,9 +4889,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_alt_seq'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line            
----------------------------
-   PATTERN (((a | b) c)+) 
+           line           
+--------------------------
+   PATTERN (((a | b) c)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4929,9 +4929,9 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_stack3'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                line                
-------------------------------------
-   PATTERN (((a | b) c | d) e | f) 
+               line                
+-----------------------------------
+   PATTERN (((a | b) c | d) e | f)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -4969,9 +4969,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_stack4'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                    line                    
---------------------------------------------
-   PATTERN ((((a | b) c | d) e | f) g | h) 
+                   line                    
+-------------------------------------------
+   PATTERN ((((a | b) c | d) e | f) g | h)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5010,9 +5010,9 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_stack3_grp'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                line                 
--------------------------------------
-   PATTERN (((a | b)+ c | d) e | f) 
+                line                
+------------------------------------
+   PATTERN (((a | b)+ c | d) e | f)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5051,9 +5051,9 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_tail3'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                line                
-------------------------------------
-   PATTERN (a (b (c | d) | e) | f) 
+               line                
+-----------------------------------
+   PATTERN (a (b (c | d) | e) | f)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5091,9 +5091,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_tail4'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                    line                    
---------------------------------------------
-   PATTERN (a (b (c (d | e) | f) | g) | h) 
+                   line                    
+-------------------------------------------
+   PATTERN (a (b (c (d | e) | f) | g) | h)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5132,9 +5132,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_tail_seqbranch'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                     line                     
-----------------------------------------------
-   PATTERN (a (b (c (d | e) | f) | g a) | h) 
+                    line                     
+---------------------------------------------
+   PATTERN (a (b (c (d | e) | f) | g a) | h)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5173,9 +5173,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_alt_mid_seqtail'), E'\n')) AS line WHERE line ~ 'PATTERN';
-                    line                    
---------------------------------------------
-   PATTERN ((a (b (c | d) | e) | f) g | h) 
+                   line                    
+-------------------------------------------
+   PATTERN ((a (b (c | d) | e) | f) g | h)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5215,9 +5215,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_simple'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN ((a b)+) 
+        line        
+--------------------
+   PATTERN ((a b)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5254,9 +5254,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_bounded'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line           
--------------------------
-   PATTERN ((a b){2,4}) 
+          line          
+------------------------
+   PATTERN ((a b){2,4})
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5293,9 +5293,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_nested'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN (((a b){2})+) 
+          line           
+-------------------------
+   PATTERN (((a b){2})+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5331,9 +5331,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 0, B AS v % 2 = 1
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_deep'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN ((((a | b)+)+)+) 
+            line            
+----------------------------
+   PATTERN ((((a | b)+)+)+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5368,9 +5368,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_bounded_alt'), E'\n')) AS line WHERE line ~ 'PATTERN';
-            line             
------------------------------
-   PATTERN ((a | b){2,3} c) 
+            line            
+----------------------------
+   PATTERN ((a | b){2,3} c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5405,9 +5405,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_nested_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN (((a b)+ c)*) 
+          line           
+-------------------------
+   PATTERN (((a b)+ c)*)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5442,9 +5442,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_grp_partial_quant'), E'\n')) AS line WHERE line ~ 'PATTERN';
-           line           
---------------------------
-   PATTERN ((a (b c)+)*) 
+          line           
+-------------------------
+   PATTERN ((a (b c)+)*)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5483,9 +5483,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_wfn_count'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5522,9 +5522,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_wfn_first_value'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5561,9 +5561,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_wfn_last_value'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5603,9 +5603,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_wfn_multi'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5650,9 +5650,9 @@ WINDOW w AS (
         B AS (v % 5 = 0) OR (v % 3 = 0)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_def_complex_bool'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5694,9 +5694,9 @@ WINDOW w AS (
         D AS v < PREV(v)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_def_prev'), E'\n')) AS line WHERE line ~ 'PATTERN';
-         line         
-----------------------
-   PATTERN (s u+ d+) 
+        line         
+---------------------
+   PATTERN (s u+ d+)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5738,11 +5738,11 @@ WINDOW w AS (
         B AS v > PREV(v)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_prev1'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
-          line           
--------------------------
-   PATTERN (a b+) 
+          line          
+------------------------
+   PATTERN (a b+)
    DEFINE
-   b AS (v > PREV(v)) );
+   b AS (v > PREV(v)));
 (3 rows)
 
 -- Using 1-arg NEXT (implicit offset 1)
@@ -5758,11 +5758,11 @@ WINDOW w AS (
         B AS v < NEXT(v)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_next1'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
-          line           
--------------------------
-   PATTERN (a b+) 
+          line          
+------------------------
+   PATTERN (a b+)
    DEFINE
-   b AS (v < NEXT(v)) );
+   b AS (v < NEXT(v)));
 (3 rows)
 
 -- Using 2-arg PREV (explicit offset)
@@ -5778,11 +5778,11 @@ WINDOW w AS (
         B AS v > PREV(v, 2)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_prev2'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
-                 line                 
---------------------------------------
-   PATTERN (a b+) 
+                line                 
+-------------------------------------
+   PATTERN (a b+)
    DEFINE
-   b AS (v > PREV(v, (2)::bigint)) );
+   b AS (v > PREV(v, (2)::bigint)));
 (3 rows)
 
 -- Using 2-arg NEXT (explicit offset)
@@ -5798,11 +5798,11 @@ WINDOW w AS (
         B AS v < NEXT(v, 2)
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_next2'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
-                 line                 
---------------------------------------
-   PATTERN (a b+) 
+                line                 
+-------------------------------------
+   PATTERN (a b+)
    DEFINE
-   b AS (v < NEXT(v, (2)::bigint)) );
+   b AS (v < NEXT(v, (2)::bigint)));
 (3 rows)
 
 -- Using NULL comparisons
@@ -5819,9 +5819,9 @@ WINDOW w AS (
     DEFINE A AS v IS NOT NULL, B AS v IS NULL
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_def_null'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line        
--------------------
-   PATTERN (a+ b) 
+       line       
+------------------
+   PATTERN (a+ b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5864,9 +5864,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 < 7, B AS v % 10 = 7, C AS v % 10 = 8
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_scale_500rows'), E'\n')) AS line WHERE line ~ 'PATTERN';
-        line         
----------------------
-   PATTERN (a+ b c) 
+        line        
+--------------------
+   PATTERN (a+ b c)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5903,9 +5903,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_scale_high_match'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a b) 
+      line       
+-----------------
+   PATTERN (a b)
 (1 row)
 
 SELECT rpr_explain_filter('
@@ -5947,9 +5947,9 @@ WINDOW w AS (
         E AS v % 100 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_scale_high_skip'), E'\n')) AS line WHERE line ~ 'PATTERN';
-          line          
-------------------------
-   PATTERN (a b c d e) 
+         line          
+-----------------------
+   PATTERN (a b c d e)
 (1 row)
 
 SELECT rpr_explain_filter('

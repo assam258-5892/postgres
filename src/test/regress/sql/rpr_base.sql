@@ -2352,6 +2352,62 @@ SELECT id, val,
 FROM rpr_serial;
 SELECT pg_get_viewdef('rpr_serial_inline_over'::regclass);
 
+-- Multi-relation view: a DEFINE column is deparsed with no qualifier, so it
+-- must stay unambiguous across the join for the view to re-parse.  This one
+-- is left in place like the rest of the section, which is what puts an
+-- unqualified DEFINE column through the pg_dump round trip at all.
+CREATE TABLE rpr_serial_j (id INT, qty INT);
+INSERT INTO rpr_serial_j VALUES (1, 5), (2, 7), (3, 9), (4, 11), (5, 13);
+
+CREATE VIEW rpr_serial_join AS
+SELECT s.id, count(*) OVER w AS cnt
+FROM rpr_serial s JOIN rpr_serial_j j ON s.id = j.id
+WINDOW w AS (ORDER BY s.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS val > 0);
+SELECT pg_get_viewdef('rpr_serial_join'::regclass);
+
+-- Ambiguity introduced after the view was created: ALTER TABLE adds a column
+-- whose name already appears in the other side of the join, so the deparser
+-- must qualify or alias it.  sv3 shows the same text is rejected on a fresh
+-- CREATE VIEW; sv4 shows the alias form that survives.  These stay temporary
+-- and are dropped at the end: sv is deliberately unrestorable, so leaving it
+-- in place would hand pg_dump a view that cannot be restored.
+CREATE TEMP TABLE sa (id int, price int);
+CREATE TEMP TABLE sb (id int, qty int);
+INSERT INTO sa VALUES (1,10),(2,20);
+INSERT INTO sb VALUES (1,5),(2,7);
+
+CREATE TEMP VIEW sv AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a JOIN sb b ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+
+ALTER TABLE sb ADD COLUMN price int;
+
+SELECT pg_get_viewdef('sv'::regclass, true);
+
+-- ERROR: the deparsed text above no longer re-parses
+CREATE TEMP VIEW sv3 AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a JOIN sb b ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+
+CREATE TEMP VIEW sv4 AS
+SELECT a.id, count(*) OVER w AS cnt
+FROM sa a (id, price) JOIN sb b (id, qty, price_1) ON a.id = b.id
+WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (UP+) DEFINE UP AS price > 0);
+
+SELECT pg_get_viewdef('sv4'::regclass, true);
+SELECT * FROM sv4;
+SELECT * FROM sv;
+
+DROP VIEW sv4;
+DROP VIEW sv;
+DROP TABLE sa, sb;
+
 -- Materialized view (if supported)
 
 CREATE TABLE rpr_mview (id INT, val INT);
@@ -5370,4 +5426,3 @@ FROM (SELECT id, val,
 ) s;
 
 DROP TABLE rpr_plan;
-RESET client_min_messages;
