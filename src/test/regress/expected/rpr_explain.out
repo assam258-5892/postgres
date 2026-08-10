@@ -3454,48 +3454,10 @@ WINDOW w AS (
 -- ============================================================
 -- INITIAL vs no INITIAL comparison
 -- ============================================================
--- With INITIAL keyword
-CREATE VIEW rpr_ev_initial_with AS
-SELECT count(*) OVER w
-FROM generate_series(1, 50) AS s(v)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP PAST LAST ROW
-    INITIAL
-    PATTERN (A+ B)
-    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
-);
-SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_initial_with'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a+ b)
-(1 row)
-
-SELECT rpr_explain_filter('
-EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
-SELECT count(*) OVER w
-FROM generate_series(1, 50) AS s(v)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP PAST LAST ROW
-    INITIAL
-    PATTERN (A+ B)
-    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
-);');
-                          rpr_explain_filter                          
-----------------------------------------------------------------------
- WindowAgg (actual rows=50.00 loops=1)
-   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+# b
-   Storage: Memory  Maximum Storage: NkB
-   NFA States: 3 peak, 91 total, 0 merged
-   NFA Contexts: 2 peak, 51 total, 0 pruned
-   NFA: 10 matched (len 5/5/5.0), 0 mismatched
-   NFA: 30 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
-   ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(9 rows)
-
--- Without INITIAL keyword (same behavior currently)
+-- INITIAL is the only supported mode (SEEK is unimplemented), so omitting the
+-- keyword changes nothing at run time and deparse adds it back.  Print the
+-- whole viewdef: filtering to the PATTERN line would hide the INITIAL literal,
+-- which is the only thing this test can pin.
 CREATE VIEW rpr_ev_initial_without AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -3505,34 +3467,19 @@ WINDOW w AS (
     PATTERN (A+ B)
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
-SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_initial_without'), E'\n')) AS line WHERE line ~ 'PATTERN';
-       line       
-------------------
-   PATTERN (a+ b)
+SELECT pg_get_viewdef('rpr_ev_initial_without'::regclass);
+                         pg_get_viewdef                          
+-----------------------------------------------------------------
+  SELECT count(*) OVER w AS count                               +
+    FROM generate_series(1, 50) s(v)                            +
+   WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING+
+   AFTER MATCH SKIP PAST LAST ROW                               +
+   INITIAL                                                      +
+   PATTERN (a+ b)                                               +
+   DEFINE                                                       +
+   a AS ((v % 5) <> 0),                                         +
+   b AS ((v % 5) = 0));
 (1 row)
-
-SELECT rpr_explain_filter('
-EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
-SELECT count(*) OVER w
-FROM generate_series(1, 50) AS s(v)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP PAST LAST ROW
-    PATTERN (A+ B)
-    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
-);');
-                          rpr_explain_filter                          
-----------------------------------------------------------------------
- WindowAgg (actual rows=50.00 loops=1)
-   Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+# b
-   Storage: Memory  Maximum Storage: NkB
-   NFA States: 3 peak, 91 total, 0 merged
-   NFA Contexts: 2 peak, 51 total, 0 pruned
-   NFA: 10 matched (len 5/5/5.0), 0 mismatched
-   NFA: 30 absorbed (len 1/1/1.0), 10 skipped (len 1/1/1.0)
-   ->  Function Scan on generate_series s (actual rows=50.00 loops=1)
-(9 rows)
 
 -- ============================================================
 -- Quantifier Variations
