@@ -37,6 +37,7 @@
 
 #include "postgres.h"
 
+#include "common/int.h"
 #include "miscadmin.h"
 #include "optimizer/rpr.h"
 
@@ -46,15 +47,18 @@ static bool rprPatternChildrenEqual(List *a, List *b);
 static int64 rprNodeRowCount(RPRPatternNode *node);
 static int64 rprBodyRowCount(List *children);
 static bool rprBodyHasUniformLength(List *children);
-static List *flattenSeqChildren(List *children);
-static List *mergeConsecutiveVars(List *children);
-static List *mergeConsecutiveGroups(List *children);
-static List *mergeConsecutiveAlts(List *children);
-static List *mergeGroupPrefixSuffix(List *children);
+static bool rprChildrenMatchAt(List *children, int start, List *content);
+static List *rprGroupContent(RPRPatternNode *group);
+static bool rprTryAddIteration(RPRPatternNode *group);
+static pg_nodiscard List *flattenSeqChildren(List *children);
+static pg_nodiscard List *mergeConsecutiveVars(List *children);
+static pg_nodiscard List *mergeConsecutiveGroups(List *children);
+static pg_nodiscard List *mergeConsecutiveAlts(List *children);
+static pg_nodiscard List *mergeGroupPrefixSuffix(List *children);
 static RPRPatternNode *optimizeSeqPattern(RPRPatternNode *pattern);
 
-static List *flattenAltChildren(List *children);
-static List *removeDuplicateAlternatives(List *children);
+static pg_nodiscard List *flattenAltChildren(List *children);
+static pg_nodiscard List *removeDuplicateAlternatives(List *children);
 static RPRPatternNode *optimizeAltPattern(RPRPatternNode *pattern);
 
 static RPRPatternNode *tryMultiplyQuantifiers(RPRPatternNode *pattern);
@@ -234,6 +238,84 @@ rprBodyHasUniformLength(List *children)
 }
 
 /*
+ * rprChildrenMatchAt
+ *		Do the cells of children at [start, start + list_length(content))
+ *		match content element for element?
+ *
+ * Returns false when that range does not lie inside children, so a caller
+ * walking towards either end of the list can just ask.
+ */
+static bool
+rprChildrenMatchAt(List *children, int start, List *content)
+{
+	int			offset = 0;
+
+	if (start < 0 || start + list_length(content) > list_length(children))
+		return false;
+
+	foreach_node(RPRPatternNode, want, content)
+	{
+		RPRPatternNode *have;
+
+		have = list_nth_node(RPRPatternNode, children, start + offset);
+		if (!rprPatternEqual(have, want))
+			return false;
+		offset++;
+	}
+
+	return true;
+}
+
+/*
+ * rprGroupContent
+ *		The elements a GROUP stands for, as they appear in a sequence.
+ *
+ * A GROUP holds a single child, and a multi-element body arrives wrapped in a
+ * SEQ, so unwrap that to compare against elements of the enclosing sequence:
+ * (A B)+ holds the sequence A B.
+ */
+static List *
+rprGroupContent(RPRPatternNode *group)
+{
+	List	   *content = group->children;
+
+	if (list_length(content) == 1)
+	{
+		RPRPatternNode *inner = linitial_node(RPRPatternNode, content);
+
+		if (inner->nodeType == RPR_PATTERN_SEQ)
+			content = inner->children;
+	}
+
+	Assert(list_length(content) > 0);
+	return content;
+}
+
+/*
+ * rprTryAddIteration
+ *		Raise a GROUP's quantifier by one iteration, if that is representable.
+ *
+ * An unbounded max stands for "no limit", not a count, so it is left alone and
+ * nothing can overflow.  A finite bound has to stay below RPR_QUANTITY_INF:
+ * one landing on the marker would read as unbounded.  Returns false without
+ * touching the node when either bound has no room.
+ */
+static bool
+rprTryAddIteration(RPRPatternNode *group)
+{
+	if (group->min >= RPR_QUANTITY_INF - 1)
+		return false;
+	if (group->max != RPR_QUANTITY_INF &&
+		group->max >= RPR_QUANTITY_INF - 1)
+		return false;
+
+	group->min += 1;
+	if (group->max != RPR_QUANTITY_INF)
+		group->max += 1;
+	return true;
+}
+
+/*
  * flattenSeqChildren
  *		Recursively optimize children and flatten nested SEQ.
  *
@@ -241,7 +323,11 @@ rprBodyHasUniformLength(List *children)
  *   SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
  *
  * Returns a new list with optimized children, with nested SEQ children
- * flattened into the parent list.
+ * flattened into the parent list.  The helpers in this file follow two
+ * conventions -- this one and flattenAltChildren() build a new list, since
+ * either can end up longer than what it started with, while the rest compact
+ * the cells they already have -- so a caller must always assign the return
+ * value.
  */
 static List *
 flattenSeqChildren(List *children)
@@ -285,66 +371,73 @@ flattenSeqChildren(List *children)
 static List *
 mergeConsecutiveVars(List *children)
 {
-	List	   *mergedChildren = NIL;
-	RPRPatternNode *prev = NULL;
+	int			writepos = 0;
+	int			readpos = 0;
 
-	foreach_node(RPRPatternNode, child, children)
+	while (readpos < list_length(children))
 	{
-		if (child->nodeType == RPR_PATTERN_VAR && child->reluctant == false)
+		RPRPatternNode *node = list_nth_node(RPRPatternNode, children, readpos);
+		int			runlen = 1;
+
+		if (node->nodeType == RPR_PATTERN_VAR && !node->reluctant)
 		{
-			/* ----------------------
-			 * Can merge consecutive VAR nodes if:
-			 * 1. Same variable name
-			 * 2. No min overflow: prev->min + child->min < INF
-			 * 3. No max overflow: prev->max + child->max < INF (or either is INF)
-			 *
-			 * Strict <: a sum equal to INF would alias the unbounded sentinel
-			 * (min must stay finite; a finite max must not become INF).
-			 */
-			if (prev != NULL &&
-				strcmp(prev->varName, child->varName) == 0 &&
-				prev->min < RPR_QUANTITY_INF - child->min &&
-				(prev->max < RPR_QUANTITY_INF - child->max ||
-				 prev->max == RPR_QUANTITY_INF ||
-				 child->max == RPR_QUANTITY_INF))
+			/* Fold the VARs that follow into node while they fit */
+			while (readpos + runlen < list_length(children))
 			{
+				RPRPatternNode *other;
+				int			newmin;
+				int			newmax;
+
+				other = list_nth_node(RPRPatternNode, children, readpos + runlen);
+
+				if (other->nodeType != RPR_PATTERN_VAR)
+					break;
+
 				/*
-				 * Merge: accumulate min/max into prev. prev is guaranteed to
-				 * be a non-reluctant VAR by the outer condition.
+				 * A greedy quantifier followed by a reluctant one over the
+				 * same variable is not expressible as a single quantifier:
+				 * the pair settles the first quantifier's count before the
+				 * second one decides, which the standard's
+				 * leftmost-choice-first rule (ISO/IEC TR 19075-5 7.2) makes
+				 * observable.  Merging them would change the preferred match,
+				 * so stop here.
 				 */
-				Assert(prev->nodeType == RPR_PATTERN_VAR && prev->reluctant == false);
+				if (other->reluctant)
+					break;
 
-				prev->min += child->min;
+				if (strcmp(node->varName, other->varName) != 0)
+					break;
 
-				if (prev->max == RPR_QUANTITY_INF ||
-					child->max == RPR_QUANTITY_INF)
-					prev->max = RPR_QUANTITY_INF;
-				else
-					prev->max += child->max;
-			}
-			else
-			{
-				/* Flush previous and start new */
-				if (prev != NULL)
-					mergedChildren = lappend(mergedChildren, prev);
-				prev = child;
+				/*
+				 * RPR_QUANTITY_INF means unbounded, not a count: a finite sum
+				 * landing on it is representable, so reject it separately.
+				 */
+				if (node->max == RPR_QUANTITY_INF ||
+					other->max == RPR_QUANTITY_INF)
+					newmax = RPR_QUANTITY_INF;
+				else if (pg_add_s32_overflow(node->max, other->max, &newmax) ||
+						 newmax >= RPR_QUANTITY_INF)
+					break;		/* fallback: leave the pair unmerged */
+
+				if (pg_add_s32_overflow(node->min, other->min, &newmin) ||
+					newmin >= RPR_QUANTITY_INF)
+					break;		/* fallback: leave the pair unmerged */
+
+				node->min = newmin;
+				node->max = newmax;
+				runlen++;
 			}
 		}
-		else
-		{
-			/* Non-mergeable - flush previous */
-			if (prev != NULL)
-				mergedChildren = lappend(mergedChildren, prev);
-			mergedChildren = lappend(mergedChildren, child);
-			prev = NULL;
-		}
+
+		/*
+		 * Survivors are compacted towards the front.  writepos never passes
+		 * readpos, so this cannot overwrite a cell still to be read.
+		 */
+		lfirst(list_nth_cell(children, writepos++)) = node;
+		readpos += runlen;
 	}
 
-	/* Flush remaining */
-	if (prev != NULL)
-		mergedChildren = lappend(mergedChildren, prev);
-
-	return mergedChildren;
+	return list_truncate(children, writepos);
 }
 
 /*
@@ -366,67 +459,65 @@ mergeConsecutiveVars(List *children)
 static List *
 mergeConsecutiveGroups(List *children)
 {
-	List	   *mergedChildren = NIL;
-	RPRPatternNode *prev = NULL;
+	int			writepos = 0;
+	int			readpos = 0;
 
-	foreach_node(RPRPatternNode, child, children)
+	while (readpos < list_length(children))
 	{
-		if (child->nodeType == RPR_PATTERN_GROUP && child->reluctant == false)
+		RPRPatternNode *node = list_nth_node(RPRPatternNode, children, readpos);
+		int			runlen = 1;
+
+		if (node->nodeType == RPR_PATTERN_GROUP && !node->reluctant)
 		{
-			/* ----------------------
-			 * Can merge consecutive GROUP nodes if:
-			 * 1. Identical children
-			 * 2. No min overflow: prev->min + child->min < INF
-			 * 3. No max overflow: prev->max + child->max < INF (or either is INF)
-			 *
-			 * Strict <: a sum equal to INF would alias the unbounded sentinel
-			 * (min must stay finite; a finite max must not become INF).
-			 */
-			if (prev != NULL &&
-				rprPatternChildrenEqual(prev->children, child->children) &&
-				rprBodyHasUniformLength(child->children) &&
-				prev->min < RPR_QUANTITY_INF - child->min &&
-				(prev->max < RPR_QUANTITY_INF - child->max ||
-				 prev->max == RPR_QUANTITY_INF ||
-				 child->max == RPR_QUANTITY_INF))
+			/* Fold the GROUPs that follow into node while they fit */
+			while (readpos + runlen < list_length(children))
 			{
+				RPRPatternNode *other;
+				int			newmin;
+				int			newmax;
+
+				other = list_nth_node(RPRPatternNode, children, readpos + runlen);
+
+				if (other->nodeType != RPR_PATTERN_GROUP || other->reluctant)
+					break;
+
+				if (!rprPatternChildrenEqual(node->children, other->children))
+					break;
+
+				/* The body must consume a fixed number of rows; see above */
+				if (!rprBodyHasUniformLength(node->children))
+					break;
+
 				/*
-				 * Merge: accumulate min/max into prev. prev is guaranteed to
-				 * be a non-reluctant GROUP by the outer condition.
+				 * RPR_QUANTITY_INF means unbounded, not a count: a finite sum
+				 * landing on it is representable, so reject it separately.
 				 */
-				Assert(prev->nodeType == RPR_PATTERN_GROUP && prev->reluctant == false);
+				if (node->max == RPR_QUANTITY_INF ||
+					other->max == RPR_QUANTITY_INF)
+					newmax = RPR_QUANTITY_INF;
+				else if (pg_add_s32_overflow(node->max, other->max, &newmax) ||
+						 newmax >= RPR_QUANTITY_INF)
+					break;		/* fallback: leave the pair unmerged */
 
-				prev->min += child->min;
+				if (pg_add_s32_overflow(node->min, other->min, &newmin) ||
+					newmin >= RPR_QUANTITY_INF)
+					break;		/* fallback: leave the pair unmerged */
 
-				if (prev->max == RPR_QUANTITY_INF ||
-					child->max == RPR_QUANTITY_INF)
-					prev->max = RPR_QUANTITY_INF;
-				else
-					prev->max += child->max;
-			}
-			else
-			{
-				/* Flush previous and start new */
-				if (prev != NULL)
-					mergedChildren = lappend(mergedChildren, prev);
-				prev = child;
+				node->min = newmin;
+				node->max = newmax;
+				runlen++;
 			}
 		}
-		else
-		{
-			/* Non-mergeable - flush previous */
-			if (prev != NULL)
-				mergedChildren = lappend(mergedChildren, prev);
-			mergedChildren = lappend(mergedChildren, child);
-			prev = NULL;
-		}
+
+		/*
+		 * Survivors are compacted towards the front.  writepos never passes
+		 * readpos, so this cannot overwrite a cell still to be read.
+		 */
+		lfirst(list_nth_cell(children, writepos++)) = node;
+		readpos += runlen;
 	}
 
-	/* Flush remaining */
-	if (prev != NULL)
-		mergedChildren = lappend(mergedChildren, prev);
-
-	return mergedChildren;
+	return list_truncate(children, writepos);
 }
 
 /*
@@ -443,91 +534,54 @@ mergeConsecutiveGroups(List *children)
 static List *
 mergeConsecutiveAlts(List *children)
 {
-	List	   *mergedChildren = NIL;
-	RPRPatternNode *prev = NULL;
-	int			count = 0;
+	int			writepos = 0;
+	int			readpos = 0;
 
-	foreach_node(RPRPatternNode, child, children)
+	while (readpos < list_length(children))
 	{
-		if (child->nodeType == RPR_PATTERN_ALT && child->reluctant == false)
+		RPRPatternNode *node = list_nth_node(RPRPatternNode, children, readpos);
+		int			count = 1;
+
+		/* A quantifier never lands on an ALT, so none of these is reluctant */
+		if (node->nodeType == RPR_PATTERN_ALT)
 		{
-			if (prev != NULL &&
-				rprPatternChildrenEqual(prev->children, child->children))
+			/* Count the run of ALTs identical to this one */
+			while (readpos + count < list_length(children))
 			{
-				/* Same ALT as prev - accumulate */
+				RPRPatternNode *other;
+
+				other = list_nth_node(RPRPatternNode, children, readpos + count);
+
+				if (!rprPatternEqual(node, other))
+					break;
+
 				count++;
 			}
-			else
-			{
-				/* Different ALT or first ALT - flush previous */
-				if (prev != NULL)
-				{
-					if (count > 1)
-					{
-						/* Wrap in GROUP{count,count}(ALT) */
-						RPRPatternNode *group = makeNode(RPRPatternNode);
 
-						group->nodeType = RPR_PATTERN_GROUP;
-						group->min = count;
-						group->max = count;
-						group->reluctant = false;
-						group->location = -1;
-						group->children = list_make1(prev);
-						mergedChildren = lappend(mergedChildren, group);
-					}
-					else
-						mergedChildren = lappend(mergedChildren, prev);
-				}
-				prev = child;
-				count = 1;
+			if (count > 1)
+			{
+				/* Wrap the run into GROUP{count,count}(ALT) */
+				RPRPatternNode *group = makeNode(RPRPatternNode);
+
+				group->nodeType = RPR_PATTERN_GROUP;
+				group->min = count;
+				group->max = count;
+				group->reluctant = false;
+				group->location = -1;
+				group->children = list_make1(node);
+				node = group;
 			}
 		}
-		else
-		{
-			/* Non-ALT - flush previous */
-			if (prev != NULL)
-			{
-				if (count > 1)
-				{
-					RPRPatternNode *group = makeNode(RPRPatternNode);
 
-					group->nodeType = RPR_PATTERN_GROUP;
-					group->min = count;
-					group->max = count;
-					group->reluctant = false;
-					group->location = -1;
-					group->children = list_make1(prev);
-					mergedChildren = lappend(mergedChildren, group);
-				}
-				else
-					mergedChildren = lappend(mergedChildren, prev);
-			}
-			mergedChildren = lappend(mergedChildren, child);
-			prev = NULL;
-			count = 0;
-		}
+		/*
+		 * Survivors are compacted towards the front.  writepos never passes
+		 * readpos, so this cannot overwrite a cell still to be read.
+		 */
+		lfirst(list_nth_cell(children, writepos++)) = node;
+		readpos += count;
 	}
 
-	/* Flush remaining */
-	if (prev != NULL)
-	{
-		if (count > 1)
-		{
-			RPRPatternNode *group = makeNode(RPRPatternNode);
-
-			group->nodeType = RPR_PATTERN_GROUP;
-			group->min = count;
-			group->max = count;
-			group->reluctant = false;
-			group->location = -1;
-			group->children = list_make1(prev);
-			mergedChildren = lappend(mergedChildren, group);
-		}
-		else
-			mergedChildren = lappend(mergedChildren, prev);
-	}
-
-	return mergedChildren;
+	return list_truncate(children, writepos);
 }
 
 /*
@@ -540,12 +594,12 @@ mergeConsecutiveAlts(List *children)
  *
  * Algorithm:
  *   For each GROUP encountered in the sequence:
- *   1. PREFIX phase: compare the last N elements already in the result
- *      list against the GROUP's children.  On match, remove them from
- *      result and increment the GROUP's min/max.  Repeat until no match.
- *   2. SUFFIX phase: compare the next N elements in the input against
- *      the GROUP's children.  On match, skip them (via skipUntil) and
- *      increment min/max.  Repeat until no match.
+ *   1. PREFIX phase: compare the last N survivors kept so far against the
+ *      GROUP's children.  On match, drop them and increment the GROUP's
+ *      min/max.  Repeat until no match.
+ *   2. SUFFIX phase: compare the next N elements not yet read against the
+ *      GROUP's children.  On match, skip them and increment min/max.
+ *      Repeat until no match.
  *
  * Examples:
  *   A B (A B)+ -> (A B){2,}
@@ -563,188 +617,120 @@ mergeConsecutiveAlts(List *children)
 static List *
 mergeGroupPrefixSuffix(List *children)
 {
-	List	   *result = NIL;
-	int			numChildren = list_length(children);
-	int			i;
-	int			skipUntil = -1; /* skip suffix elements already merged */
+	int			numChildren;
+	int			writepos;
+	int			readpos;
 
-	for (i = 0; i < numChildren; i++)
+	/*
+	 * PREFIX phase.  Every copy that sits immediately before a GROUP is
+	 * folded into it, over the whole sequence, before any suffix is
+	 * considered.  A copy between two GROUPs is a suffix of the one before it
+	 * and a prefix of the one after, and this order hands it to the second,
+	 * which is the safer of the two rules: a mandatory copy before a group
+	 * already sits where the leading iterations it becomes would sit, so
+	 * folding it as a prefix holds for any content, while folding one as a
+	 * suffix needs a fixed-length body.
+	 *
+	 * A prefix copy is one of the survivors already stored, so folding it is
+	 * a step back of the write cursor.
+	 */
+	writepos = 0;
+	numChildren = list_length(children);
+
+	for (readpos = 0; readpos < numChildren; readpos++)
 	{
-		RPRPatternNode *child = (RPRPatternNode *) list_nth(children, i);
+		RPRPatternNode *child = list_nth_node(RPRPatternNode, children, readpos);
 
-		/*
-		 * The suffix merge logic below adjusts i to skip merged elements,
-		 * ensuring we never revisit them. Verify this invariant.
-		 */
-		Assert(i >= skipUntil);
-
-		/*
-		 * If this is a GROUP, see if preceding/following elements match its
-		 * children. GROUP's content may be wrapped in a SEQ - unwrap for
-		 * comparison.
-		 */
-		if (child->nodeType == RPR_PATTERN_GROUP && child->reluctant == false)
+		if (child->nodeType == RPR_PATTERN_GROUP && !child->reluctant)
 		{
-			List	   *groupContent = child->children;
-			int			groupChildCount;
-			int			prefixLen = list_length(result);
-			List	   *trimmed;
+			List	   *content = rprGroupContent(child);
+			int			content_len = list_length(content);
 
-			/*
-			 * If GROUP has single SEQ child, compare with SEQ's children.
-			 * e.g., (A B)+ internally contains sequence A B; compare against
-			 * that.
-			 */
-			if (list_length(groupContent) == 1)
-			{
-				RPRPatternNode *inner = (RPRPatternNode *) linitial(groupContent);
-
-				if (inner->nodeType == RPR_PATTERN_SEQ)
-					groupContent = inner->children;
-			}
-
-			groupChildCount = list_length(groupContent);
-
-			/*
-			 * PREFIX MERGE: Check if preceding elements match. Keep merging
-			 * as long as we have matching prefixes.
-			 */
-			while (prefixLen >= groupChildCount && groupChildCount > 0)
-			{
-				List	   *prefixElements = NIL;
-				int			j;
-
-				/* Extract last groupChildCount elements from prefix */
-				for (j = prefixLen - groupChildCount; j < prefixLen; j++)
-				{
-					prefixElements = lappend(prefixElements,
-											 list_nth(result, j));
-				}
-
-				/* Compare with GROUP's (possibly unwrapped) children */
-				if (rprPatternChildrenEqual(prefixElements, groupContent) &&
-					child->min < RPR_QUANTITY_INF - 1 &&
-					(child->max == RPR_QUANTITY_INF ||
-					 child->max < RPR_QUANTITY_INF - 1))
-				{
-					/*
-					 * Match! Merge by incrementing GROUP's quantifier. Remove
-					 * the prefix elements from output.
-					 */
-					child->min += 1;
-					if (child->max != RPR_QUANTITY_INF)
-						child->max += 1;
-
-					/* Rebuild result without matched prefix */
-					trimmed = NIL;
-					for (j = 0; j < prefixLen - groupChildCount; j++)
-					{
-						trimmed = lappend(trimmed,
-										  list_nth(result, j));
-					}
-					result = trimmed;
-					prefixLen = list_length(result);
-				}
-				else
-				{
-					list_free(prefixElements);
-					break;
-				}
-
-				list_free(prefixElements);
-			}
-
-			/*
-			 * SUFFIX MERGE: Check if following elements match. Keep merging
-			 * as long as we have matching suffixes.
-			 */
-			while (i + groupChildCount < numChildren && groupChildCount > 0)
-			{
-				List	   *suffixElements = NIL;
-				int			j;
-				int			suffixStart = i + 1;
-
-				/* suffixStart always >= skipUntil after i adjustment */
-				Assert(skipUntil <= suffixStart);
-
-				/* Extract next groupChildCount elements as suffix */
-				for (j = 0; j < groupChildCount; j++)
-				{
-					int			idx = suffixStart + j;
-
-					/* while condition guarantees idx < numChildren */
-					Assert(idx < numChildren);
-					suffixElements = lappend(suffixElements,
-											 list_nth(children, idx));
-				}
-
-				/* Compare with GROUP's children */
-				if (list_length(suffixElements) == groupChildCount &&
-					rprPatternChildrenEqual(suffixElements, groupContent) &&
-					rprBodyHasUniformLength(groupContent) &&
-					child->min < RPR_QUANTITY_INF - 1 &&
-					(child->max == RPR_QUANTITY_INF ||
-					 child->max < RPR_QUANTITY_INF - 1))
-				{
-					/*
-					 * Match! Merge suffix by incrementing quantifier and
-					 * skipping.
-					 */
-					child->min += 1;
-					if (child->max != RPR_QUANTITY_INF)
-						child->max += 1;
-					skipUntil = suffixStart + groupChildCount;
-
-					/*
-					 * Update i to continue suffix check after merged elements
-					 */
-					i = skipUntil - 1;
-				}
-				else
-				{
-					list_free(suffixElements);
-					break;
-				}
-
-				list_free(suffixElements);
-			}
+			while (rprChildrenMatchAt(children, writepos - content_len, content) &&
+				   rprTryAddIteration(child))
+				writepos -= content_len;
 		}
 
-		result = lappend(result, child);
+		/*
+		 * Survivors are compacted towards the front.  writepos never passes
+		 * readpos, so this cannot overwrite a cell still to be read.
+		 */
+		lfirst(list_nth_cell(children, writepos++)) = child;
 	}
 
-	return result;
+	children = list_truncate(children, writepos);
+
+	/*
+	 * SUFFIX phase.  A suffix copy comes after the GROUP has already decided
+	 * to stop, which the merged form defers until after the last iteration's
+	 * own choices, so the body must consume a fixed number of rows; see
+	 * above.
+	 *
+	 * Such a copy is still unread, so folding it is a step forward of the
+	 * read cursor.
+	 */
+	writepos = 0;
+	readpos = 0;
+	numChildren = list_length(children);
+
+	while (readpos < numChildren)
+	{
+		RPRPatternNode *child = list_nth_node(RPRPatternNode, children, readpos);
+		int			runlen = 1;
+
+		if (child->nodeType == RPR_PATTERN_GROUP && !child->reluctant)
+		{
+			List	   *content = rprGroupContent(child);
+			int			content_len = list_length(content);
+
+			while (rprBodyHasUniformLength(content) &&
+				   rprChildrenMatchAt(children, readpos + runlen, content) &&
+				   rprTryAddIteration(child))
+				runlen += content_len;
+		}
+
+		lfirst(list_nth_cell(children, writepos++)) = child;
+		readpos += runlen;
+	}
+
+	return list_truncate(children, writepos);
 }
 
 /*
  * optimizeSeqPattern
  *		Optimize SEQ pattern node.
  *
- * Optimizations:
- *   1. Flatten nested SEQ and GROUP{1,1}
+ * Optimizations, in the order they run:
+ *   1. Recursively optimize the children and flatten nested SEQ
  *   2. Merge consecutive identical VAR nodes
  *   3. Merge consecutive identical GROUP nodes
  *   4. Merge consecutive identical ALT nodes into GROUP
  *   5. Merge prefix/suffix into GROUP with matching children
- *   6. Unwrap single-item SEQ
+ *   6. Merge consecutive identical GROUP nodes once more
+ *   7. Unwrap single-item SEQ
+ *
+ * That order carries meaning: 1 is what optimizes the children, so every pass
+ * after it sees a flat list of finished nodes, and 6 runs for the reason
+ * given there.
  */
 static RPRPatternNode *
 optimizeSeqPattern(RPRPatternNode *pattern)
 {
-	/* Recursively optimize children and flatten nested SEQ/GROUP{1,1} */
 	pattern->children = flattenSeqChildren(pattern->children);
-
-	/* Merge consecutive identical VAR nodes */
 	pattern->children = mergeConsecutiveVars(pattern->children);
-
-	/* Merge consecutive identical GROUP nodes */
 	pattern->children = mergeConsecutiveGroups(pattern->children);
-
-	/* Merge consecutive identical ALT nodes into GROUP */
 	pattern->children = mergeConsecutiveAlts(pattern->children);
-
-	/* Merge prefix/suffix into GROUP with matching children */
 	pattern->children = mergeGroupPrefixSuffix(pattern->children);
+
+	/*
+	 * Two identical GROUPs can end up next to each other with nothing having
+	 * put them side by side: the ALT merge wraps a run into a GROUP that may
+	 * land beside an identical one, and folding a prefix or a suffix away can
+	 * close the gap between two.  So the GROUP merge gets a second look.  One
+	 * is enough: it only drops elements and raises quantifiers, so it creates
+	 * no copy for the prefix/suffix pass to fold in turn.
+	 */
+	pattern->children = mergeConsecutiveGroups(pattern->children);
 
 	/* Unwrap single-item SEQ: SEQ[A] -> A */
 	if (list_length(pattern->children) == 1)
@@ -760,25 +746,28 @@ optimizeSeqPattern(RPRPatternNode *pattern)
  * Example:
  *   (A | (B | C)) -> (A | B | C)
  *
- * Returns a new list with optimized children, with nested ALT children
- * flattened into the parent list.
+ * Splices each nested ALT's children into the parent list at the position the
+ * ALT occupied, so the flattened alternatives keep their place.  Like
+ * flattenSeqChildren(), this pass can end up longer than what it started
+ * with, so it builds a new list rather than compacting the cells it has; the
+ * caller must assign the result.
  */
 static List *
 flattenAltChildren(List *children)
 {
-	List	   *newChildren = NIL;
+	List	   *flattened = NIL;
 
 	foreach_node(RPRPatternNode, child, children)
 	{
-		RPRPatternNode *opt = optimizeRPRPattern(child);
+		RPRPatternNode *optimized = optimizeRPRPattern(child);
 
-		if (opt->nodeType == RPR_PATTERN_ALT)
-			newChildren = list_concat(newChildren, list_copy(opt->children));
+		if (optimized->nodeType == RPR_PATTERN_ALT)
+			flattened = list_concat(flattened, optimized->children);
 		else
-			newChildren = lappend(newChildren, opt);
+			flattened = lappend(flattened, optimized);
 	}
 
-	return newChildren;
+	return flattened;
 }
 
 /*
@@ -794,15 +783,22 @@ flattenAltChildren(List *children)
 static List *
 removeDuplicateAlternatives(List *children)
 {
-	List	   *uniqueChildren = NIL;
+	int			writepos = 0;
 
-	foreach_node(RPRPatternNode, child, children)
+	for (int readpos = 0; readpos < list_length(children); readpos++)
 	{
+		RPRPatternNode *node = list_nth_node(RPRPatternNode, children, readpos);
 		bool		isDuplicate = false;
 
-		foreach_node(RPRPatternNode, uchild, uniqueChildren)
+		/*
+		 * Survivors are compacted towards the front, so those already kept
+		 * are the cells below writepos.  writepos never passes readpos, so
+		 * the store below cannot overwrite a cell still to be read.
+		 */
+		for (int keptpos = 0; keptpos < writepos; keptpos++)
 		{
-			if (rprPatternEqual(uchild, child))
+			if (rprPatternEqual(list_nth_node(RPRPatternNode, children, keptpos),
+								node))
 			{
 				isDuplicate = true;
 				break;
@@ -810,10 +806,10 @@ removeDuplicateAlternatives(List *children)
 		}
 
 		if (!isDuplicate)
-			uniqueChildren = lappend(uniqueChildren, child);
+			lfirst(list_nth_cell(children, writepos++)) = node;
 	}
 
-	return uniqueChildren;
+	return list_truncate(children, writepos);
 }
 
 /*
@@ -874,8 +870,8 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 {
 	RPRPatternNode *child;
 	bool		safe;
-	int64		new_min_64;
-	int64		new_max_64;
+	int32		newmin;
+	int32		newmax;
 
 	/* Parser always creates GROUP with exactly one child */
 	Assert(list_length(pattern->children) == 1);
@@ -954,22 +950,23 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 	if (!safe)
 		return pattern;
 
-	/* Flatten the child quantifier, guarding against overflow. */
-	new_min_64 = (int64) pattern->min * child->min;
-	if (new_min_64 >= RPR_QUANTITY_INF)
-		return pattern;			/* overflow, skip optimization */
+	/* Flatten the child quantifier, declining the rewrite if it does not fit */
+	if (pg_mul_s32_overflow(pattern->min, child->min, &newmin) ||
+		newmin >= RPR_QUANTITY_INF)
+		return pattern;
 
+	/*
+	 * RPR_QUANTITY_INF means unbounded, not a count: a finite product landing
+	 * on it is representable, so reject it separately.
+	 */
 	if (pattern->max == RPR_QUANTITY_INF || child->max == RPR_QUANTITY_INF)
-		new_max_64 = RPR_QUANTITY_INF;
-	else
-	{
-		new_max_64 = (int64) pattern->max * child->max;
-		if (new_max_64 >= RPR_QUANTITY_INF)
-			return pattern;
-	}
+		newmax = RPR_QUANTITY_INF;
+	else if (pg_mul_s32_overflow(pattern->max, child->max, &newmax) ||
+			 newmax >= RPR_QUANTITY_INF)
+		return pattern;
 
-	child->min = (int) new_min_64;
-	child->max = (int) new_max_64;
+	child->min = newmin;
+	child->max = newmax;
 	return child;
 }
 
@@ -1031,16 +1028,14 @@ tryUnwrapGroup(RPRPatternNode *pattern)
 static RPRPatternNode *
 optimizeGroupPattern(RPRPatternNode *pattern)
 {
-	List	   *newChildren;
+	ListCell   *lc;
 	RPRPatternNode *result;
 
 	/* Recursively optimize children */
-	newChildren = NIL;
-	foreach_node(RPRPatternNode, child, pattern->children)
+	foreach(lc, pattern->children)
 	{
-		newChildren = lappend(newChildren, optimizeRPRPattern(child));
+		lfirst(lc) = optimizeRPRPattern((RPRPatternNode *) lfirst(lc));
 	}
-	pattern->children = newChildren;
 
 	/* Try quantifier multiplication */
 	result = tryMultiplyQuantifiers(pattern);

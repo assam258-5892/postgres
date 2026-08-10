@@ -456,6 +456,61 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 0, B AS v % 2 = 1
 );');
 
+-- Folding a copy that sits between two GROUPs leaves those GROUPs
+-- adjacent, which nothing had put side by side before, so the GROUP
+-- merge runs once more to collect them.  The copy reaches the fold as
+-- a suffix of the GROUP before it.
+-- (A B)+ A B (A B)+ A B -> (A B){4,}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B)+ A B (A B)+ A B)
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+
+-- A leading copy reaches the fold as a prefix instead
+-- A B (A B)+ A B (A B)+ -> (A B){4,}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A B (A B)+ A B (A B)+)
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+
+-- The same with bounded quantifiers
+-- (A B){2} A B (A B){2} -> (A B){5}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B){2} A B (A B){2})
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+
+-- Three GROUPs and two copies between them
+-- (A B)+ A B (A B)+ A B (A B)+ -> (A B){5,}
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A B)+ A B (A B)+ A B (A B)+)
+    DEFINE A AS v % 2 = 1, B AS v % 2 = 0
+);');
+
 -- High state count - alternation with plus quantifier
 CREATE VIEW rpr_ev_state_alt_plus AS
 SELECT count(*) OVER w
