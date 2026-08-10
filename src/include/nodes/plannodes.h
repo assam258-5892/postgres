@@ -1409,32 +1409,12 @@ typedef struct WindowAgg
 
 	/*
 	 * Bitmapset of DEFINE variable indices whose expressions depend on
-	 * match_start (contain FIRST, LAST-with-offset, or compound
-	 * PREV_FIRST/NEXT_FIRST/PREV_LAST/NEXT_LAST with offset).  Variables in
-	 * this set require per-context re-evaluation during NFA processing.
+	 * match_start: they contain FIRST or a compound PREV_FIRST/NEXT_FIRST, or
+	 * a LAST that carries an offset of its own, whether plain or inside a
+	 * compound PREV_LAST/NEXT_LAST. Variables in this set require per-context
+	 * re-evaluation during NFA processing.
 	 */
 	Bitmapset  *defineMatchStartDependent;
-
-	/*
-	 * Navigation offset status and values for tuplestore mark optimization.
-	 * See RPRNavOffsetKind in nodes/parsenodes.h.
-	 *
-	 * navMaxOffset: maximum backward reach from currentpos (contributed by
-	 * PREV, LAST-with-offset, compound PREV_LAST/NEXT_LAST).  Only valid when
-	 * navMaxOffsetKind == RPR_NAV_OFFSET_FIXED.
-	 *
-	 * navFirstOffset: minimum forward offset from match_start (contributed by
-	 * FIRST, compound PREV_FIRST/NEXT_FIRST).  Can be negative for compound
-	 * PREV_FIRST.  Only valid when navFirstOffsetKind == RPR_NAV_OFFSET_FIXED
-	 * and hasFirstNav == true.
-	 */
-	RPRNavOffsetKind navMaxOffsetKind;
-	int64		navMaxOffset;
-
-	/* true if FIRST-based navigation (FIRST, PREV_FIRST, NEXT_FIRST) is used */
-	bool		hasFirstNav;
-	RPRNavOffsetKind navFirstOffsetKind;
-	int64		navFirstOffset;
 
 	/*
 	 * false for all apart from the WindowAgg that's closest to the root of

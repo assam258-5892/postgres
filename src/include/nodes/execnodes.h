@@ -70,6 +70,7 @@ typedef struct TupleTableSlot TupleTableSlot;
 typedef struct TupleTableSlotOps TupleTableSlotOps;
 typedef struct WalUsage WalUsage;
 typedef struct WorkerNodeInstrumentation WorkerNodeInstrumentation;
+typedef struct WindowAggState WindowAggState;
 
 
 /* ----------------
@@ -1072,6 +1073,52 @@ typedef struct SubPlanState
 	FmgrInfo   *cur_eq_funcs;	/* equality functions for LHS vs. table */
 	ExprState  *cur_eq_comp;	/* equality comparator for LHS vs. table */
 } SubPlanState;
+
+typedef struct RPRNavState
+{
+	NodeTag		type;
+
+	WindowAggState *winstate;
+	RPRNavExpr *rprnavexpr;
+
+	/*
+	 * Resolved navigation offsets for this execution, captured from
+	 * winstate->rprNavOffsets at expression compile time.  These live in
+	 * executor state (not on the RPRNavExpr) because plan trees are read-only
+	 * and may be shared by concurrent executions.
+	 */
+	NullableDatum offset;		/* inner offset */
+	NullableDatum compound_offset;	/* outer offset for compound nav */
+	int16		resulttyplen;	/* RESTORE: result type length */
+	bool		resulttypbyval; /* RESTORE: result pass-by-value? */
+} RPRNavState;
+
+/*
+ * RPRNavOffsetKind - status of a resolved navigation trim offset
+ * (WindowAggState.navMaxOffset / navFirstOffset)
+ */
+typedef enum RPRNavOffsetKind
+{
+	RPR_NAV_OFFSET_FIXED,		/* resolved constant; use the offset value */
+	RPR_NAV_OFFSET_NEEDS_EVAL,	/* non-constant offset; shows "runtime",
+								 * resolved per scan */
+	RPR_NAV_OFFSET_RETAIN_ALL,	/* offset overflow; retain all rows (no trim) */
+} RPRNavOffsetKind;
+
+/*
+ * RPRNavOffsets - one entry of WindowAggState.rprNavOffsets
+ *
+ * Associates an RPRNavExpr from the (read-only) plan tree with its offsets,
+ * built by build_define_offsets() at executor startup and settled once per
+ * scan by resolve_nav_offsets().  The list is in RPRNavExpr.navno order.
+ */
+typedef struct RPRNavOffsets
+{
+	RPRNavExpr *nav;			/* plan-tree node this entry belongs to */
+	ExprState  *offset_state;	/* inner offset expr, evaluated once per scan */
+	ExprState  *compound_offset_state;	/* outer (compound) offset expr */
+	RPRNavState *rprnavstate;	/* execution state; holds the resolved values */
+} RPRNavOffsets;
 
 /*
  * DomainConstraintState - one item to check during CoerceToDomain
@@ -2567,7 +2614,8 @@ typedef struct RPRNFAContext
 	RPRNFAState *states;		/* active states (linked list) */
 
 	int64		matchStartRow;	/* row where match started */
-	int64		matchEndRow;	/* row where match ended (-1 = no match) */
+	int64		matchEndRow;	/* last row of the match; below matchStartRow
+								 * for an empty one, -1 before any */
 	int64		lastProcessedRow;	/* last row processed (for fail depth) */
 	RPRNFAState *matchedState;	/* this context's match candidate, or NULL */
 	bool		matchUpdated;	/* matchedState was set or replaced during the
@@ -2742,14 +2790,31 @@ typedef struct WindowAggState
 	TupleTableSlot *temp_slot_2;
 
 	/* RPR navigation */
+
+	/*
+	 * per-execution resolved nav offsets: list of RPRNavOffsets, indexed by
+	 * RPRNavExpr.navno; built by build_define_offsets()
+	 */
+	List	   *rprNavOffsets;
+	bool		navResolvePending;	/* nav offsets need (re)resolving at the
+									 * next ExecWindowAgg call; set at init
+									 * and rescan, cleared by
+									 * resolve_nav_offsets() */
+	bool		hasMaxNav;		/* backward nav in DEFINE: PREV, LAST,
+								 * compound PREV_LAST/NEXT_LAST */
+	bool		hasFirstNav;	/* forward nav in DEFINE: FIRST, compound
+								 * PREV_FIRST/NEXT_FIRST */
 	RPRNavOffsetKind navMaxOffsetKind;	/* status of navMaxOffset */
 	int64		navMaxOffset;	/* max backward nav offset (when FIXED) */
-	bool		hasFirstNav;	/* FIRST() present in DEFINE */
 	RPRNavOffsetKind navFirstOffsetKind;	/* status of navFirstOffset */
-	int64		navFirstOffset; /* min FIRST() offset (when FIXED) */
+	int64		navFirstOffset; /* min forward reach from match_start (when
+								 * FIXED); negative when a compound PREV_FIRST
+								 * reaches back past it */
 	struct WindowObjectData *nav_winobj;	/* winobj for RPR */
 	int64		nav_slot_pos;	/* position cached in nav_slot, or -1 */
-	TupleTableSlot *nav_slot;	/* slot for PREV/NEXT/FIRST/LAST target row */
+	TupleTableSlot *nav_slot;	/* slot holding the resolved navigation target
+								 * row (simple or compound
+								 * PREV/NEXT/FIRST/LAST) */
 	TupleTableSlot *nav_saved_outertuple;	/* saved slot during nav swap */
 	int64		nav_match_start;	/* match_start for FIRST/LAST nav */
 
