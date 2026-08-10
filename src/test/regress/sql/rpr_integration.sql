@@ -839,6 +839,40 @@ LATERAL (
 WHERE r.cnt > 0 AND o.id IN (5, 10)
 ORDER BY o.id, r.id;
 
+-- A lateral outer reference can share varno and varattno with a DEFINE-only
+-- column: here o.b and y are both attribute 2 at their own query levels.
+-- Conflating them drops the DEFINE column's junk targetlist entry, and
+-- setrefs.c then fails with "variable not found in subplan target list".
+CREATE TABLE rpr_lat_o (a int, b int);
+CREATE TABLE rpr_lat_i (x int, y int);
+INSERT INTO rpr_lat_o VALUES (1, 10);
+INSERT INTO rpr_lat_i VALUES (1, 5), (2, 6);
+
+-- Result: the shared attribute number does not disturb the match.
+SELECT *
+FROM rpr_lat_o o,
+LATERAL (
+    SELECT o.b AS lat, count(*) OVER w AS c
+    FROM rpr_lat_i
+    WINDOW w AS (ORDER BY x
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS y > 0)
+) s;
+
+-- Result: attribute 1 never collided; the counts must match above.
+SELECT *
+FROM rpr_lat_o o,
+LATERAL (
+    SELECT o.a AS lat, count(*) OVER w AS c
+    FROM rpr_lat_i
+    WINDOW w AS (ORDER BY x
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS y > 0)
+) s;
+DROP TABLE rpr_lat_o, rpr_lat_i;
+
 -- ============================================================
 -- B7. RPR + Recursive CTE
 -- ============================================================
@@ -1003,6 +1037,39 @@ SELECT cnt FROM (
                PATTERN (X+) DEFINE X AS a > 0)
 ) s;
 DROP TABLE rpr_over1, rpr_over2;
+
+-- A DEFINE-only column and a later window's sort key both become junk
+-- targetlist entries, so their resno must come from p_next_resno; sharing one
+-- trips the apply_tlist_labeling assertion during planning.
+SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
+WINDOW w1 AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (S U+)
+        DEFINE U AS val > PREV(val)),
+    w2 AS (PARTITION BY grp ORDER BY id)
+ORDER BY id;
+
+-- Same collision reached through a plain ORDER BY window.
+SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
+WINDOW w1 AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (S U+)
+        DEFINE U AS val > PREV(val)),
+    w2 AS (ORDER BY grp)
+ORDER BY id;
+
+-- Defining the windows in the opposite order never collided, and must keep
+-- returning the same rows as the first query above.
+SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
+WINDOW w2 AS (PARTITION BY grp ORDER BY id),
+    w1 AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (S U+)
+        DEFINE U AS val > PREV(val))
+ORDER BY id;
 
 -- Cleanup
 DROP TABLE rpr_integ;
