@@ -1184,6 +1184,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				 */
 				RPRNavExpr *nav = (RPRNavExpr *) node;
 				WindowAggState *winstate;
+				int			skip_arg_step;
 
 				Assert(state->parent && IsA(state->parent, WindowAggState));
 				winstate = (WindowAggState *) state->parent;
@@ -1245,8 +1246,25 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				ExprEvalPushStep(state, &scratch);
 
+				/*
+				 * If the target row does not exist, skip evaluation of the
+				 * argument expression and go straight to RESTORE.  The
+				 * EEOP_RPR_NAV_SET step writes a definitive resnull (false
+				 * when the target row exists), so the jump condition is
+				 * always up to date.
+				 */
+				skip_arg_step = state->steps_len;
+				scratch.opcode = EEOP_JUMP_IF_NULL;
+				scratch.resvalue = resv;
+				scratch.resnull = resnull;
+				scratch.d.jump.jumpdone = -1;	/* set below */
+				ExprEvalPushStep(state, &scratch);
+
 				/* Compile the argument expression normally */
 				ExecInitExprRec(nav->arg, state, resv, resnull);
+
+				/* out-of-range jump lands on the RESTORE step */
+				state->steps[skip_arg_step].d.jump.jumpdone = state->steps_len;
 
 				/* Emit RESTORE opcode: restore original slot */
 				scratch.opcode = EEOP_RPR_NAV_RESTORE;
