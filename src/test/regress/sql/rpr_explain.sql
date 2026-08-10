@@ -1265,6 +1265,53 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 )');
 
+-- Absorbed contexts and a navigation, neither of which the case above emits,
+-- so without this the XML spelling of the absorbed length group and of Nav
+-- Mark goes unchecked.
+CREATE VIEW rpr_ev_xml_absorb AS
+SELECT count(*) OVER w
+FROM generate_series(1, 100) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B+)
+    DEFINE A AS v % 10 <> 0 AND PREV(v) IS NOT NULL, B AS v % 10 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_xml_absorb'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF, FORMAT XML)
+SELECT count(*) OVER w
+FROM generate_series(1, 100) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+ B+)
+    DEFINE A AS v % 10 <> 0 AND PREV(v) IS NOT NULL, B AS v % 10 = 0
+)');
+
+-- A pattern that mismatches at all, which the two cases above never do, so
+-- this is where the mismatch length group appears in XML.
+CREATE VIEW rpr_ev_xml_mismatch AS
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B){2,4})
+    DEFINE A AS v % 2 = 1, B AS v % 3 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_xml_mismatch'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF, FORMAT XML)
+SELECT count(*) OVER w
+FROM generate_series(1, 40) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B){2,4})
+    DEFINE A AS v % 2 = 1, B AS v % 3 = 0
+)');
+
 -- ============================================================
 -- Multiple Partitions Tests
 -- ============================================================
@@ -3424,6 +3471,16 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, 3)
 );
 
+-- PREV(v, 1 + 1): a foldable offset has to arrive as a constant, or the trim
+-- bound would print "runtime" instead of 2
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > PREV(v, 1 + 1)
+);
+
 -- Two PREV with different offsets: max(1, 5) = 5
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3442,6 +3499,18 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
 RESET plan_cache_mode;
 DEALLOCATE rpr_nav_offset_prep;
 
+-- EXPLAIN (GENERIC_PLAN) of an unbound parameter offset must not evaluate the
+-- parameter: the offset stays "runtime" instead of failing with "no value
+-- found for parameter 1".
+EXPLAIN (GENERIC_PLAN, COSTS OFF)
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > PREV(v, $1)
+);
+
 -- FIRST(v): retain all (references match_start row)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3449,6 +3518,33 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS v > FIRST(v)
+);
+
+-- FIRST(v, 5): forward reach 5
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > FIRST(v, 5)
+);
+
+-- The same forward reach in the XML and JSON forms.  Only the text form is
+-- exercised elsewhere, so the tag itself has no coverage.
+EXPLAIN (COSTS OFF, FORMAT XML) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > FIRST(v, 5)
+);
+
+EXPLAIN (COSTS OFF, FORMAT JSON) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > FIRST(v, 5)
 );
 
 -- LAST(v, 1): backward reach 1, same as PREV(v, 1)
@@ -3505,6 +3601,41 @@ WINDOW w AS (
     DEFINE A AS NEXT(LAST(v, 1), 3) > 0
 );
 
+-- Compound forms with the outer offset left out, which defaults to 1: each of
+-- the four arms combines it with the inner offset differently, and the value
+-- decides both the trim bound and the row the navigation lands on.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, 2)) > 0
+);
+
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS NEXT(FIRST(v, 2)) > 0
+);
+
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(LAST(v, 2)) > 0
+);
+
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS NEXT(LAST(v, 2)) > 0
+);
+
 -- Compound PREV(LAST(val, N), M): constant near-overflow (N+M just fits int64)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3531,6 +3662,97 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS NEXT(FIRST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
+);
+
+-- A navigation with a negative offset cannot run, so it contributes no reach
+-- and its dimension reports nothing at all.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
+);
+
+-- The same query errors once it runs, since execution validates the offset.
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
+);
+
+-- Same at the int64 limit, where the reach subtraction would otherwise wrap.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v, (-9223372036854775807)::int8), 2) IS NOT NULL
+);
+
+-- The other dimension keeps its own aggregate.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(v, 5) IS NOT NULL AND FIRST(v, -1) IS NOT NULL
+);
+
+-- A null offset cannot run either, so it too contributes no reach.  Resolving
+-- it to a placeholder 0 would instead let it join the aggregate and displace
+-- the offset of the navigation that can run.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS FIRST(v, 7) IS NOT NULL AND PREV(FIRST(v, NULL::int), 2) IS NOT NULL
+);
+
+-- And it errors once it runs, for the same reason the negative one does.
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS FIRST(v, 7) IS NOT NULL AND PREV(FIRST(v, NULL::int), 2) IS NOT NULL
+);
+
+-- Dropping a navigation must not disturb the kind the survivor reports.  An
+-- overflowing lookback still retains every row.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS FIRST(v, -1) IS NOT NULL
+            AND PREV(LAST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
+);
+
+-- And a parameter offset beside a dropped one is still settled per scan.
+PREPARE test_dropped_with_runtime(int8) AS
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS FIRST(v, -1) IS NOT NULL AND PREV(v, $1) IS NOT NULL
+);
+SET plan_cache_mode = force_generic_plan;
+EXPLAIN (COSTS OFF) EXECUTE test_dropped_with_runtime(2);
+RESET plan_cache_mode;
+DEALLOCATE test_dropped_with_runtime;
+
+-- NEXT(LAST()) reaches the same subtraction on the lookback side.
+EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS NEXT(LAST(v, 2), (-9223372036854775807)::int8) IS NOT NULL
 );
 
 -- Compound PREV(LAST(val, $1), $2): parameter lookback overflow -> retain all
@@ -3584,10 +3806,10 @@ EXPLAIN (COSTS OFF) EXECUTE p_first_runtime(1, 1);
 RESET plan_cache_mode;
 DEALLOCATE p_first_runtime;
 
--- PREV(v) + PREV(v, $1): NEEDS_EVAL path must account for implicit lookback=1
--- Previously, eval_nav_max_offset_walker skipped PREV(v) when offset_arg was
--- NULL, causing maxOffset=0 when $1=0, which would trim the row needed by
--- PREV(v).  Verify this executes without "cannot fetch row before mark" error.
+-- PREV(v) + PREV(v, $1): the implicit lookback of 1 has to count even when the
+-- explicit offset resolves to 0, or PREV(v) would fail with "cannot fetch row
+-- before mark".  A generic plan settles the reach per scan instead of at init.
+SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_implicit_offset(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3598,11 +3820,12 @@ WINDOW w AS (
 );
 EXECUTE test_prev_implicit_offset(0);
 DEALLOCATE test_prev_implicit_offset;
+RESET plan_cache_mode;
 
 -- NEEDS_EVAL executor offset paths: a Param nav offset stays non-Const under a
--- generic plan, so the planner marks the offset NEEDS_EVAL and the executor
--- resolves it at init via eval_define_offsets -> visit_nav_exec.  Each query
--- below exercises a different navigation arm of that walker.
+-- generic plan, so build_define_offsets() marks the offset NEEDS_EVAL and
+-- resolve_nav_offsets() settles it once per scan.  Each query below exercises
+-- a different navigation arm of that walker.
 
 -- Simple FIRST(v, $1): forward-reach FIRST arm.
 PREPARE test_eval_first(int8) AS
@@ -3657,6 +3880,13 @@ WINDOW w AS (
 );
 SET plan_cache_mode = force_generic_plan;
 EXECUTE test_eval_prevfirst(1, 1);
+-- Observe the arm rather than only run it.  At plan time the line reads
+-- "runtime"; once resolved it reads inner - outer, so 2 here is the PREV_FIRST
+-- subtraction.  A bare FIRST would report the inner offset alone.
+EXPLAIN (COSTS OFF) EXECUTE test_eval_prevfirst(3, 1);
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+EXECUTE test_eval_prevfirst(3, 1);');
 RESET plan_cache_mode;
 DEALLOCATE test_eval_prevfirst;
 
@@ -3672,6 +3902,22 @@ WINDOW w AS (
 EXECUTE test_runtime_neg_offset(-1);
 DEALLOCATE test_runtime_neg_offset;
 
+-- The same at generic-plan resolution time, and for each half of a compound
+-- navigation on its own.
+PREPARE test_runtime_neg_compound_offset(int8, int8) AS
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS NEXT(FIRST(v, $1), $2) IS NOT NULL
+);
+SET plan_cache_mode = force_generic_plan;
+EXECUTE test_runtime_neg_compound_offset(1, -1);
+EXECUTE test_runtime_neg_compound_offset(-1, 1);
+RESET plan_cache_mode;
+DEALLOCATE test_runtime_neg_compound_offset;
+
 -- Runtime error: null offset at execution time
 PREPARE test_runtime_null_offset(int8) AS
 SELECT count(*) OVER w
@@ -3683,3 +3929,24 @@ WINDOW w AS (
 );
 EXECUTE test_runtime_null_offset(NULL);
 DEALLOCATE test_runtime_null_offset;
+
+-- A correlated PARAM_EXEC nav offset (reaching the offset via SRF inlining) is
+-- resolved per scan by resolve_nav_offsets(); after execution EXPLAIN ANALYZE
+-- must display the concrete resolved bound (a number), not "runtime" -- that is,
+-- navMaxOffsetKind resolves to FIXED.  Plain EXPLAIN of the same query shows
+-- "runtime"; only ANALYZE exercises the per-scan clear.
+CREATE TABLE rpr_exp_srf (v int);
+INSERT INTO rpr_exp_srf SELECT generate_series(1, 10);
+CREATE FUNCTION rpr_exp_srf_f(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_exp_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS v > PREV(v, k))
+$$ LANGUAGE sql STABLE;
+SELECT t FROM rpr_explain_filter(
+  'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, BUFFERS OFF)
+   SELECT g.n, max(s) FROM (VALUES (2), (2)) g(n), LATERAL rpr_exp_srf_f(g.n) s
+   GROUP BY g.n') AS t
+WHERE t LIKE '%Nav Mark Lookback%';
+DROP FUNCTION rpr_exp_srf_f(int);
+DROP TABLE rpr_exp_srf;

@@ -740,11 +740,9 @@ WINDOW w AS (
 -- 2-arg PREV/NEXT: functional tests
 --
 
--- PREV(price, 2): match rows where current price > price 2 rows back
--- stock: 100, 90, 80, 95, 110
--- Pattern (A B+): A=any, B where price > PREV(price, 2)
--- At pos 2 (80): A matches. pos 3 (95): 95 > PREV(95,2)=90 TRUE.
---                             pos 4 (110): 110 > PREV(110,2)=80 TRUE. Match!
+-- PREV(price, 2): with A=any, B matches where the price beats the one two rows
+-- back.  On company1 (100, 200, 150, 140, 150, 90, 110, 130, 120, 130) that is
+-- 200 -> 150, then 110 -> 130 -> 120, which stops where 130 only ties 130.
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM stock
@@ -757,8 +755,9 @@ WINDOW w AS (
         B AS price > PREV(price, 2)
 );
 
--- NEXT(price, 2): match rows where current price > price 2 rows ahead
--- pos 0 (100): NEXT(100,2)=80, 100>80 TRUE. pos 1 (90): NEXT(90,2)=95, 90>95 FALSE. Match ends.
+-- NEXT(price, 2): A matches while the price beats the one two rows ahead, so
+-- company1 gives 200 on its own, since 150 only ties the 150 ahead of it, and
+-- then 140, 150 up to where 90 falls short of 130.
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM stock
@@ -882,8 +881,10 @@ EXECUTE test_prev_offset(-1);
 EXECUTE test_prev_offset(NULL);
 DEALLOCATE test_prev_offset;
 
--- 2-arg PREV/NEXT: host variable with positive value
--- Exercises RPR_NAV_OFFSET_NEEDS_EVAL -> eval_nav_max_offset() path
+-- 2-arg PREV/NEXT: host variable with positive value.  A generic plan keeps
+-- the parameter as a Param, which is what reaches the RPR_NAV_OFFSET_NEEDS_EVAL
+-- path; a custom plan would fold it to a Const and settle the reach at init.
+SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w, count(*) OVER w
 FROM stock
@@ -897,6 +898,7 @@ WINDOW w AS (
 EXECUTE test_prev_offset(1);
 EXECUTE test_prev_offset(2);
 DEALLOCATE test_prev_offset;
+RESET plan_cache_mode;
 
 -- 2-arg: two PREV with different offsets in same DEFINE clause
 -- B: price exceeds both 1-back and 2-back values
@@ -1239,6 +1241,84 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS NEXT(LAST(val), -1) IS NULL
 );
+
+-- Compound: an out-of-range inner offset must not skip validation of the outer
+-- one.  All four arms resolve their outer offset through the same call, so each
+-- appears once, and the negative and the null case take two arms apiece.
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(FIRST(val, 99), -1) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(LAST(val, 99), NULL::int8) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS NEXT(FIRST(val, 99), NULL::int8) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS NEXT(LAST(val, 99), -1) IS NULL
+);
+
+-- Same with a host variable, where the offset is not a Const the planner can
+-- fold: one prepared statement, and only the outer offset decides the outcome.
+-- The reach reads "runtime" here; a custom plan would fold it to 99 - 1 = 98.
+SET plan_cache_mode = force_generic_plan;
+PREPARE test_compound_illegal(int8, int8) AS
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(FIRST(val, $1), $2) IS NULL
+);
+EXPLAIN (COSTS OFF) EXECUTE test_compound_illegal(99, 1);
+EXECUTE test_compound_illegal(99, 1);
+EXECUTE test_compound_illegal(99, -1);
+EXECUTE test_compound_illegal(99, NULL);
+EXECUTE test_compound_illegal(0, -1);
+DEALLOCATE test_compound_illegal;
+RESET plan_cache_mode;
+
+-- An offset is settled before the first row is fetched, so a partition with no
+-- rows at all rejects an illegal one just the same, and a legal one returns no
+-- rows rather than failing.
+CREATE TABLE rpr_nav_empty (id int, val int);
+SELECT id, count(*) OVER w FROM rpr_nav_empty WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(val, -1) IS NULL
+);
+SELECT id, count(*) OVER w FROM rpr_nav_empty WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(val, 1) IS NULL
+);
+SET plan_cache_mode = force_generic_plan;
+PREPARE test_empty_offset(int8) AS
+SELECT id, count(*) OVER w FROM rpr_nav_empty WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(val, $1) IS NULL
+);
+EXECUTE test_empty_offset(-1);
+EXECUTE test_empty_offset(NULL);
+EXECUTE test_empty_offset(1);
+DEALLOCATE test_empty_offset;
+RESET plan_cache_mode;
+DROP TABLE rpr_nav_empty;
 
 -- Outer offset overflows int64: target position out of range -> NULL.
 -- Plain NEXT(val, INT64_MAX): currentpos + INT64_MAX overflows.

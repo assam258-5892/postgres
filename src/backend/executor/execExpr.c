@@ -36,6 +36,7 @@
 #include "catalog/pg_type.h"
 #include "executor/execExpr.h"
 #include "executor/nodeSubplan.h"
+#include "executor/nodeWindowAgg.h"
 #include "funcapi.h"
 #include "jit/jit.h"
 #include "miscadmin.h"
@@ -1177,11 +1178,8 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				 * swaps ecxt_outertuple to the target row, the argument
 				 * expression is compiled normally (reads from the swapped
 				 * slot), and the RESTORE opcode restores the original slot.
-				 *
-				 * Default offset when offset_arg is NULL: PREV/NEXT: 1
-				 * (physical offset from currentpos) FIRST/LAST: 0 (logical
-				 * offset from match boundary)
 				 */
+				RPRNavState *rprnavstate = NULL;
 				RPRNavExpr *nav = (RPRNavExpr *) node;
 				WindowAggState *winstate;
 				int			skip_arg_step;
@@ -1189,60 +1187,34 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				Assert(state->parent && IsA(state->parent, WindowAggState));
 				winstate = (WindowAggState *) state->parent;
 
+				/*
+				 * Take the execution state from the navigation's
+				 * RPRNavOffsets entry, which build_define_offsets() created
+				 * at executor startup -- it must have run before this loop.
+				 * The offset it carries is a run-time constant settled once
+				 * per scan by resolve_nav_offsets().
+				 *
+				 * The offsets live in executor state rather than on the
+				 * RPRNavExpr because the plan tree is read-only and may be
+				 * shared by concurrent executions.
+				 */
+				foreach_ptr(RPRNavOffsets, entry, winstate->rprNavOffsets)
+				{
+					if (entry->nav != nav)
+						continue;
+
+					/* build_define_offsets() records each navigation once */
+					if (rprnavstate != NULL)
+						elog(ERROR, "RPRNavExpr occurrence more than once");
+
+					rprnavstate = entry->rprnavstate;
+				}
+				if (rprnavstate == NULL)
+					elog(ERROR, "no offsets entry found for RPRNavExpr");
+
 				/* Emit SET opcode: swap slot to target row */
 				scratch.opcode = EEOP_RPR_NAV_SET;
-				scratch.d.rpr_nav.winstate = winstate;
-				scratch.d.rpr_nav.kind = nav->kind;
-
-				if (nav->kind >= RPR_NAV_PREV_FIRST)
-				{
-					/*
-					 * Compound navigation: allocate array of 2 for inner [0]
-					 * and outer [1] offsets.
-					 */
-					Datum	   *offset_values = palloc_array(Datum, 2);
-					bool	   *offset_isnulls = palloc_array(bool, 2);
-
-					/* Inner offset (default 0 for FIRST/LAST) */
-					if (nav->offset_arg != NULL)
-						ExecInitExprRec(nav->offset_arg, state,
-										&offset_values[0], &offset_isnulls[0]);
-					else
-					{
-						offset_values[0] = Int64GetDatum(0);
-						offset_isnulls[0] = false;
-					}
-
-					/* Outer offset (default 1 for PREV/NEXT) */
-					if (nav->compound_offset_arg != NULL)
-						ExecInitExprRec(nav->compound_offset_arg, state,
-										&offset_values[1], &offset_isnulls[1]);
-					else
-					{
-						offset_values[1] = Int64GetDatum(1);
-						offset_isnulls[1] = false;
-					}
-
-					scratch.d.rpr_nav.offset_value = offset_values;
-					scratch.d.rpr_nav.offset_isnull = offset_isnulls;
-				}
-				else if (nav->offset_arg != NULL)
-				{
-					/* Simple navigation with explicit offset */
-					Datum	   *offset_value = palloc_object(Datum);
-					bool	   *offset_isnull = palloc_object(bool);
-
-					ExecInitExprRec(nav->offset_arg, state,
-									offset_value, offset_isnull);
-					scratch.d.rpr_nav.offset_value = offset_value;
-					scratch.d.rpr_nav.offset_isnull = offset_isnull;
-				}
-				else
-				{
-					/* Simple navigation with default offset */
-					scratch.d.rpr_nav.offset_value = NULL;
-					scratch.d.rpr_nav.offset_isnull = NULL;
-				}
+				scratch.d.rpr_nav.rprnavstate = rprnavstate;
 
 				ExprEvalPushStep(state, &scratch);
 
@@ -1270,10 +1242,16 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				scratch.opcode = EEOP_RPR_NAV_RESTORE;
 				scratch.resvalue = resv;
 				scratch.resnull = resnull;
-				scratch.d.rpr_nav.winstate = winstate;
+				scratch.d.rpr_nav.rprnavstate = rprnavstate;
+
+				/*
+				 * The state is shared with the offsets entry, but resulttype
+				 * belongs to the plan node, so every compilation of this
+				 * navigation writes the same pair.
+				 */
 				get_typlenbyval(nav->resulttype,
-								&scratch.d.rpr_nav.resulttyplen,
-								&scratch.d.rpr_nav.resulttypbyval);
+								&rprnavstate->resulttyplen,
+								&rprnavstate->resulttypbyval);
 				ExprEvalPushStep(state, &scratch);
 				break;
 			}
