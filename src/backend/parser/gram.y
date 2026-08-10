@@ -214,6 +214,7 @@ static RPRPatternNode *splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t y
 static RPRPatternNode *makeRPRQuantifier(int32 min, int32 max, bool reluctant,
 										 int location);
 static const char *rpr_invalid_quantifier_token(const char *tok);
+static bool rpr_is_quantifier_token(const char *tok);
 
 %}
 
@@ -17878,8 +17879,8 @@ row_pattern_quantifier_opt:
 					else
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("unsupported quantifier \"%s\"", $1),
-								errhint("Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions."),
+								errmsg("unsupported quantifier \"%s\"", rpr_invalid_quantifier_token($1)),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
 								parser_errposition(@1));
 				}
 			/* RELUCTANT quantifiers (when lexer separates tokens) */
@@ -17919,12 +17920,19 @@ row_pattern_quantifier_opt:
 				}
 			| Op Op
 				{
+					if (!rpr_is_quantifier_token($1))
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("unsupported quantifier \"%s\"", rpr_invalid_quantifier_token($1)),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@1));
 					if (strcmp($1, "?") != 0)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("invalid quantifier combination: \"%s%s\"", $1, $2),
-								errhint("Did you mean \"??\" for reluctant quantifier?"),
-								parser_errposition(@1));
+								errmsg("invalid token \"%s\" after \"%s\" quantifier",
+									   rpr_invalid_quantifier_token($2), $1),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@2));
 					if (strcmp($2, "?") == 0)
 						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
 					else if (strcmp($2, "?|") == 0)
@@ -17936,9 +17944,9 @@ row_pattern_quantifier_opt:
 					else
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("invalid quantifier combination"),
-								errhint("Did you mean \"??\" for reluctant quantifier?"),
-								parser_errposition(@1));
+								errmsg("invalid token \"%s\" after \"?\" quantifier", rpr_invalid_quantifier_token($2)),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@2));
 				}
 			/* {n}, {n,}, {,m}, {n,m} quantifiers */
 			| '{' Iconst '}'
@@ -17970,11 +17978,16 @@ row_pattern_quantifier_opt:
 				}
 			| '{' Iconst ',' Iconst '}'
 				{
-					if ($2 < 0 || $4 <= 0 || $2 >= RPR_QUANTITY_INF || $4 >= RPR_QUANTITY_INF)
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bounds must be between 0 and %d with max >= 1", RPR_QUANTITY_INF - 1),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
+					if ($4 <= 0 || $4 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@4));
 					if ($2 > $4)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
@@ -18042,11 +18055,16 @@ row_pattern_quantifier_opt:
 								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($6)),
 								errhint("Only \"?\" is allowed after {n,m} to make it reluctant."),
 								parser_errposition(@6));
-					if ($2 < 0 || $4 <= 0 || $2 >= RPR_QUANTITY_INF || $4 >= RPR_QUANTITY_INF)
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("quantifier bounds must be between 0 and %d with max >= 1", RPR_QUANTITY_INF - 1),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
 								parser_errposition(@2));
+					if ($4 <= 0 || $4 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@4));
 					if ($2 > $4)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
@@ -21555,7 +21573,7 @@ splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 				ereport(ERROR,
 						errcode(ERRCODE_SYNTAX_ERROR),
 						errmsg("alternation operator \"|\" requires a pattern on both sides"),
-						parser_errposition(node->location));
+						parser_errposition(child->location));
 
 			/* the right branch starts at its own first element, not the seq start */
 			rightnode = splitRPRTrailingAlt(makeRPRSeqOrSingle(righthalf,
@@ -21577,23 +21595,48 @@ splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 
 /*
  * rpr_invalid_quantifier_token
- *		Return the offending part of an invalid token following a quantifier.
+ *		Return the offending part of an invalid token in a quantifier position.
  *
  * The lexer glues a quantifier and a trailing alternation operator into a
- * single token (for example "*|").  When such a glued token appears in an
- * invalid position, drop the trailing '|': it is the alternation operator,
- * not part of the offending quantifier, so "*|" reports '*' and "*?|"
- * reports "*?".  Tokens without a trailing '|' (such as "??" or "?+") are
- * reported unchanged.
+ * single token (for example "*|").  Drop that trailing '|': it is the
+ * alternation operator, not part of the offending quantifier, so "*|" reports
+ * '*' and "*?|" reports "*?", exactly as the spaced spellings "* |" and "*? |"
+ * do.  Only a single trailing operator is dropped: with another '|' left over
+ * there is no quantifier to uncover, so "||" and "*||" are reported whole, as
+ * are tokens with no trailing '|' such as "??" or "?+".
  */
 static const char *
 rpr_invalid_quantifier_token(const char *tok)
 {
 	size_t		len = strlen(tok);
 
-	if (len > 1 && tok[len - 1] == '|')
+	if (len > 1 && tok[len - 1] == '|' && memchr(tok, '|', len - 1) == NULL)
 		return pnstrdup(tok, len - 1);
 	return tok;
+}
+
+/*
+ * rpr_is_quantifier_token
+ *		Does this Op token spell a quantifier?
+ *
+ * These are exactly the tokens the single-Op arm of row_pattern_quantifier_opt
+ * accepts, so the two must be kept in step.  A token outside the set is not a
+ * quantifier at all and has to be reported as an unsupported one, the way that
+ * arm reports it, rather than as something a quantifier was followed by.
+ */
+static bool
+rpr_is_quantifier_token(const char *tok)
+{
+	static const char *const quantifiers[] = {
+		"?", "*?", "+?", "??", "*|", "+|", "?|", "*?|", "+?|", "??|"
+	};
+
+	for (int i = 0; i < lengthof(quantifiers); i++)
+	{
+		if (strcmp(tok, quantifiers[i]) == 0)
+			return true;
+	}
+	return false;
 }
 
 /* parser_init()
