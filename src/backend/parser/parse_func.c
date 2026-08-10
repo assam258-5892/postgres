@@ -2250,6 +2250,7 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 	navexpr = makeNode(RPRNavExpr);
 	navexpr->kind = kind;
 	navexpr->arg = (Expr *) arg;
+	navexpr->navno = -1;		/* assigned while planning */
 
 	/* an explicit offset is coerced to int8, which the executor reads */
 	if (nargs == 2)

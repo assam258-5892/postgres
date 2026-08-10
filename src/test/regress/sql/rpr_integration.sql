@@ -1039,6 +1039,69 @@ SELECT cnt FROM (
 ) s;
 DROP TABLE rpr_over1, rpr_over2;
 
+-- A row pattern navigation offset that resolves to a correlated PARAM_EXEC
+-- (here through SRF inlining of rpr_srf_prev(g.n)) must be re-resolved on every
+-- rescan, not frozen at executor init.  The inlined WindowAgg is the inner
+-- side of a nestloop and is rescanned once per outer row, so each row sees its
+-- own PREV(v, n) offset; a frozen offset would report the same value for all.
+CREATE TABLE rpr_srf (v int);
+INSERT INTO rpr_srf SELECT generate_series(1, 10);
+CREATE FUNCTION rpr_srf_prev(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS v > PREV(v, k))
+$$ LANGUAGE sql STABLE;
+-- The offset reads "runtime"; the WindowAgg inlines into the nestloop and is
+-- rescanned per outer row.
+EXPLAIN (COSTS OFF)
+SELECT g.n, max(s) FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
+GROUP BY g.n ORDER BY g.n;
+-- Each outer row yields its own offset (9, 8, 7), not one frozen value.
+SELECT g.n, max(s) AS m FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
+GROUP BY g.n ORDER BY g.n;
+
+-- A forward FIRST-family offset with a correlated PARAM_EXEC must likewise be
+-- re-resolved per scan (navFirstOffset / navFirstOffsetKind), not frozen at init.
+-- PATTERN (B A+) anchors the match start at B so A can reference FIRST(v, k)
+-- k rows ahead; each outer k yields its own forward offset (k=0 matches all
+-- ten rows, k>=1 makes the first A fail), proving per-scan re-resolution.
+CREATE FUNCTION rpr_srf_first(k int) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (B A+) DEFINE A AS v > FIRST(v, k))
+$$ LANGUAGE sql STABLE;
+-- The forward offset reads "runtime" and the WindowAgg inlines into the nestloop.
+EXPLAIN (COSTS OFF)
+SELECT g.n, max(s) FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
+GROUP BY g.n ORDER BY g.n;
+-- k=0 -> 10, k>=1 -> 0: distinct per outer row, so the forward offset is not
+-- frozen at ExecInit.
+SELECT g.n, max(s) AS m FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
+GROUP BY g.n ORDER BY g.n;
+DROP FUNCTION rpr_srf_first(int);
+
+-- A compound navigation whose OUTER offset is a correlated PARAM_EXEC must be
+-- re-resolved per scan as well.  The last offset overflows int64, so that
+-- scan's navigation has no target row at all: k=1 -> 9, k=3 -> 7,
+-- k=overflow -> 0.  Three answers from one plan is what says each rescan
+-- resolved its own outer offset.  The trim kind a scan settles on does not
+-- show in a count; rpr_explain reads it out of EXPLAIN ANALYZE instead.
+CREATE FUNCTION rpr_srf_cmp(k int8) RETURNS SETOF bigint AS $$
+  SELECT count(*) OVER w
+  FROM rpr_srf
+  WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+) DEFINE B AS v > PREV(LAST(v, 1), k))
+$$ LANGUAGE sql STABLE;
+SELECT g.n, max(s) AS m
+FROM (VALUES (1::int8), (3::int8), (9223372036854775807::int8)) g(n),
+     LATERAL rpr_srf_cmp(g.n) s
+GROUP BY g.n ORDER BY g.n;
+DROP FUNCTION rpr_srf_cmp(int8);
+DROP FUNCTION rpr_srf_prev(int);
+DROP TABLE rpr_srf;
+
 -- A correlated PARAM_EXEC used only inside DEFINE must reach the WindowAgg's
 -- extParam.  Otherwise chgParam never gets to the HashAgg that DISTINCT plans
 -- above it, and its hash table for the first outer row is re-served.

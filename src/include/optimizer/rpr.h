@@ -84,26 +84,4 @@ extern RPRPattern *buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 								   RPSkipTo rpSkipTo, int frameOptions,
 								   bool hasMatchStartDependent);
 
-/*
- * Shared traversal walker for DEFINE clause RPRNavExpr collection.
- *
- * Both planner (nav-offset / match_start dependency analysis) and executor
- * (runtime offset evaluation) need to walk DEFINE expressions and dispatch
- * per RPRNavExpr.  They differ only in what they do at each nav node, so
- * the traversal frame is shared (nav_traversal_walker, defined in rpr.c)
- * and the per-nav action is supplied as a callback.  The driver allocates
- * a mode-specific context, points NavTraversal.data at it, and casts
- * inside its visitor.
- */
-struct NavTraversal;
-typedef void (*NavVisitFn) (struct NavTraversal *t, RPRNavExpr *nav);
-
-typedef struct NavTraversal
-{
-	NavVisitFn	visit;
-	void	   *data;			/* mode-specific context */
-} NavTraversal;
-
-extern bool nav_traversal_walker(Node *node, void *ctx);
-
 #endif							/* RPR_H */
