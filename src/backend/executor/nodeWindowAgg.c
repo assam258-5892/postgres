@@ -47,7 +47,6 @@
 #include "nodes/plannodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/optimizer.h"
-#include "optimizer/rpr.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_coerce.h"
 #include "utils/acl.h"
@@ -176,6 +175,21 @@ typedef struct WindowStatePerAggData
 	bool		restart;		/* need to restart this agg in this cycle? */
 } WindowStatePerAggData;
 
+typedef struct
+{
+	WindowAggState *winstate;
+	int64		maxOffset;		/* max backward-reach offset across all nav
+								 * exprs */
+	bool		maxOverflow;	/* true if backward-reach overflow detected */
+	int64		minFirstOffset; /* min forward-from-match_start offset; may be
+								 * negative (PREV_FIRST: inner - outer < 0) */
+	bool		hasMax;			/* any backward-reach nav found */
+	bool		hasFirst;		/* any FIRST-based nav found */
+	bool		validate;		/* fail-closed on a null/negative offset?
+								 * false at init (display only), true at
+								 * execution */
+} EvalDefineOffsetsContext;
+
 static void initialize_windowaggregate(WindowAggState *winstate,
 									   WindowStatePerFunc perfuncstate,
 									   WindowStatePerAgg peraggstate);
@@ -247,9 +261,11 @@ static void update_reduced_frame(WindowObject winobj, int64 pos);
 
 /* Forward declarations - DEFINE row evaluation */
 static bool rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched);
-
-/* Forward declarations - navigation offset evaluation */
-static void eval_define_offsets(WindowAggState *winstate, List *defineClause);
+static void build_define_offsets(WindowAggState *winstate, List *defineClause);
+static void resolve_nav_offsets(WindowAggState *winstate);
+static void resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context);
+static bool RPRNavExpr_walker(Node *node, WindowAggState *winstate);
+static void build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate);
 
 /*
  * Not null info bit array consists of 2-bit items
@@ -1261,13 +1277,12 @@ prepare_tuplestore(WindowAggState *winstate)
 		/*
 		 * Allocate mark and read pointers for RPR navigation.
 		 *
-		 * If navMaxOffsetKind == RPR_NAV_OFFSET_FIXED, we advance the mark
-		 * based on (currentpos - navMaxOffset) and optionally
+		 * When the trim offset is FIXED we advance the mark based on
+		 * (currentpos - navMaxOffset) and optionally
 		 * (nfaContext->matchStartRow + navFirstOffset), allowing
-		 * tuplestore_trim() to free rows that are no longer reachable.
-		 *
-		 * RPR_NAV_OFFSET_NEEDS_EVAL is resolved at executor init; by this
-		 * point it is either FIXED or RETAIN_ALL.
+		 * tuplestore_trim() to free rows that are no longer reachable.  A
+		 * parameterized offset is still NEEDS_EVAL here and gets resolved at
+		 * execution by resolve_nav_offsets(); RETAIN_ALL disables trim.
 		 */
 		winstate->nav_winobj->markptr =
 			tuplestore_alloc_read_pointer(winstate->buffer, 0);
@@ -2419,6 +2434,16 @@ ExecWindowAgg(PlanState *pstate)
 	if (unlikely(winstate->all_first))
 		calculate_frame_offsets(pstate);
 
+	/*
+	 * Resolve navigation offsets the same way, during first call (or after a
+	 * rescan).  Every RPR window holding a navigation comes through here: the
+	 * pass at init resolved the constant offsets for EXPLAIN to display
+	 * without validating them, so this is where a null or negative offset is
+	 * rejected.
+	 */
+	if (unlikely(winstate->navResolvePending))
+		resolve_nav_offsets(winstate);
+
 	/* We need to loop as the runCondition or qual may filter out tuples */
 	for (;;)
 	{
@@ -3030,13 +3055,8 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->rpSkipTo = node->rpSkipTo;
 	/* Set up row pattern recognition PATTERN clause (compiled NFA) */
 	winstate->rpPattern = node->rpPattern;
-	/* Set up nav offsets for tuplestore trim; resolve any NEEDS_EVAL kinds */
-	winstate->navMaxOffsetKind = node->navMaxOffsetKind;
-	winstate->navMaxOffset = node->navMaxOffset;
-	winstate->hasFirstNav = node->hasFirstNav;
-	winstate->navFirstOffsetKind = node->navFirstOffsetKind;
-	winstate->navFirstOffset = node->navFirstOffset;
-	eval_define_offsets(winstate, node->defineClause);
+	/* Build nav offset bookkeeping; values are resolved per scan */
+	build_define_offsets(winstate, node->defineClause);
 
 	/* Copy match_start dependency bitmapset for per-context evaluation */
 	winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
@@ -3096,6 +3116,12 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	else
 		winstate->nfaVarMatched = NULL;
 	winstate->all_first = true;
+
+	/*
+	 * Nav offsets are resolved (and validated) at execution, like frame
+	 * offsets: on the first scan and after each rescan, for every RPR window.
+	 */
+	winstate->navResolvePending = (winstate->rprNavOffsets != NIL);
 	winstate->partition_spooled = false;
 	winstate->more_partitions = false;
 	winstate->next_partition = true;
@@ -3186,6 +3212,8 @@ ExecReScanWindowAgg(WindowAggState *node)
 
 	node->status = WINDOWAGG_RUN;
 	node->all_first = true;
+	/* offsets are re-resolved and re-validated at the next scan */
+	node->navResolvePending = (node->rprNavOffsets != NIL);
 
 	/* release tuplestore et al */
 	release_partition(node);
@@ -3971,226 +3999,370 @@ put_notnull_info(WindowObject winobj, int64 pos, int argno, bool isnull)
 }
 
 /*
- * eval_nav_offset_helper
- *		Pre-evaluate a navigation offset expression at executor init time, to
- *		bound how far navigation can reach (which sizes the frame trim).
- *		Returns the offset value, or 0 for a NULL or negative offset.
+ * eval_nav_offset
+ *		Evaluate a pre-built row pattern navigation offset ExprState.
  *
- * The offset is not validated here.  A NULL or negative value is caught later,
- * per row, on the navigation path that consumes it (see EEOP_RPR_NAV_SET in
- * execExprInterp.c), which errors out before navigation produces any result;
- * the trim sizing computed from such an offset is therefore never used, and 0
- * is returned as a harmless placeholder.
+ * The offset is a run-time constant (the parser rejects column references in a
+ * navigation offset), so it is evaluated once per scan -- when any parameter
+ * is bound.  Returns the offset as an int64; a NULL or negative result is an
+ * error per the SQL standard (fail-closed, re-checked on every scan).
  */
 static int64
-eval_nav_offset_helper(WindowAggState *winstate, Expr *offset_expr,
-					   int64 defaultOffset)
+eval_nav_offset(WindowAggState *winstate, ExprState *estate, bool validate)
 {
 	ExprContext *econtext = winstate->ss.ps.ps_ExprContext;
-	ExprState  *estate;
 	Datum		val;
 	bool		isnull;
 	int64		offset;
 
-	if (offset_expr == NULL)
-		return defaultOffset;
-
-	estate = ExecInitExpr(offset_expr, (PlanState *) winstate);
 	val = ExecEvalExprSwitchContext(estate, econtext, &isnull);
 
 	if (isnull)
-		return 0;
+	{
+		if (validate)
+			ereport(ERROR,
+					errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+					errmsg("row pattern navigation offset must not be null"));
+		return 0;				/* placeholder for display; execution
+								 * revalidates */
+	}
 
 	offset = DatumGetInt64(val);
-	if (offset < 0)
-		return 0;
+
+	if (offset < 0 && validate)
+		ereport(ERROR,
+				errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("row pattern navigation offset must not be negative"));
 
 	return offset;
 }
 
-typedef struct
-{
-	WindowAggState *winstate;
-	int64		maxOffset;		/* max backward-reach offset across all nav
-								 * exprs */
-	bool		maxOverflow;	/* true if backward-reach overflow detected */
-	int64		minFirstOffset; /* min forward-from-match_start offset; may be
-								 * negative (PREV_FIRST: inner - outer < 0) */
-} EvalDefineOffsetsContext;
-
 /*
- * visit_nav_exec
- *		nav_traversal_walker callback (NavVisitFn) for the executor side.
- *		At each RPRNavExpr, evaluates the nav's offset expression(s) at
- *		runtime via eval_nav_offset_helper and accumulates:
+ * build_nav_offsets
+ *		Create the per-navigation offset bookkeeping entry at executor init and
+ *		compile its offset argument expression(s).
  *
- *		  - maxOffset (backward reach): PREV, LAST-with-offset, compound
- *			PREV_LAST (sets maxOverflow on int64 overflow), compound
- *			NEXT_LAST (= max(inner - outer, 0))
- *		  - minFirstOffset (forward reach from match_start): FIRST,
- *			compound PREV_FIRST (= inner - outer, may be negative),
- *			compound NEXT_FIRST (= inner + outer, clamped to PG_INT64_MAX on
- *			overflow; always >= 0 so never updates minFirstOffset in practice)
- *
- * Counterpart of visit_nav_plan but using runtime evaluation instead of
- * Const folding; runs only for offsets the planner marked NEEDS_EVAL.
- * Match-start dependency is not recomputed here -- the planner's bitmapset
- * is reused via winstate->defineMatchStartDependent.
+ * The offsets are not evaluated here: a PARAM_EXEC offset (function inlining or
+ * a LATERAL reference) has no value until the node is (re)scanned.  The
+ * concrete value is resolved per scan by resolve_nav_offsets(), mirroring how
+ * calculate_frame_offsets() handles the window frame bounds.
  */
 static void
-visit_nav_exec(NavTraversal *t, RPRNavExpr *nav)
+build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate)
 {
-	EvalDefineOffsetsContext *context = (EvalDefineOffsetsContext *) t->data;
+	RPRNavOffsets *entry = palloc0_object(RPRNavOffsets);
 
 	/*
-	 * Parser guarantee (mirrors visit_nav_plan): nav's direct children are
-	 * never RPRNavExpr -- compound nesting is flattened in place and any
-	 * other nesting is rejected.  Outer-kind dispatch is sufficient.
+	 * Parser guarantee (mirrors compute_matchStartDependent): nav's direct
+	 * children are never RPRNavExpr -- compound nesting is flattened in place
+	 * and any other nesting is rejected.  Outer-kind dispatch is sufficient.
 	 */
 	Assert(nav->arg == NULL || !IsA(nav->arg, RPRNavExpr));
 	Assert(nav->offset_arg == NULL || !IsA(nav->offset_arg, RPRNavExpr));
 	Assert(nav->compound_offset_arg == NULL ||
 		   !IsA(nav->compound_offset_arg, RPRNavExpr));
 
-	/* Backward reach: PREV, LAST-with-offset */
-	if (!context->maxOverflow)
+	entry->nav = nav;
+	if (nav->offset_arg != NULL)
+		entry->offset_state = ExecInitExpr(nav->offset_arg,
+										   (PlanState *) winstate);
+	if (nav->compound_offset_arg != NULL)
+		entry->compound_offset_state = ExecInitExpr(nav->compound_offset_arg,
+													(PlanState *) winstate);
+
+	winstate->rprNavOffsets = lappend(winstate->rprNavOffsets, entry);
+}
+
+static bool
+RPRNavExpr_walker(Node *node, WindowAggState *winstate)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, RPRNavExpr))
+		build_nav_offsets(castNode(RPRNavExpr, node), winstate);
+
+	return expression_tree_walker(node, RPRNavExpr_walker, winstate);
+}
+
+/*
+ * build_define_offsets
+ *		At executor init, create one RPRNavOffsets entry per navigation in the
+ *		DEFINE clause and compile its offset argument expressions.
+ *
+ * The concrete offset values -- and the tuplestore trim bounds derived from
+ * them -- are resolved later, per scan, by resolve_nav_offsets().  A non-RPR
+ * window has an empty DEFINE clause and falls through to the defaults.
+ */
+static void
+build_define_offsets(WindowAggState *winstate, List *defineClause)
+{
+	EvalDefineOffsetsContext ctx;
+
+	winstate->navMaxOffset = 0;
+	winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
+	winstate->hasMaxNav = false;
+	winstate->hasFirstNav = false;
+	winstate->navFirstOffset = 0;
+	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
+	winstate->rprNavOffsets = NIL;
+
+	if (defineClause == NIL)
+		return;
+
+	foreach_node(TargetEntry, te, defineClause)
 	{
-		int64		reach = 0;
-		bool		gotReach = false;
-
-		if (nav->kind == RPR_NAV_PREV)
-		{
-			reach = eval_nav_offset_helper(context->winstate,
-										   nav->offset_arg, 1);
-			gotReach = true;
-		}
-		else if (nav->kind == RPR_NAV_LAST && nav->offset_arg != NULL)
-		{
-			reach = eval_nav_offset_helper(context->winstate,
-										   nav->offset_arg, 0);
-			gotReach = true;
-		}
-		else if (nav->kind == RPR_NAV_PREV_LAST ||
-				 nav->kind == RPR_NAV_NEXT_LAST)
-		{
-			int64		inner = eval_nav_offset_helper(context->winstate,
-													   nav->offset_arg, 0);
-			int64		outer = eval_nav_offset_helper(context->winstate,
-													   nav->compound_offset_arg, 1);
-
-			if (nav->kind == RPR_NAV_PREV_LAST)
-			{
-				if (pg_add_s64_overflow(inner, outer, &reach))
-					context->maxOverflow = true;
-				else
-					gotReach = true;
-			}
-			else
-			{
-				reach = Max(inner - outer, 0);
-				gotReach = true;
-			}
-		}
-
-		if (gotReach)
-			context->maxOffset = Max(context->maxOffset, reach);
+		RPRNavExpr_walker((Node *) te->expr, winstate);
 	}
 
-	/* Forward reach from match_start: FIRST, compound PREV_FIRST/NEXT_FIRST */
-	if (nav->kind == RPR_NAV_FIRST)
-	{
-		int64		reach;
+	/*
+	 * Resolve the offsets that are already constant at plan time, so EXPLAIN
+	 * (which never executes, hence never reaches resolve_nav_offsets()) shows
+	 * the real trim bounds.  A parameterized offset (PARAM_EXTERN under a
+	 * generic plan, or a PARAM_EXEC) has no value yet and is left for
+	 * resolve_nav_offsets() to bound per scan.
+	 */
+	ctx.winstate = winstate;
+	ctx.maxOffset = 0;
+	ctx.maxOverflow = false;
+	ctx.minFirstOffset = PG_INT64_MAX;
+	ctx.hasMax = false;
+	ctx.hasFirst = false;
+	ctx.validate = false;		/* init resolution is for EXPLAIN display only */
 
-		reach = eval_nav_offset_helper(context->winstate,
-									   nav->offset_arg, 0);
-		context->minFirstOffset = Min(context->minFirstOffset, reach);
-	}
-	else if (nav->kind == RPR_NAV_PREV_FIRST ||
-			 nav->kind == RPR_NAV_NEXT_FIRST)
+	foreach_ptr(RPRNavOffsets, entry, winstate->rprNavOffsets)
 	{
-		int64		inner = eval_nav_offset_helper(context->winstate,
-												   nav->offset_arg, 0);
-		int64		outer = eval_nav_offset_helper(context->winstate,
-												   nav->compound_offset_arg, 1);
-		int64		reach;
+		RPRNavExpr *nav = entry->nav;
+		bool		is_const;
 
-		if (nav->kind == RPR_NAV_PREV_FIRST)
+		/*
+		 * A foldable offset such as PREV(v, 1 + 1) counts as fixed only if
+		 * eval_const_expressions() reached inside the navigation and left a
+		 * Const here, which the expression tree mutator does for us.
+		 */
+		is_const = (nav->offset_arg == NULL || IsA(nav->offset_arg, Const)) &&
+			(nav->compound_offset_arg == NULL ||
+			 IsA(nav->compound_offset_arg, Const));
+
+		if (is_const)
 		{
-			/*
-			 * reach = inner - outer.  Both are non-negative, so the result >=
-			 * -PG_INT64_MAX, which cannot underflow int64.
-			 */
-			reach = inner - outer;
+			/* constant offset: resolvable now, for EXPLAIN and the scan */
+			resolve_one_nav(entry, &ctx);
 		}
 		else
 		{
 			/*
-			 * NEXT_FIRST: reach = inner + outer.  This can overflow, but the
-			 * result is always >= 0, so it never updates minFirstOffset
-			 * (which tracks the minimum).  Clamp to PG_INT64_MAX on overflow.
+			 * A parameterized offset (a bind PARAM_EXTERN or, via
+			 * SRF/function inlining, a correlated PARAM_EXEC) has no
+			 * dependable value at init.  Like a window frame offset it is
+			 * resolved at execution by resolve_nav_offsets(), and EXPLAIN
+			 * shows "runtime".
 			 */
+			if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_LAST ||
+				nav->kind == RPR_NAV_PREV_LAST || nav->kind == RPR_NAV_NEXT_LAST)
+			{
+				ctx.hasMax = true;
+				winstate->navMaxOffsetKind = RPR_NAV_OFFSET_NEEDS_EVAL;
+			}
+			if (nav->kind == RPR_NAV_FIRST || nav->kind == RPR_NAV_PREV_FIRST ||
+				nav->kind == RPR_NAV_NEXT_FIRST)
+			{
+				ctx.hasFirst = true;
+				winstate->navFirstOffsetKind = RPR_NAV_OFFSET_NEEDS_EVAL;
+			}
+		}
+	}
+
+	if (ctx.maxOverflow)
+	{
+		/*
+		 * a const/bind overflow forces retain-all, unless a param already
+		 * made this dimension "runtime" (NEEDS_EVAL wins for display)
+		 */
+		if (winstate->navMaxOffsetKind != RPR_NAV_OFFSET_NEEDS_EVAL)
+			winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
+	}
+	else
+		winstate->navMaxOffset = ctx.maxOffset;
+
+	winstate->hasMaxNav = ctx.hasMax;
+	winstate->hasFirstNav = ctx.hasFirst;
+	if (ctx.hasFirst && ctx.minFirstOffset < PG_INT64_MAX)
+		winstate->navFirstOffset = ctx.minFirstOffset;
+	else if (ctx.hasFirst)
+		winstate->navFirstOffset = PG_INT64_MAX;
+}
+
+/*
+ * resolve_one_nav
+ *		Evaluate one navigation's offset(s) for the current scan, pin the
+ *		resolved values into its RPRNavState, and accumulate the backward and
+ *		forward reach used to size the tuplestore trim.
+ */
+static void
+resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
+{
+	RPRNavExpr *nav = entry->nav;
+	int64		inner;
+	int64		outer;
+
+	/* Inner offset */
+	if (entry->offset_state != NULL)
+		inner = eval_nav_offset(context->winstate, entry->offset_state,
+								context->validate);
+	else if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_NEXT)
+		inner = 1;
+	else
+		inner = 0;
+
+	/* Outer (compound) offset */
+	if (entry->compound_offset_state != NULL)
+		outer = eval_nav_offset(context->winstate, entry->compound_offset_state,
+								context->validate);
+	else
+		outer = 1;
+
+	/*
+	 * A negative offset is rejected at execution, where eval_nav_offset() has
+	 * already raised the error before we get here, so this navigation can
+	 * never run and needs no rows retained.  Leave it out of both reaches,
+	 * which also keeps the arithmetic below on non-negative operands.
+	 */
+	if (inner < 0 || outer < 0)
+	{
+		Assert(!context->validate);
+		return;
+	}
+
+	entry->offset = inner;
+	entry->compound_offset = outer;
+
+	/*
+	 * Pin the resolved values into the compiled navigation's RPRNavState, so
+	 * ExecEvalRPRNavSet() reads this scan's constant instead of re-evaluating
+	 * the offset per row.
+	 */
+	if (entry->rprnavstate != NULL)
+	{
+		entry->rprnavstate->offset.isnull = false;
+		entry->rprnavstate->offset.value = Int64GetDatum(inner);
+		entry->rprnavstate->compound_offset.isnull = false;
+		entry->rprnavstate->compound_offset.value = Int64GetDatum(outer);
+	}
+
+	/*
+	 * Backward reach: PREV, LAST at any offset including the default 0, and
+	 * compound PREV_LAST/NEXT_LAST.
+	 */
+	if (nav->kind == RPR_NAV_PREV ||
+		nav->kind == RPR_NAV_LAST ||
+		nav->kind == RPR_NAV_PREV_LAST ||
+		nav->kind == RPR_NAV_NEXT_LAST)
+	{
+		context->hasMax = true;
+
+		if (!context->maxOverflow)
+		{
+			int64		reach = 0;
+
+			if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_LAST)
+				reach = inner;
+			else if (nav->kind == RPR_NAV_PREV_LAST)
+			{
+				if (pg_add_s64_overflow(inner, outer, &reach))
+					context->maxOverflow = true;
+			}
+			else
+				reach = Max(inner - outer, 0);
+
+			if (!context->maxOverflow)
+				context->maxOffset = Max(context->maxOffset, reach);
+		}
+	}
+
+	/* Forward reach from match_start: FIRST, compound PREV_FIRST/NEXT_FIRST */
+	if (nav->kind == RPR_NAV_FIRST ||
+		nav->kind == RPR_NAV_PREV_FIRST ||
+		nav->kind == RPR_NAV_NEXT_FIRST)
+	{
+		int64		reach;
+
+		context->hasFirst = true;
+
+		if (nav->kind == RPR_NAV_FIRST)
+			reach = inner;
+		else if (nav->kind == RPR_NAV_PREV_FIRST)
+			reach = inner - outer;	/* both >= 0, cannot underflow int64 */
+		else
+		{
+			/* NEXT_FIRST: inner + outer, always >= 0; clamp on overflow */
 			if (pg_add_s64_overflow(inner, outer, &reach))
 				reach = PG_INT64_MAX;
 		}
+
 		context->minFirstOffset = Min(context->minFirstOffset, reach);
 	}
 }
 
 /*
- * eval_define_offsets
- *		Evaluate non-constant nav offsets at executor init time.
+ * resolve_nav_offsets
+ *		Resolve every navigation offset for the current scan and store the
+ *		tuplestore trim bounds in the WindowAggState.
  *
- * Called when the planner set navMaxOffsetKind and/or navFirstOffsetKind
- * to RPR_NAV_OFFSET_NEEDS_EVAL because some offset contains a parameter
- * or non-foldable expression.  Updates only the fields whose kind was
- * NEEDS_EVAL; FIXED kinds are left unchanged.
- *
- * On backward-reach overflow, sets navMaxOffsetKind to
- * RPR_NAV_OFFSET_RETAIN_ALL so that tuplestore trim is disabled for
- * backward navigation.
+ * Called from ExecWindowAgg on the first call and after every rescan -- the
+ * same place calculate_frame_offsets() resolves the window frame bounds.  By
+ * then every parameter (PARAM_EXTERN and PARAM_EXEC alike) is bound, and the
+ * offset is a run-time constant, so a single evaluation per scan is correct.
+ * This keeps the trim finite for a parameterized offset (no retain-all) and
+ * revalidates it (fail-closed) on each scan.
  */
 static void
-eval_define_offsets(WindowAggState *winstate, List *defineClause)
+resolve_nav_offsets(WindowAggState *winstate)
 {
 	EvalDefineOffsetsContext ctx;
-	NavTraversal trav;
-	bool		needsMax = (winstate->navMaxOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL);
-	bool		needsFirst = (winstate->hasFirstNav &&
-							  winstate->navFirstOffsetKind == RPR_NAV_OFFSET_NEEDS_EVAL);
 
-	if (!needsMax && !needsFirst)
+	/* Servicing the request now; clear the per-scan pending flag */
+	winstate->navResolvePending = false;
+
+	winstate->navMaxOffset = 0;
+	winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
+	winstate->hasMaxNav = false;
+	winstate->hasFirstNav = false;
+	winstate->navFirstOffset = 0;
+	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
+
+	if (winstate->rprNavOffsets == NIL)
 		return;
 
 	ctx.winstate = winstate;
 	ctx.maxOffset = 0;
 	ctx.maxOverflow = false;
 	ctx.minFirstOffset = PG_INT64_MAX;
+	ctx.hasMax = false;
+	ctx.hasFirst = false;
+	ctx.validate = true;		/* execution: fail-closed on null/negative */
 
-	trav.visit = visit_nav_exec;
-	trav.data = &ctx;
-
-	foreach_node(TargetEntry, te, defineClause)
+	foreach_ptr(RPRNavOffsets, entry, winstate->rprNavOffsets)
 	{
-		nav_traversal_walker((Node *) te->expr, &trav);
+		resolve_one_nav(entry, &ctx);
 	}
 
-	if (needsMax)
-	{
-		if (ctx.maxOverflow)
-		{
-			winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
-			winstate->navMaxOffset = 0;
-		}
-		else
-		{
-			winstate->navMaxOffsetKind = RPR_NAV_OFFSET_FIXED;
-			winstate->navMaxOffset = ctx.maxOffset;
-		}
-	}
+	/*
+	 * Backward (PREV/LAST) reach.  On int64 overflow the lookback cannot be
+	 * bounded, so mark the dimension RETAIN_ALL; advance_nav_mark() reads it
+	 * to disable tuplestore trim.
+	 */
+	if (ctx.maxOverflow)
+		winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
+	else
+		winstate->navMaxOffset = ctx.maxOffset;
 
-	if (needsFirst)
+	winstate->hasMaxNav = ctx.hasMax;
+
+	/* Forward (FIRST) reach; never needs a retain-all sentinel */
+	winstate->hasFirstNav = ctx.hasFirst;
+
+	if (ctx.hasFirst)
 	{
-		winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
 		if (ctx.minFirstOffset < PG_INT64_MAX)
 			winstate->navFirstOffset = ctx.minFirstOffset;
 		else
@@ -4379,12 +4551,9 @@ advance_nav_mark(WindowAggState *winstate, int64 currentPos)
 	if (winstate->nav_winobj == NULL)
 		return;
 
-	/* RETAIN_ALL disables trim for the backward (PREV/LAST) dimension */
+	/* RETAIN_ALL (offset overflow) disables trim for the backward dimension */
 	if (winstate->navMaxOffsetKind == RPR_NAV_OFFSET_RETAIN_ALL)
 		return;
-
-	/* navMax is FIXED here: NEEDS_EVAL resolved, RETAIN_ALL returned */
-	Assert(winstate->navMaxOffsetKind == RPR_NAV_OFFSET_FIXED);
 
 	if (currentPos > winstate->navMaxOffset)
 		navmarkpos = currentPos - winstate->navMaxOffset;
@@ -4394,9 +4563,6 @@ advance_nav_mark(WindowAggState *winstate, int64 currentPos)
 	if (winstate->hasFirstNav && winstate->nfaContext != NULL)
 	{
 		int64		firstreach;
-
-		/* navFirst is always FIXED; it never takes RETAIN_ALL */
-		Assert(winstate->navFirstOffsetKind == RPR_NAV_OFFSET_FIXED);
 
 		/*
 		 * Head context has the smallest matchStartRow (contexts appended in

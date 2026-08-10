@@ -668,25 +668,28 @@ typedef struct WindowFuncRunCondition
  */
 typedef enum RPRNavKind
 {
-	RPR_NAV_PREV,
-	RPR_NAV_NEXT,
-	RPR_NAV_FIRST,
-	RPR_NAV_LAST,
+	RPR_NAV_PREV,				/* offset default: 1 */
+	RPR_NAV_NEXT,				/* offset default: 1 */
+	RPR_NAV_FIRST,				/* offset default: 0 */
+	RPR_NAV_LAST,				/* offset default: 0 */
 	/* compound: outer(inner(arg)) */
-	RPR_NAV_PREV_FIRST,
-	RPR_NAV_PREV_LAST,
-	RPR_NAV_NEXT_FIRST,
-	RPR_NAV_NEXT_LAST,
+	RPR_NAV_PREV_FIRST,			/* (offset, compound_offset) default: (0, 1) */
+	RPR_NAV_PREV_LAST,			/* (offset, compound_offset) default: (0, 1) */
+	RPR_NAV_NEXT_FIRST,			/* (offset, compound_offset) default: (0, 1) */
+	RPR_NAV_NEXT_LAST,			/* (offset, compound_offset) default: (0, 1) */
 } RPRNavKind;
 
 typedef struct RPRNavExpr
 {
 	Expr		xpr;
-	RPRNavKind	kind;			/* navigation kind */
-	Expr	   *arg;			/* argument expression */
-	Expr	   *offset_arg;		/* offset expression, or NULL for default */
-	Expr	   *compound_offset_arg;	/* outer offset for compound nav, or
-										 * NULL if simple */
+	RPRNavKind	kind;
+	/* argument expression */
+	Expr	   *arg;
+	/* offset expression, or NULL for the kind's default */
+	Expr	   *offset_arg;
+	/* outer offset for compound navigation, or NULL for its default */
+	Expr	   *compound_offset_arg;
+
 	/* result type (same as arg's type) */
 	Oid			resulttype pg_node_attr(query_jumble_ignore);
 	/* OID of collation of result */
