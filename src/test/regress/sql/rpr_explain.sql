@@ -1901,32 +1901,10 @@ WINDOW w AS (
 -- ============================================================
 -- INITIAL vs no INITIAL comparison
 -- ============================================================
-
--- With INITIAL keyword
-CREATE VIEW rpr_ev_initial_with AS
-SELECT count(*) OVER w
-FROM generate_series(1, 50) AS s(v)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP PAST LAST ROW
-    INITIAL
-    PATTERN (A+ B)
-    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
-);
-SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_initial_with'), E'\n')) AS line WHERE line ~ 'PATTERN';
-SELECT rpr_explain_filter('
-EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
-SELECT count(*) OVER w
-FROM generate_series(1, 50) AS s(v)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP PAST LAST ROW
-    INITIAL
-    PATTERN (A+ B)
-    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
-);');
-
--- Without INITIAL keyword (same behavior currently)
+-- INITIAL is the only supported mode (SEEK is unimplemented), so omitting the
+-- keyword changes nothing at run time and deparse adds it back.  Print the
+-- whole viewdef: filtering to the PATTERN line would hide the INITIAL literal,
+-- which is the only thing this test can pin.
 CREATE VIEW rpr_ev_initial_without AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1936,17 +1914,7 @@ WINDOW w AS (
     PATTERN (A+ B)
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );
-SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_initial_without'), E'\n')) AS line WHERE line ~ 'PATTERN';
-SELECT rpr_explain_filter('
-EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
-SELECT count(*) OVER w
-FROM generate_series(1, 50) AS s(v)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP PAST LAST ROW
-    PATTERN (A+ B)
-    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
-);');
+SELECT pg_get_viewdef('rpr_ev_initial_without'::regclass);
 
 -- ============================================================
 -- Quantifier Variations

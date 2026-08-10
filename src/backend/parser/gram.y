@@ -741,7 +741,6 @@ static bool rpr_is_quantifier_token(const char *tok);
 				row_pattern_quantifier_opt
 %type <list>	row_pattern_definition_list row_pattern_permute_list
 %type <ival>	opt_row_pattern_skip_to
-%type <boolean>	opt_row_pattern_initial_or_seek
 
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
@@ -17673,7 +17672,6 @@ opt_row_pattern_skip_to opt_row_pattern_initial_or_seek
 			{
 				RPCommonSyntax *n = makeNode(RPCommonSyntax);
 				n->rpSkipTo = $1;
-				n->initial = $2;
 				n->rpPattern = (RPRPatternNode *) $5;
 				n->rpDefs = $8;
 				n->location = @3;
@@ -17698,7 +17696,7 @@ opt_row_pattern_skip_to:
 		;
 
 opt_row_pattern_initial_or_seek:
-			INITIAL_P		{ $$ = true; }
+			INITIAL_P
 			| SEEK
 				{
 					ereport(ERROR,
@@ -17707,7 +17705,7 @@ opt_row_pattern_initial_or_seek:
 							errhint("Use INITIAL instead."),
 							parser_errposition(@1));
 				}
-			| /*EMPTY*/		{ $$ = true; }
+			| /*EMPTY*/
 		;
 
 row_pattern:
