@@ -4327,6 +4327,20 @@ ERROR:  cannot nest row pattern navigation more than two levels deep
 LINE 6:     DEFINE A AS PREV(FIRST(PREV(v))) > 0
                         ^
 HINT:  Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed.
+-- Sibling navigations: prohibited, but they are not a deeper nesting,
+-- so the inner navigation must be reported as not being the direct
+-- argument rather than as a third level.
+SELECT count(*) OVER w
+FROM generate_series(1,10) s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(FIRST(v) + LAST(v)) > 0
+);
+ERROR:  row pattern navigation operation must be a direct argument of the outer navigation
+LINE 6:     DEFINE A AS PREV(FIRST(v) + LAST(v)) > 0
+                        ^
+HINT:  Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed.
 -- A navigation offset must be a run-time constant, not a navigation operation
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
