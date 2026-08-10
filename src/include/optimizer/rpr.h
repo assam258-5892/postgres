@@ -38,8 +38,9 @@
 #define RPR_COUNT_INF		RPR_QUANTITY_INF
 #define RPR_ELEMIDX_MAX		PG_INT16_MAX	/* max pattern elements */
 #define RPR_ELEMIDX_INVALID	((RPRElemIdx) -1)	/* invalid index */
-#define RPR_DEPTH_MAX		PG_UINT8_MAX	/* max pattern nesting depth: 255,
-											 * the largest RPRDepth */
+#define RPR_DEPTH_MAX		PG_UINT8_MAX	/* 255 levels fit RPRDepth; depth
+											 * is 0-based, so the deepest
+											 * permitted nesting is 254 */
 
 /* Reserved control-element varIds (high nibble 0xF; 0xF0-0xFA spare) */
 #define RPR_VARID_BEGIN		((RPRVarId) 0xFB)	/* group begin */
@@ -58,7 +59,7 @@
 											 * empty match */
 /*
  * The two absorption flags below are explained in README.rpr IV-5
- * ("Absorbability Analysis"), with worked examples in Appendix C; the
+ * ("Absorbability Analysis"), with worked examples in Appendix B; the
  * analysis that sets them is computeAbsorbability() in
  * optimizer/plan/rpr.c.
  */

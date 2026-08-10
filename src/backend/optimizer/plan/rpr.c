@@ -245,7 +245,10 @@ rprBodyHasUniformLength(List *children)
  *   SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
  *
  * Returns a new list with optimized children, with nested SEQ children
- * flattened into the parent list.
+ * flattened into the parent list.  The helpers in this file follow two
+ * conventions -- this one, mergeConsecutiveGroups() and
+ * mergeGroupPrefixSuffix() build a new list, the rest edit cells in place --
+ * so a caller must always assign the return value.
  */
 static List *
 flattenSeqChildren(List *children)
@@ -375,8 +378,9 @@ mergeConsecutiveGroups(List *children)
 			/* ----------------------
 			 * Can merge consecutive GROUP nodes if:
 			 * 1. Identical children
-			 * 2. No min overflow: prev->min + child->min < INF
-			 * 3. No max overflow: prev->max + child->max < INF (or either is INF)
+			 * 2. Body consumes a fixed number of rows (see above)
+			 * 3. No min overflow: prev->min + child->min < INF
+			 * 4. No max overflow: prev->max + child->max < INF (or either is INF)
 			 *
 			 * Strict <: a sum equal to INF would alias the unbounded sentinel
 			 * (min must stay finite; a finite max must not become INF).
@@ -722,8 +726,9 @@ optimizeSeqPattern(RPRPatternNode *pattern)
  * Example:
  *   (A | (B | C)) -> (A | B | C)
  *
- * Returns a new list with optimized children, with nested ALT children
- * flattened into the parent list.
+ * Splices each nested ALT's children into the parent list at the position the
+ * ALT occupied.  Edits the list in place and returns it; the pointer may have
+ * been reallocated, so the caller must assign the result.
  */
 static List *
 flattenAltChildren(List *children)
@@ -775,7 +780,8 @@ flattenAltChildren(List *children)
  *   (A | B | A) -> (A | B)
  *   (X | Y | X | Z | Y) -> (X | Y | Z)
  *
- * Returns a new list with only unique children (first occurrence kept).
+ * Deletes the later occurrences in place and returns the list, keeping the
+ * first of each; the pointer may have been reallocated.
  */
 static List *
 removeDuplicateAlternatives(List *children)
@@ -1321,7 +1327,8 @@ fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
  *     |                  +-- jump --+ (loop back to first child)
  *     +---- jump -------------------+ (skip to after END)
  *
- * BEGIN.jump points past END (skip path when count >= max or min == 0).
+ * BEGIN.jump points past END (the skip path taken when min == 0; a count is
+ * only tested at END, so a BEGIN never takes it for reaching max).
  * END.jump points to the first child (loop-back path).
  * BEGIN.next and END.next are set later by finalizeRPRPattern().
  *
@@ -1692,29 +1699,33 @@ finalizeRPRPattern(RPRPattern *result)
  *   -> Compare at A every row. When contexts move to B, absorption stops.
  *
  *   Pattern: (A B)+ C
- *   Element 0 (A): ABSORBABLE_BRANCH
- *   Element 1 (B): ABSORBABLE_BRANCH
- *   Element 2 (END): ABSORBABLE | ABSORBABLE_BRANCH  <- comparison point
- *   Element 3 (C): (none)
+ *   Element 0 (BEGIN): ABSORBABLE_BRANCH
+ *   Element 1 (A): ABSORBABLE_BRANCH
+ *   Element 2 (B): ABSORBABLE_BRANCH
+ *   Element 3 (END): ABSORBABLE | ABSORBABLE_BRANCH  <- comparison point
+ *   Element 4 (C): (none)
  *   -> Compare at END every 2 rows. When contexts move to C, absorption stops.
  *
  *   Pattern: (A+ B+)+ C
- *   Element 0 (A): ABSORBABLE | ABSORBABLE_BRANCH  <- only first A+ flagged
- *   Element 1 (B): (none)
- *   Element 2 (END): (none)
- *   Element 3 (C): (none)
- *   -> Only first unbounded portion (A+) gets flags. Absorption happens
- *      at A during first iteration. After moving to B+, absorption stops.
+ *   Element 0 (BEGIN): ABSORBABLE_BRANCH
+ *   Element 1 (A): ABSORBABLE | ABSORBABLE_BRANCH  <- comparison point
+ *   Element 2 (B): (none)
+ *   Element 3 (END): (none)
+ *   Element 4 (C): (none)
+ *   -> Compare at A during the first iteration. After moving to B+,
+ *      absorption stops.
  *
  * First Unbounded Portion Strategy:
- *   The algorithm only flags the FIRST unbounded portion starting from
- *   element 0. This is sufficient because:
+ *   Along one path the algorithm only flags the FIRST unbounded portion
+ *   starting from element 0; an alternation is walked branch by branch, so
+ *   each branch may contribute one (A+ | B+ gives both). This is sufficient
+ *   because:
  *   - Absorption in first portion already achieves O(n) complexity
  *   - Later portions have different synchronization characteristics
  *   - Nested unbounded patterns are too complex for simple absorption
  *   - Complex patterns (nested groups, etc.) naturally die from mismatch
  *
- * Runtime Usage (in nodeWindowAgg.c):
+ * Runtime Usage (in execRPR.c):
  *   - state.isAbsorbable = (previous && elem.ABSORBABLE_BRANCH)
  *   - Monotonic: once false, stays false (cannot re-enter region)
  *   - context.hasAbsorbableState: can absorb others (>=1 absorbable state)
@@ -1991,11 +2002,13 @@ computeAbsorbabilityRecursive(RPRPattern *pattern, RPRElemIdx startIdx,
  *     - Simple unbounded VAR: the VAR itself (e.g., A in A+)
  *     - Unbounded GROUP: the END element (e.g., END in (A B)+)
  *   RPR_ELEM_ABSORBABLE_BRANCH: All elements in absorbable region
- *     - All elements within the same scope as unbounded start
+ *     - Simple unbounded VAR: the VAR itself only
+ *     - Unbounded GROUP: the whole body (including nested subgroups) and the
+ *       group's END, plus any enclosing BEGIN/ALT on the path to it
  *
  * Examples:
  *   A+ B C         - absorbable (A gets both flags)
- *   (A B)+ C       - absorbable (A,B,END get BRANCH, END gets ABSORBABLE)
+ *   (A B)+ C       - absorbable (BEGIN,A,B,END get BRANCH, END gets ABSORBABLE)
  *   A B+           - NOT absorbable (unbounded not at start)
  *   A+? B C        - NOT absorbable (reluctant quantifier)
  *   (A+ B+)+       - only first A+ on first iteration (nested unbounded not supported)
@@ -2091,16 +2104,23 @@ buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 	 *
 	 * Runtime conditions for absorption:
 	 *
-	 * 1. SKIP TO PAST LAST ROW required (not SKIP TO NEXT ROW): With NEXT
-	 * ROW, after each match the search resumes from the next row, so contexts
-	 * are immediately discarded. No redundant contexts accumulate, making
-	 * absorption unnecessary.
+	 * 1. SKIP TO PAST LAST ROW required (not SKIP TO NEXT ROW): with NEXT
+	 * ROW, matches overlap and every row must report its own match, so
+	 * absorption (sharing one result) is not semantically possible.  A
+	 * completed context does linger until its own start row is queried; that
+	 * is the inherent cost of per-row match reporting, not redundancy
+	 * absorption could remove.
 	 *
 	 * 2. Unbounded frame end required (not ROWS with bounded end): With a
 	 * bounded frame (e.g., ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING),
 	 * matches may be truncated at frame boundaries. This changes the
 	 * absorption semantics - older contexts don't necessarily produce longer
 	 * matches when frame limits apply differently to each context.
+	 *
+	 * 3. No DEFINE may depend on match_start: such a variable is evaluated
+	 * against the start of its own match, so two contexts that differ only in
+	 * where they started can classify the same row differently and the older
+	 * one no longer covers the newer.
 	 */
 	if (rpSkipTo == ST_PAST_LAST_ROW &&
 		(frameOptions & FRAMEOPTION_END_UNBOUNDED_FOLLOWING) &&
