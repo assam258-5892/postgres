@@ -885,6 +885,20 @@ DROP TABLE rpr_quant;
 CREATE TABLE rpr_reluctant (id INT, val INT);
 INSERT INTO rpr_reluctant VALUES (1, 10), (2, 20), (3, 30);
 
+-- A greedy quantifier followed by a reluctant one over the same variable must
+-- not be merged: the merged spellings A{2,3} and A{1,4} match all three rows
+-- where these stop at two, so merging would change the preferred match.
+SELECT id, count(*) OVER w FROM rpr_reluctant
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2} A??) DEFINE A AS TRUE);
+
+SELECT id, count(*) OVER w FROM rpr_reluctant
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{1,2} A{0,2}?) DEFINE A AS TRUE);
+
+-- cascade: the reluctant middle VAR must stop the merge on both sides, where
+-- the merged A{1,3} would match all three rows
+SELECT id, count(*) OVER w FROM rpr_reluctant
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? A?? A) DEFINE A AS TRUE);
+
 -- *? (zero or more, reluctant)
 -- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
@@ -4154,6 +4168,54 @@ WINDOW w AS (
 );
 -- Expected: Fallback - VARs not merged (min sum 2147483647 == INF)
 
+-- Test: one more than that sum does not fit in int32.  The fallback looks the
+-- same as the case above; this one reaches the overflow check instead of the
+-- >= INF comparison.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1073741825,} A{1073741823,})
+    DEFINE A AS val > 0
+);
+
+-- Test: VAR merge falls back when the max sum lands exactly on INF.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741823} A{1,1073741824})
+    DEFINE A AS val > 0
+);
+-- Test: one below that sum is the largest max the merge may keep.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741822} A{1,1073741824})
+    DEFINE A AS val > 0
+);
+-- Test: one above that does not fit in int32; the overflow check rejects it.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741824} A{1,1073741824})
+    DEFINE A AS val > 0
+);
+-- Test: an operand that is already unbounded still merges.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A{1,1073741823} A{1,})
+    DEFINE A AS val > 0
+);
 -- Test: consecutive GROUP merge whose min sum is exactly INF causes fallback.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
@@ -4164,6 +4226,79 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5
 );
 -- Expected: Fallback - GROUPs not merged (min sum 2147483647 == INF)
+
+-- Test: consecutive GROUP merge whose max sum is exactly INF causes fallback,
+-- where one less merges.  Without the guard the merged max would alias INF and
+-- a bounded pattern would become unbounded.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ((A B){1,1073741823} (A B){1,1073741824})
+    DEFINE A AS val > 0, B AS val > 5
+);
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ((A B){1,1073741822} (A B){1,1073741824})
+    DEFINE A AS val > 0, B AS val > 5
+);
+
+-- Test: the prefix merge adds one iteration, so it declines a min already at
+-- INF - 1 and a max already at INF - 1; one less than either merges.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B (A B){2147483646,})
+    DEFINE A AS val > 0, B AS val > 5
+);
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B (A B){2147483645,})
+    DEFINE A AS val > 0, B AS val > 5
+);
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B (A B){1,2147483646})
+    DEFINE A AS val > 0, B AS val > 5
+);
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B (A B){1,2147483645})
+    DEFINE A AS val > 0, B AS val > 5
+);
+
+-- Test: the suffix merge has the same boundary as the prefix merge.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ((A B){2147483646,} A B)
+    DEFINE A AS val > 0, B AS val > 5
+);
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_fallback
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN ((A B){2147483645,} A B)
+    DEFINE A AS val > 0, B AS val > 5
+);
 
 DROP TABLE rpr_fallback;
 
