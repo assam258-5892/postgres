@@ -3084,9 +3084,9 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 			sizeof(int32) * node->rpPattern->maxDepth;
 
 		/*
-		 * Allocate varMatched array for NFA evaluation. With the new varNames
-		 * ordering (DEFINE order first), varId == defineIdx for all defined
-		 * variables, so no mapping is needed.
+		 * Allocate the per-row varMatched cache.  varNames are built in
+		 * DEFINE order, so varId equals the DEFINE list index and no mapping
+		 * is needed.
 		 */
 		if (winstate->defineClauseExprs != NIL)
 			winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
@@ -4414,8 +4414,8 @@ rpr_is_defined(WindowAggState *winstate)
  * >0, if the row is the first in the reduced frame. Return the number of rows
  * in the reduced frame.
  * -1, if the row is an unmatched row
- * -2, if the row is in the reduced frame but needed to be skipped because of
- * AFTER MATCH SKIP PAST LAST ROW
+ * -2, if the row is inside the current match but is not its first row (an
+ * interior row of the match)
  * -----------------
  */
 static int64

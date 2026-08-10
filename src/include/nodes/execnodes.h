@@ -2603,8 +2603,10 @@ typedef struct RPRNFAState
  *   hasAbsorbableState: can this context absorb others? (>=1 absorbable state)
  *     - Monotonic: true->false only, cannot recover once false
  *     - Used to skip absorption attempts once all absorbable states are gone
- *   allStatesAbsorbable: can this context be absorbed? (ALL states absorbable)
- *     - Dynamic: can change false->true (when non-absorbable states die)
+ *   allStatesAbsorbable: can this context be absorbed? (ALL states
+ *   absorbable, no recorded match)
+ *     - Dynamic: false->true when non-absorbable states die; a recorded
+ *       match pins it false
  *     - Used to determine if this context is eligible for absorption
  */
 typedef struct RPRNFAContext
