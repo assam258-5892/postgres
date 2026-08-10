@@ -444,7 +444,11 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  * walks nav.arg in PHASE_NAV_ARG to collect nesting/column-ref state,
  * applies compound flatten or raises a nesting error, then walks the
  * (post-flatten) offset(s) in PHASE_NAV_OFFSET to enforce the
- * constant-offset and no-nested-nav rules.  No subtree is walked twice.
+ * constant-offset and no-nested-nav rules.  A compound form's inner
+ * offset is covered by both walks: the PHASE_NAV_ARG pass only asks
+ * whether nav.arg as a whole holds a column reference, so the offset
+ * is walked again in PHASE_NAV_OFFSET to catch one it would have
+ * leaked.
  */
 
 /*
@@ -465,7 +469,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
  * Var sightings feed the column-ref rule for the enclosing nav scope;
  * RPRNavExpr sightings inside PHASE_NAV_ARG feed the nesting decision.
  * See the comment block above DefinePhase for the overall design and
- * how each subtree is walked exactly once.
+ * the phase transitions.
  */
 static bool
 define_walker(Node *node, void *context)

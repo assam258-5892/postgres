@@ -2090,10 +2090,12 @@ buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 	 *
 	 * Runtime conditions for absorption:
 	 *
-	 * 1. SKIP TO PAST LAST ROW required (not SKIP TO NEXT ROW): With NEXT
-	 * ROW, after each match the search resumes from the next row, so contexts
-	 * are immediately discarded. No redundant contexts accumulate, making
-	 * absorption unnecessary.
+	 * 1. SKIP TO PAST LAST ROW required (not SKIP TO NEXT ROW): with NEXT
+	 * ROW, matches overlap and every row must report its own match, so
+	 * absorption (sharing one result) is not semantically possible.  A
+	 * completed context does linger until its own start row is queried; that
+	 * is the inherent cost of per-row match reporting, not redundancy
+	 * absorption could remove.
 	 *
 	 * 2. Unbounded frame end required (not ROWS with bounded end): With a
 	 * bounded frame (e.g., ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING),
