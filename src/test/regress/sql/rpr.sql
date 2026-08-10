@@ -1240,6 +1240,77 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
     DEFINE A AS NEXT(LAST(val), -1) IS NULL
 );
 
+-- Compound: an out-of-range inner offset must not skip validation of an
+-- illegal outer offset.  The early exit on the inner used to let a NULL or
+-- negative outer offset through, so the same illegal query passed or errored
+-- depending on the data; both must error now.  All four compound arms are
+-- covered, since each resolves its outer offset separately.
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(FIRST(val, 99), -1) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(FIRST(val, 99), NULL::int8) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(LAST(val, 99), -1) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(LAST(val, 99), NULL::int8) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS NEXT(FIRST(val, 99), -1) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS NEXT(FIRST(val, 99), NULL::int8) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS NEXT(LAST(val, 99), -1) IS NULL
+);
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS NEXT(LAST(val, 99), NULL::int8) IS NULL
+);
+
+-- Same with a host variable, where the offset is not a Const the planner can
+-- fold: one prepared statement, and only the outer offset decides the outcome
+SET plan_cache_mode = force_generic_plan;
+PREPARE test_compound_illegal(int8, int8) AS
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(FIRST(val, $1), $2) IS NULL
+);
+EXECUTE test_compound_illegal(99, 1);
+EXECUTE test_compound_illegal(99, -1);
+EXECUTE test_compound_illegal(99, NULL);
+EXECUTE test_compound_illegal(0, -1);
+DEALLOCATE test_compound_illegal;
+RESET plan_cache_mode;
+
 -- Outer offset overflows int64: target position out of range -> NULL.
 -- Plain NEXT(val, INT64_MAX): currentpos + INT64_MAX overflows.
 SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (

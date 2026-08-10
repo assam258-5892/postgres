@@ -1285,6 +1285,46 @@ SELECT format($$SELECT count(*) OVER w FROM (SELECT 1 i) t
 -- ============================================================
 -- Navigation Functions Tests (PREV / NEXT / FIRST / LAST)
 -- ============================================================
+CREATE TEMP TABLE rpr_nav0 (id int, v int);
+INSERT INTO rpr_nav0 SELECT g, g*10 FROM generate_series(1, 5) g;
+
+-- Two concurrently open portals of the SAME cached generic plan, with different
+-- offset parameters.
+--
+-- The parameterized cursor 'c' compiles to one plpgsql statement -> one SPI
+-- cached plan.  The recursive call OPENs a second portal of that same plan
+-- (with a different offset) while the outer portal is already started but has
+-- not yet FETCHed.
+CREATE OR REPLACE FUNCTION rpr_nested(p_off int, depth int)
+RETURNS SETOF text LANGUAGE plpgsql AS $$
+DECLARE
+  c CURSOR (o int) FOR
+    SELECT id, count(*) OVER w AS cnt
+    FROM rpr_nav0
+    WINDOW w AS (ORDER BY id
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A)
+                 DEFINE A AS PREV(v, o) IS NULL);
+  r record;
+BEGIN
+  OPEN c(p_off);
+  IF depth > 0 THEN
+    RETURN QUERY SELECT * FROM rpr_nested(p_off + 2, depth - 1);
+  END IF;
+
+  LOOP
+    FETCH c INTO r;
+    EXIT WHEN NOT FOUND;
+    RETURN NEXT format('off=%s id=%s cnt=%s', p_off, r.id, r.cnt);
+  END LOOP;
+  CLOSE c;
+END $$;
+
+SET plan_cache_mode = force_generic_plan;
+SELECT * FROM rpr_nested(1, 1);
+RESET plan_cache_mode;
+
+DROP FUNCTION rpr_nested(int, int);
 
 CREATE TABLE rpr_nav (id INT, val INT);
 INSERT INTO rpr_nav VALUES
@@ -4430,7 +4470,7 @@ DROP TABLE rpr_sort;
 CREATE TABLE rpr_srf_t (v int);
 INSERT INTO rpr_srf_t SELECT generate_series(1, 5);
 
-CREATE FUNCTION rpr_srf_f(threshold int)
+CREATE FUNCTION rpr_srf_inline(threshold int)
 RETURNS TABLE (v int, cnt bigint)
 LANGUAGE sql STABLE AS $$
     SELECT v::int, count(*) OVER w
@@ -4443,10 +4483,10 @@ LANGUAGE sql STABLE AS $$
     )
 $$;
 
-SELECT v, cnt FROM rpr_srf_f(3) ORDER BY v;
+SELECT v, cnt FROM rpr_srf_inline(3) ORDER BY v;
 
 DROP TABLE rpr_srf_t;
-DROP FUNCTION rpr_srf_f(int);
+DROP FUNCTION rpr_srf_inline(int);
 
 DROP TABLE rpr_planner;
 

@@ -2848,6 +2848,35 @@ eval_const_expressions_mutator(Node *node,
 
 				return (Node *) newexpr;
 			}
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *expr = (RPRNavExpr *) node;
+				RPRNavExpr *newexpr = makeNode(RPRNavExpr);
+
+				/*
+				 * A navigation itself never folds: its value depends on the
+				 * row it lands on.  Its offsets do, and they have to: the
+				 * executor tests IsA(offset_arg, Const) to decide whether the
+				 * tuplestore trim bound is fixed or must be resolved per scan
+				 * (build_define_offsets in nodeWindowAgg.c), so PREV(v, 1 + 1)
+				 * has to arrive there as a Const rather than be reported as a
+				 * run-time offset.
+				 *
+				 * Copy the node whole and replace only the children, so a
+				 * field added to RPRNavExpr needs no change here.
+				 */
+				memcpy(newexpr, expr, sizeof(RPRNavExpr));
+				newexpr->arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->arg, context);
+				newexpr->offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->offset_arg,
+												   context);
+				newexpr->compound_offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->compound_offset_arg,
+												   context);
+
+				return (Node *) newexpr;
+			}
 		case T_FuncExpr:
 			{
 				FuncExpr   *expr = (FuncExpr *) node;
