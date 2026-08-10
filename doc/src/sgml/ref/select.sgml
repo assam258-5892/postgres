@@ -1167,7 +1167,10 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     <literal>??</literal>, <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}?</literal>)
     are supported.
     The exclusion (<literal>{-</literal> and <literal>-}</literal>)
-    is not supported.
+    and the permutation (<literal>PERMUTE</literal>) are not supported.
+    <literal>PERMUTE</literal> is recognized wherever
+    a <literal>(</literal> follows it, so a pattern variable of that name has
+    to be written <literal>"permute"</literal> in that position.
     Patterns can be grouped using parentheses, and alternation (OR) can be
     expressed using the vertical bar <literal>|</literal>.
     For example, <literal>(A B)+</literal> matches one or more repetitions
