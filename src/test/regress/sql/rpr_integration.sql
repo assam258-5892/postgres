@@ -29,7 +29,11 @@
 --    B7. RPR + Recursive CTE
 --    B8. RPR + Incremental sort
 --    B9. RPR + Volatile function in DEFINE
---    B10. RPR + Correlated subquery
+--    B10. RPR + Correlated subquery in WHERE
+--    B11. RPR + Junk targetlist pruning
+--    B12. RPR + Correlated navigation offsets
+--    B13. RPR + DEFINE-only parameter caching
+--    B14. RPR + Multiple window definitions
 --
 
 CREATE TABLE rpr_integ (id INT, val INT);
@@ -49,6 +53,10 @@ INSERT INTO rpr_integ VALUES
 -- UNBOUNDED PRECEDING, while in the RPR case the guard in
 -- optimize_window_clauses() blocks the rewrite and the frame is
 -- preserved as specified.
+-- Affected functions: row_number, rank, dense_rank, percent_rank,
+-- cume_dist, ntile.  All would change the frame to ROWS UNBOUNDED
+-- PRECEDING, breaking RPR's required ROWS BETWEEN CURRENT ROW AND
+-- UNBOUNDED FOLLOWING.
 
 -- Non-RPR baseline: the planner rewrites the frame to ROWS UNBOUNDED PRECEDING.
 EXPLAIN (COSTS OFF)
@@ -72,6 +80,16 @@ WINDOW w AS (ORDER BY id
 -- determined by pattern matching rather than by a monotonic
 -- accumulation over the frame, so a filter such as "cnt > 0" cannot be
 -- used to stop evaluating the window function early.
+-- With RPR's required frame (ROWS BETWEEN CURRENT ROW AND UNBOUNDED
+-- FOLLOWING), the monotonic direction of the window function determines
+-- which comparison operators allow pushdown:
+--   INCREASING (<=): row_number, rank, dense_rank, percent_rank,
+--                    cume_dist, ntile
+--   DECREASING (>):  count(*).  As the current row advances, the frame
+--                    (which ends at UNBOUNDED FOLLOWING) shrinks, so the
+--                    count decreases.
+-- RPR window function results are match-dependent, not monotonic, so this
+-- pushdown does not apply.
 
 -- Non-RPR baseline: the filter is expected to appear as a Run Condition.
 EXPLAIN (COSTS OFF)
@@ -154,6 +172,44 @@ SELECT
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS normal_cnt
 FROM rpr_integ
 ORDER BY id;
+
+-- Result level: if the two windows had been merged, fv_normal and fv_rpr
+-- would agree on every row.  They do not, so the windows stayed separate.
+SELECT id, val,
+    first_value(id) OVER (
+        ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    ) AS fv_normal,
+    first_value(id) OVER w1 AS fv_rpr
+FROM (VALUES (1, 10), (2, 20), (3, 30), (4, 40)) AS t(id, val)
+WINDOW w1 AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS val > 10
+);
+
+-- The two windows above start from the same frame.  These two do not:
+-- they converge only after frame optimization rewrites the non-RPR one,
+-- and the RPR window is preserved, so they still must not be merged.
+-- The view is deliberately left undropped: it is the only one in the
+-- tree that serializes an RPR window and a non-RPR window together, so
+-- pg_upgrade/pg_dump needs it to exercise that round trip.
+CREATE VIEW rpr_ev_opt_mixed AS
+SELECT
+    row_number() OVER w_normal AS rn_normal,
+    row_number() OVER w_rpr AS rn_rpr
+FROM generate_series(1, 5) AS s(v)
+WINDOW
+    w_normal AS (ORDER BY v RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
+    w_rpr AS (
+        ORDER BY v
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS v > 1
+    );
+
+EXPLAIN (COSTS OFF) SELECT * FROM rpr_ev_opt_mixed;
 
 -- ============================================================
 -- A4. Window dedup prevention (same PATTERN, different DEFINE)
@@ -337,17 +393,10 @@ SELECT sum(c) FROM (
 -- the frame is determined by pattern matching and cannot be derived
 -- incrementally from the previous frame.
 
--- sum() would normally be eligible for the moving aggregate
--- optimization; under RPR it must be computed from scratch over each
--- reduced frame, and the returned values must match the pattern.
--- Note: inverse-transition selection is not exposed in the plan, so
--- there is no direct EXPLAIN assertion for it.  The structural
--- guarantee is that RPR uses its own navigation mark, distinct from
--- the moving-aggregate mark, so the inverse-transition path is
--- never reached on the RPR side.  This test verifies that
--- separation indirectly: if inverse transition leaked into the RPR
--- path, state would mix across match boundaries and pattern_sum
--- would diverge from the expected output, failing the regression.
+-- sum() is inverse-transition eligible in a plain window; over an RPR reduced
+-- frame rpr_is_defined() forces peraggstate->restart, so the aggregate is
+-- recomputed from scratch.  The logging aggregate below asserts the bypass
+-- directly.
 SELECT id, val,
     sum(val) OVER w AS pattern_sum
 FROM rpr_integ
@@ -876,16 +925,8 @@ DROP TABLE rpr_lat_o, rpr_lat_i;
 -- ============================================================
 -- B7. RPR + Recursive CTE
 -- ============================================================
--- Verify that RPR is rejected inside a recursive query.
--- ISO/IEC 19075-5 6.17.5 (R020) and 4.18.5 (R010) cite CREATE
--- RECURSIVE VIEW examples and state that "row pattern matching
--- is prohibited in recursive queries".  The formal rule lives in
--- ISO/IEC 9075-2:2016 7.17 Syntax Rule 3)f): a potentially
--- recursive <with list element> shall not contain a <row pattern
--- measures> or <row pattern common syntax>.  Per 3)e), every
--- <with list element> under WITH RECURSIVE is "potentially
--- recursive", so the rejection covers the base (non-recursive)
--- leg too, not just the self-referencing leg.
+-- RPR is rejected in every leg of a recursive query, including the
+-- non-recursive leg (see parse_cte.c for the standard citation).
 
 -- WITH RECURSIVE: RPR in the base leg is rejected even though the
 -- base leg never references the recursive CTE name.
@@ -1022,13 +1063,19 @@ SELECT o.id, o.val,
 FROM rpr_integ o
 ORDER BY o.id;
 
--- A column referenced only by DEFINE must not keep an unrelated column that
--- merely shares its attribute number.  DEFINE references a (rpr_over1); c
--- (rpr_over2) has the same attno but is unused, so it must be dropped.
+-- ============================================================
+-- B11. RPR + Junk targetlist pruning
+-- ============================================================
+-- Verify that the junk targetlist entry planted for a DEFINE-only
+-- column does not keep an unrelated column alive.  DEFINE references
+-- a (rpr_over1); c (rpr_over2) carries the same attribute number but
+-- is unused, so the plan must drop it.
 CREATE TABLE rpr_over1 (a int);
 CREATE TABLE rpr_over2 (c int);
 INSERT INTO rpr_over1 VALUES (1),(2),(3);
 INSERT INTO rpr_over2 VALUES (1),(2),(3);
+
+-- Plan: only the DEFINE column survives in the subquery output.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT cnt FROM (
   SELECT a AS oa, c AS oc, count(*) OVER w AS cnt
@@ -1038,6 +1085,9 @@ SELECT cnt FROM (
 ) s;
 DROP TABLE rpr_over1, rpr_over2;
 
+-- ============================================================
+-- B12. RPR + Correlated navigation offsets
+-- ============================================================
 -- A row pattern navigation offset that resolves to a correlated PARAM_EXEC
 -- (here through SRF inlining of rpr_srf_prev(g.n)) must be re-resolved on every
 -- rescan, not frozen at executor init.  The inlined WindowAgg is the inner
@@ -1051,8 +1101,8 @@ CREATE FUNCTION rpr_srf_prev(k int) RETURNS SETOF bigint AS $$
   WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                PATTERN (A+) DEFINE A AS v > PREV(v, k))
 $$ LANGUAGE sql STABLE;
--- The offset reads "runtime"; the WindowAgg inlines into the nestloop and is
--- rescanned per outer row.
+-- Plan: the offset reads "runtime"; the WindowAgg inlines into the
+-- nestloop and is rescanned per outer row.
 EXPLAIN (COSTS OFF)
 SELECT g.n, max(s) FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
 GROUP BY g.n ORDER BY g.n;
@@ -1060,39 +1110,40 @@ GROUP BY g.n ORDER BY g.n;
 SELECT g.n, max(s) AS m FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
 GROUP BY g.n ORDER BY g.n;
 
--- A forward FIRST-family offset with a correlated PARAM_EXEC must likewise be
--- re-resolved per scan (navFirstOffset / navFirstOffsetKind), not frozen at init.
--- PATTERN (B A+) anchors the match start at B so A can reference FIRST(v, k)
--- k rows ahead; each outer k yields its own forward offset (k=0 matches all
--- ten rows, k>=1 makes the first A fail), proving per-scan re-resolution.
+-- A forward FIRST-family offset must likewise be re-resolved per scan
+-- (navFirstOffset / navFirstOffsetKind).  PATTERN (B A+) anchors the
+-- match start at B so A can reference FIRST(v, k) k rows ahead, and
+-- each outer k yields its own forward offset.
 CREATE FUNCTION rpr_srf_first(k int) RETURNS SETOF bigint AS $$
   SELECT count(*) OVER w
   FROM rpr_srf
   WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                PATTERN (B A+) DEFINE A AS v > FIRST(v, k))
 $$ LANGUAGE sql STABLE;
--- The forward offset reads "runtime" and the WindowAgg inlines into the nestloop.
+-- Plan: the forward offset reads "runtime" and the WindowAgg inlines
+-- into the nestloop.
 EXPLAIN (COSTS OFF)
 SELECT g.n, max(s) FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
 GROUP BY g.n ORDER BY g.n;
--- k=0 -> 10, k>=1 -> 0: distinct per outer row, so the forward offset is not
--- frozen at ExecInit.
+-- Result: k=0 matches all ten rows and k>=1 makes the first A fail,
+-- so the forward offset is not frozen at ExecInit.
 SELECT g.n, max(s) AS m FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(g.n) s
 GROUP BY g.n ORDER BY g.n;
 DROP FUNCTION rpr_srf_first(int);
 
--- A compound navigation whose OUTER offset is a correlated PARAM_EXEC must be
--- re-resolved per scan as well.  An outer offset that overflows int64 flips the
--- backward trim to RETAIN_ALL for that scan only; a smaller offset on the next
--- rescan must go back to FIXED.  k=1 -> 9, k=3 -> 7, k=overflow -> 0 (out of
--- range, no match), proving both the per-scan outer-offset resolution and the
--- RETAIN_ALL <-> FIXED toggle across rescans.
+-- A compound navigation's OUTER offset must be re-resolved per scan
+-- as well.  An outer offset that overflows int64 flips the backward
+-- trim to RETAIN_ALL for that scan only; a smaller offset on the next
+-- rescan must go back to FIXED.
 CREATE FUNCTION rpr_srf_cmp(k int8) RETURNS SETOF bigint AS $$
   SELECT count(*) OVER w
   FROM rpr_srf
   WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                PATTERN (A B+) DEFINE B AS v > PREV(LAST(v, 1), k))
 $$ LANGUAGE sql STABLE;
+-- Result: k=1 -> 9, k=3 -> 7, overflow -> 0 (out of range, no match),
+-- proving both the per-scan outer-offset resolution and the
+-- RETAIN_ALL <-> FIXED toggle across rescans.
 SELECT g.n, max(s) AS m
 FROM (VALUES (1::int8), (3::int8), (9223372036854775807::int8)) g(n),
      LATERAL rpr_srf_cmp(g.n) s
@@ -1101,6 +1152,9 @@ DROP FUNCTION rpr_srf_cmp(int8);
 DROP FUNCTION rpr_srf_prev(int);
 DROP TABLE rpr_srf;
 
+-- ============================================================
+-- B13. RPR + DEFINE-only parameter caching
+-- ============================================================
 -- A correlated PARAM_EXEC used only inside DEFINE must reach the WindowAgg's
 -- extParam.  Otherwise chgParam never gets to the HashAgg that DISTINCT plans
 -- above it, and its hash table for the first outer row is re-served.
@@ -1122,6 +1176,9 @@ ORDER BY 1, 2;
 DROP FUNCTION rpr_hcache_fn(int);
 DROP TABLE rpr_hcache_thr, rpr_hcache_stock;
 
+-- ============================================================
+-- B14. RPR + Multiple window definitions
+-- ============================================================
 -- A DEFINE-only column and a later window's sort key both become junk
 -- targetlist entries, so their resno must come from p_next_resno; sharing one
 -- trips the apply_tlist_labeling assertion during planning.
