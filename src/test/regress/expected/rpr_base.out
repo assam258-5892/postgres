@@ -1100,9 +1100,9 @@ WINDOW w AS (
     DEFINE A AS val > 1000, B AS val > 0
 )
 ORDER BY id;
-ERROR:  quantifier bounds must be between 0 and 2147483646 with max >= 1
+ERROR:  quantifier bound must be between 1 and 2147483646
 LINE 6:     PATTERN (A{0,0} B)
-                       ^
+                         ^
 -- {0,1} (equivalent to ?)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
@@ -1492,9 +1492,9 @@ WINDOW w AS (
     PATTERN (A{1,2147483647}?)
     DEFINE A AS val > 0
 );
-ERROR:  quantifier bounds must be between 0 and 2147483646 with max >= 1
+ERROR:  quantifier bound must be between 1 and 2147483646
 LINE 6:     PATTERN (A{1,2147483647}?)
-                       ^
+                         ^
 -- ERROR: {5,3}? (min > max is not allowed)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
@@ -1601,6 +1601,76 @@ WINDOW w AS (
      0
 (3 rows)
 
+-- Two operator tokens where the first is not "?": the offending one is the
+-- second, so that is what gets named and what the cursor points at
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *? ?)
+    DEFINE A AS val > 0
+);
+ERROR:  invalid token "?" after "*?" quantifier
+LINE 6:     PATTERN (A *? ?)
+                          ^
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
+-- The first token is quoted as typed: stripping its "|" would name "*", and
+-- "A* ?" is accepted, so the error would describe a pair the grammar takes
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *| ?)
+    DEFINE A AS val > 0
+);
+ERROR:  invalid token "?" after "*|" quantifier
+LINE 6:     PATTERN (A *| ?)
+                          ^
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
+-- A first token that is no quantifier at all is itself the offending one, so it
+-- is reported the same way as when it stands alone
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?+ ?)
+    DEFINE A AS val > 0
+);
+ERROR:  unsupported quantifier "?+"
+LINE 6:     PATTERN (A ?+ ?)
+                       ^
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
+-- The two tokens are reported separately, so the report cannot glue them into
+-- a spelling that was never typed
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? || B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+ERROR:  invalid token "||" after "??" quantifier
+LINE 6:     PATTERN (A ?? || B)
+                          ^
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
+-- The trailing "|" belongs to the alternation, not to the quantifier, so the
+-- report drops it
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A ?? ?|B)
+    DEFINE A AS val > 0, B AS val > 1
+);
+ERROR:  invalid token "?" after "??" quantifier
+LINE 6:     PATTERN (A ?? ?|B)
+                          ^
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 DROP TABLE rpr_reluctant;
 -- Quantifier boundary conditions
 CREATE TABLE rpr_bounds (id INT);
@@ -4018,7 +4088,7 @@ SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRE
 ERROR:  unsupported quantifier "&"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A&B) DEFINE...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|) DEFINE A AS val > 0);
 ERROR:  alternation operator "|" requires a pattern on both sides
 LINE 1: ...WEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|) DEFIN...
@@ -4027,16 +4097,21 @@ SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRE
 ERROR:  alternation operator "|" requires a pattern on both sides
 LINE 1: ...WEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*| |B) DE...
                                                              ^
+-- the dangling operator is blamed on the element it hangs off, not on the first
+SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A B*|) DEFINE A AS val > 0, B AS val <= 0);
+ERROR:  alternation operator "|" requires a pattern on both sides
+LINE 1: ...EN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A B*|) DEFIN...
+                                                             ^
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*||B) DEFINE A AS val > 0, B AS val <= 0);
 ERROR:  unsupported quantifier "*||"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*||B) DEFI...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A||B) DEFINE A AS val > 0, B AS val <= 0);
 ERROR:  unsupported quantifier "||"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A||B) DEFIN...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B|) DEFINE A AS val > 0, B AS val <= 0);
 ERROR:  syntax error at or near ")"
 LINE 1: ...CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B|) DEFINE A...
@@ -4060,10 +4135,10 @@ LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* *?|B) DEFI...
                                                              ^
 HINT:  Did you mean "*?" for reluctant quantifier?
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFINE A AS val > 0, B AS val <= 0);
-ERROR:  invalid quantifier combination
-LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DE...
+ERROR:  invalid token "*?" after "?" quantifier
+LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFI...
                                                              ^
-HINT:  Did you mean "??" for reluctant quantifier?
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2}*?|B) DEFINE A AS val > 0, B AS val <= 0);
 ERROR:  invalid token "*?" after range quantifier
 LINE 1: ... CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2}*?|B) DEFI...
@@ -4077,25 +4152,25 @@ HINT:  Only "?" is allowed after {n} to make it reluctant.
 -- Doubled op-char quantifiers lex as one Op token and are unsupported, whether
 -- glued to '|' ("**|", "*+|", "???|") or on their own ("**").
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A**|B) DEFINE A AS val > 0, B AS val <= 0);
-ERROR:  unsupported quantifier "**|"
+ERROR:  unsupported quantifier "**"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A**|B) DEFI...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*+|B) DEFINE A AS val > 0, B AS val <= 0);
-ERROR:  unsupported quantifier "*+|"
+ERROR:  unsupported quantifier "*+"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*+|B) DEFI...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A???|B) DEFINE A AS val > 0, B AS val <= 0);
-ERROR:  unsupported quantifier "???|"
+ERROR:  unsupported quantifier "???"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A???|B) DEF...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A**B) DEFINE A AS val > 0);
 ERROR:  unsupported quantifier "**"
 LINE 1: ...EEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A**B) DEFIN...
                                                              ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 DROP TABLE rpr_glue;
 -- ============================================================
 -- Error Cases Tests
@@ -4115,7 +4190,7 @@ WINDOW w AS (
 ERROR:  unsupported quantifier "+!"
 LINE 6:     PATTERN (A+!)
                       ^
-HINT:  Valid quantifiers are: *, +, ?, *?, +?, ??, {n}, {n,}, {,m}, {n,m} and their reluctant versions.
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 -- none of the following queries should be accepted
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A+ !) DEFINE A AS TRUE);
 ERROR:  invalid token "!" after "+" quantifier
@@ -4133,10 +4208,10 @@ LINE 1: ...S BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A* ?+) DEFINE...
                                                              ^
 HINT:  Did you mean "*?" for reluctant quantifier?
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE A AS TRUE);
-ERROR:  invalid quantifier combination
-LINE 1: ...OWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFI...
+ERROR:  invalid token "??" after "?" quantifier
+LINE 1: ...S BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE...
                                                              ^
-HINT:  Did you mean "??" for reluctant quantifier?
+HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A {1,2}??) DEFINE A AS TRUE);
 ERROR:  invalid token "??" after range quantifier
 LINE 1: ...TWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A {1,2}??) DEFINE...
@@ -6743,9 +6818,9 @@ WINDOW w AS (
     PATTERN ((A{2000000000,2147483647}){2})
     DEFINE A AS val > 0
 );
-ERROR:  quantifier bounds must be between 0 and 2147483646 with max >= 1
+ERROR:  quantifier bound must be between 1 and 2147483646
 LINE 6:     PATTERN ((A{2000000000,2147483647}){2})
-                        ^
+                                   ^
 -- Test: nested unbounded with large min causes overflow fallback
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
