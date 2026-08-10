@@ -4852,7 +4852,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+"
+   Pattern: a+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4868,7 +4868,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{2,}"
+   Pattern: a{2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4886,7 +4886,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{2147483646,}"
+   Pattern: a{2147483646,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4916,7 +4916,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2,}"
+   Pattern: (a~ b~){2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4932,7 +4932,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){3,}"
+   Pattern: (a~ b~){3,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4950,7 +4950,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2147483646,}"
+   Pattern: (a~ b~){2147483646,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4965,7 +4965,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2,}"
+   Pattern: (a~ b~){2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -4980,7 +4980,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){3,}"
+   Pattern: (a~ b~){3,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5160,7 +5160,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a{2}'){2,}"
+   Pattern: (a{2}~){2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5176,7 +5176,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{2,}"
+   Pattern: a{2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5192,7 +5192,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+"
+   Pattern: a+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5257,7 +5257,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a*"
+   Pattern: a*#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5272,7 +5272,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a*"
+   Pattern: a*#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5287,7 +5287,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+"
+   Pattern: a+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5303,7 +5303,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{3,}"
+   Pattern: a{3,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5318,7 +5318,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{6,}"
+   Pattern: a{6,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5334,7 +5334,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{2,}"
+   Pattern: a{2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5460,7 +5460,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{2,}"
+   Pattern: a{2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5508,7 +5508,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b')+" (a b c)+
+   Pattern: (a~ b~)+# (a b c)+
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5523,7 +5523,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2,}"
+   Pattern: (a~ b~){2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5538,7 +5538,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2,}"
+   Pattern: (a~ b~){2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5554,7 +5554,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){3,}" c
+   Pattern: (a~ b~){3,}# c
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5621,7 +5621,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a+" b* c?){2,}
+   Pattern: (a+# b* c?){2,}
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5770,7 +5770,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a*"
+   Pattern: a*#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5873,7 +5873,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 (6 rows)
 
 -- Reluctant optimization bypass: absorption flags
--- A+? with SKIP PAST LAST ROW - no absorption markers (greedy A+ gets a+")
+-- A+? with SKIP PAST LAST ROW - no absorption markers (greedy A+ gets a+#)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -5912,7 +5912,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+"
+   Pattern: a+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5927,7 +5927,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{7,}"
+   Pattern: a{7,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5943,7 +5943,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){5,}"
+   Pattern: (a~ b~){5,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5975,7 +5975,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+"
+   Pattern: a+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6026,7 +6026,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: ((a+" b | c) d | a b c)
+   Pattern: ((a+# b | c) d | a b c)
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6036,9 +6036,9 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -- Absorption Flag Display Tests
 -- ============================================================
 -- Tests absorption marker display in EXPLAIN output
--- Markers: ' = branch element, " = comparison point
+-- Markers: ~ = branch element, # = comparison point
 -- Files: explain.c (append_rpr_quantifier, deparse_rpr_pattern)
--- Simple VAR: A+ -> a+" (comparison point)
+-- Simple VAR: A+ -> a+# (comparison point)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6047,13 +6047,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+"
+   Pattern: a+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- GROUP unbounded: (A B)+ -> (a' b')+" (branch + comparison)
+-- GROUP unbounded: (A B)+ -> (a~ b~)+# (branch + comparison)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6062,13 +6062,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b')+"
+   Pattern: (a~ b~)+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- ALT both absorbable: A+ | B+ -> (a+" | b+")
+-- ALT both absorbable: A+ | B+ -> (a+# | b+#)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6077,13 +6077,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a+" | b+")
+   Pattern: (a+# | b+#)
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- ALT one absorbable: A+ | B -> (a+" | b)
+-- ALT one absorbable: A+ | B -> (a+# | b)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6092,13 +6092,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a+" | b)
+   Pattern: (a+# | b)
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- Sequence with absorbable start: A+ B -> a+" b
+-- Sequence with absorbable start: A+ B -> a+# b
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6107,7 +6107,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a+" b
+   Pattern: a+# b
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6123,13 +6123,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: ((a+" b | c) d | a b c)
+   Pattern: ((a+# b | c) d | a b c)
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b' c')+" (d e)+)
+-- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b~ c~)+# (d e)+)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6139,13 +6139,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a | (b' c')+" (d e)+)
+   Pattern: (a | (b~ c~)+# (d e)+)
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- Nested unbounded: (A+ | B)+ -> (a+" | b)+ (first iteration absorbable)
+-- Nested unbounded: (A+ | B)+ -> (a+# | b)+ (first iteration absorbable)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6155,13 +6155,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a+" | b)+
+   Pattern: (a+# | b)+
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- ALT inside unbounded GROUP: (A+ B | A B)* -> (a+" b | a b)* (first iteration absorbable)
+-- ALT inside unbounded GROUP: (A+ B | A B)* -> (a+# b | a b)* (first iteration absorbable)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -6171,13 +6171,13 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a+" b | a b)*
+   Pattern: (a+# b | a b)*
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- Fixed-length group absorbable: (A{2} B{3})+ -> (a{2}' b{3}'){2,}"
+-- Fixed-length group absorbable: (A{2} B{3})+ -> (a{2}~ b{3}~)+#
 -- All children have min == max, equivalent to unrolling to {1,1}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
@@ -6188,7 +6188,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a{2}' b{3}')+"
+   Pattern: (a{2}~ b{3}~)+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6204,7 +6204,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' (b' c'){2}' d')+"
+   Pattern: (a~ (b~ c~){2}~ d~)+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6220,7 +6220,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: ((a{2}' b{3}'){2}')+"
+   Pattern: ((a{2}~ b{3}~){2}~)+#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6313,6 +6313,40 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND '10'::bigint FOLLOWING)
    Pattern: a+
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_plan
+(6 rows)
+
+-- A marker on a quoted variable name lands outside the closing quote: a
+-- keyword name takes the comparison point, "select"+ -> "select"+#
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             AFTER MATCH SKIP PAST LAST ROW PATTERN ("select"+ B)
+             DEFINE "select" AS val <= 50, B AS val > 50);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: "select"+# b
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_plan
+(6 rows)
+
+-- The same for the branch marker, on a name quoted for its space:
+-- ("My Var" A)+ -> ("My Var"~ a~)+#
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             AFTER MATCH SKIP PAST LAST ROW PATTERN (("My Var" A)+ B)
+             DEFINE "My Var" AS val <= 25, A AS val <= 50, B AS val > 50);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: ("My Var"~ a~)+# b
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6961,7 +6995,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a{2000000000,}"){2000000000,}
+   Pattern: (a{2000000000,}#){2000000000,}
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7004,7 +7038,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{1073741824,}" a{1073741823,}
+   Pattern: a{1073741824,}# a{1073741823,}
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7026,7 +7060,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{1073741825,}" a{1073741823,}
+   Pattern: a{1073741825,}# a{1073741823,}
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7102,7 +7136,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{2,}"
+   Pattern: a{2,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7121,7 +7155,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){1073741824,}" (a b){1073741823,}
+   Pattern: (a~ b~){1073741824,}# (a b){1073741823,}
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7199,7 +7233,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2147483646,}"
+   Pattern: (a~ b~){2147483646,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7254,7 +7288,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2147483646,}" a b
+   Pattern: (a~ b~){2147483646,}# a b
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
@@ -7272,7 +7306,7 @@ WINDOW w AS (
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a' b'){2147483646,}"
+   Pattern: (a~ b~){2147483646,}#
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_fallback
