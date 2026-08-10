@@ -108,94 +108,12 @@ static void nfa_reevaluate_dependent_vars(WindowAggState *winstate,
 										  int64 currentPos);
 
 /*
- * NFA-based pattern matching implementation
- *
- * These functions implement direct NFA execution using the compiled
- * RPRPattern structure, avoiding regex compilation overhead.
- *
- * Execution Flow: match -> absorb -> advance
- * -----------------------------------------
- * The NFA execution follows a three-phase cycle for each row:
- *
- * 1. MATCH (convergence): Evaluate all waiting states against current row.
- *    States on VAR elements are checked against their defining conditions.
- *    Failed matches are removed, successful ones may transition forward.
- *    This is a "convergence" phase - the number of states tends to decrease.
- *
- * 2. ABSORB: After matching, check if any context can absorb another.
- *    Context absorption is an optimization that merges equivalent contexts.
- *    A context can only be absorbed if ALL its states are absorbable.
- *
- * 3. ADVANCE (divergence): Expand states through epsilon transitions.
- *    States advance through ALT (alternation), END (group end), and
- *    optional elements until reaching VAR or FIN elements where they wait.
- *    This is a "divergence" phase - ALT creates multiple branch states.
- *
- * Key Design Decisions:
- * ---------------------
- * - VAR->END transition in match phase: When a simple VAR (max=1) matches
- *   and the next element is END, we transition immediately in the match
- *   phase rather than waiting for advance. This is necessary for correct
- *   absorption: states must be at END to be marked absorbable before the
- *   absorption check occurs.
- *
- * - Optional VAR skip paths: When advance lands on a VAR with min=0,
- *   we create both a waiting state AND a skip state (like ALT branches).
- *   This ensures patterns like "A B? C" work correctly - we need a state
- *   waiting for B AND a state that has already skipped to C.
- *
- * - END->END count increment: When transitioning from one END to another
- *   END within advance, we must increment the outer END's count. This
- *   handles nested groups like "((A|B)+)+" correctly - exiting the inner
- *   group counts as one iteration of the outer group.
- *
- * - Empty match handling: The initial advance uses currentPos =
- *   startPos - 1 (before any row is consumed). If FIN is reached via
- *   epsilon transitions alone, matchEndRow = startPos - 1 < matchStartRow.
- *   If matchedState is set (FIN was reached), this is an empty match
- *   (RF_EMPTY_MATCH); otherwise it is unmatched (RF_UNMATCHED).
- *   For reluctant min=0 patterns (A*?, A??), the skip path reaches
- *   FIN first and early termination prunes enter paths, yielding an
- *   immediate empty match result. For greedy patterns (A*), the enter
- *   path adds VAR states first, then the skip FIN is recorded but VAR
- *   states survive for later matching.
- *
- * Context Absorption Runtime:
- * ---------------------------
- * Absorption uses flags computed at planning time (in rpr.c) and two
- * context-level flags maintained at runtime:
- *
- * State-level:
- *   state.isAbsorbable: true if state is in the absorbable region.
- *     - Set at creation: elem->flags & RPR_ELEM_ABSORBABLE_BRANCH
- *     - At transition: prevAbsorbable && (newElem->flags & ABSORBABLE_BRANCH)
- *     - Monotonic: once false, stays false forever
- *
- * Context-level:
- *   ctx.hasAbsorbableState: can this context absorb others?
- *     - True if at least one state has isAbsorbable=true
- *     - Monotonic: true->false only (optimization: skip recalc when false)
- *
- *   ctx.allStatesAbsorbable: can this context be absorbed?
- *     - True if ALL states have isAbsorbable=true
- *     - Dynamic: can change false->true (when non-absorbable states die)
- *
- * Absorption Algorithm:
- *   For each pair (older Ctx1, newer Ctx2):
- *   1. Pre-check: Ctx1.hasAbsorbableState && Ctx2.allStatesAbsorbable
- *      -> If false, skip (fast filter)
- *   2. Coverage check: For each Ctx2 state with isAbsorbable=true,
- *      find Ctx1 state with same elemIdx and count >= Ctx2.count
- *   3. If all Ctx2 absorbable states are covered, absorb Ctx2
- *
- * Example: Pattern A+ B
- *   Row 1: Ctx1 at A (count=1)
- *   Row 2: Ctx1 at A (count=2), Ctx2 at A (count=1)
- *   -> Both at same elemIdx (A), Ctx1.count >= Ctx2.count
- *   -> Ctx2 absorbed
- *
- * The asymmetric design (Ctx1 needs hasAbsorbable, Ctx2 needs allAbsorbable)
- * allows absorption even when Ctx1 has extra non-absorbable states.
+ * The engine runs three phases per row: match (evaluate VARs, prune dead
+ * states), absorb (drop contexts an older context already covers), advance
+ * (expand epsilon transitions until states park on VARs).  Per-element
+ * advance behaviour, the absorption argument and the dual-flag contract are
+ * documented in README.rpr chapters VIII and IX and in the RPRNFAContext
+ * comment in nodes/execnodes.h.
  */
 
 /*
@@ -203,7 +121,6 @@ static void nfa_reevaluate_dependent_vars(WindowAggState *winstate,
  *
  * Allocate an NFA state, reusing from freeList if available.
  * freeList is stored in WindowAggState for reuse across match attempts.
- * Uses flexible array member for counts[].
  */
 static RPRNFAState *
 nfa_state_make(WindowAggState *winstate)
@@ -586,9 +503,10 @@ nfa_record_context_absorbed(WindowAggState *winstate, int64 absorbedLen)
  *   hasAbsorbableState: true if context has at least one absorbable state.
  *     This flag is monotonic (true -> false only). Once all absorbable states
  *     die, no new absorbable states can be created through transitions.
- *   allStatesAbsorbable: true if ALL states in context are absorbable.
- *     This flag is dynamic and can change false -> true when non-absorbable
- *     states die off.
+ *   allStatesAbsorbable: true if ALL states in context are absorbable and no
+ *     match is recorded.  Dynamic (false -> true as non-absorbable states die
+ *     off), except that a recorded match pins it false: absorbing would free
+ *     a match no absorbing context can reproduce.
  *
  * Optimization: Once hasAbsorbableState becomes false, both flags remain false
  * permanently, so we skip recalculation.
@@ -706,8 +624,8 @@ nfa_states_covered(RPRPattern *pattern, RPRNFAContext *older, RPRNFAContext *new
 /*
  * nfa_try_absorb_context
  *
- * Try to absorb ctx (newer) into an older in-progress context.
- * Returns true if ctx was absorbed and freed.
+ * Try to absorb ctx (newer) into an older in-progress context.  If one is
+ * found, ctx is unlinked and freed here.
  *
  * Absorption requires three conditions:
  *   1. ctx must have all states absorbable (allStatesAbsorbable).
@@ -853,22 +771,24 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
  * Only updates counts and removes dead states. Minimal transitions.
  *
  * For VAR elements:
- *   - matched: count++, keep state (unless count > max)
+ *   - matched: count++ (saturating at RPR_COUNT_INF), keep state
  *   - not matched: remove state (exit alternatives already exist from
  *     previous advance when count >= min was satisfied)
  *
  * For VARs that reached max count followed by END:
  *   - Advance through the END-element chain to the absorption
  *     comparison point
- *   - Only deterministic exits (count >= max) are handled.  That test alone
- *     excludes unbounded VARs: RPR_QUANTITY_INF is PG_INT32_MAX.
+ *   - Only deterministic exits are handled.  A count saturates at
+ *     RPR_COUNT_INF, so count >= max does not by itself exclude an unbounded
+ *     VAR; what excludes it is the absorbable-region test, which no unbounded
+ *     VAR inside a still-looping group passes.
  *   - Chains through END elements while count >= max (must-exit path)
  *
- * Non-VAR elements (ALT, END, FIN) are kept as-is for advance phase.
+ * Non-VAR elements (only an END parked by the chain above) are kept as-is for
+ * advance phase.
  *
- * currentPos is threaded in only for debugging visibility (nfa_match is the
- * one NFA helper that otherwise lacks the row index); it has no runtime
- * consumer yet.
+ * currentPos is unused by the matching logic itself; it is accepted so that
+ * every NFA helper carries the row index for debugging.
  */
 static void
 nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
@@ -917,10 +837,11 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 				 * deterministic exits (count >= max, max finite) are handled;
 				 * unbounded VARs stay for advance phase.
 				 *
-				 * In nested patterns like ((A B){2}){3}, a VAR reaching its
-				 * max triggers an exit cascade: inner END increments inner
-				 * group count, which may itself reach max, requiring an exit
-				 * to the next outer END.  The loop below walks this chain.
+				 * In nested patterns like ((A (B C){2}){2})+, a VAR reaching
+				 * its max triggers an exit cascade: inner END increments
+				 * inner group count, which may itself reach max, requiring an
+				 * exit to the next outer END.  The loop below walks this
+				 * chain.
 				 *
 				 * ABSORBABLE_BRANCH marks elements inside the absorbable
 				 * region; ABSORBABLE marks the outermost comparison point
