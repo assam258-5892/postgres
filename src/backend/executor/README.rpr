@@ -139,7 +139,7 @@ following:
         positive offset FOLLOWING only)
 
   (2) Transcription to WindowClause
-      - Copies rpPattern, rpSkipTo, initial fields
+      - Copies the rpPattern and rpSkipTo fields
 
   (3) DEFINE clause transformation (transformDefineClause)
 
@@ -1708,10 +1708,11 @@ Appendix A. Data Structure Relationship Diagram
   --------
   RPCommonSyntax
     |--- rpSkipTo: RPSkipTo
-    |--- initial: bool
+    |--- rpDefs: List* (ResTarget)
     +--- rpPattern: RPRPatternNode* (tree)
          |--- nodeType: VAR | SEQ | ALT | GROUP
          |--- min, max: quantifier
+         |--- reluctant: bool
          |--- varName: variable name (VAR only)
          +--- children: List* (SEQ/ALT/GROUP only)
 
