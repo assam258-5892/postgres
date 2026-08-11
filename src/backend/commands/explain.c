@@ -2928,11 +2928,10 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 	else if (elem->min != 1 || elem->max != 1)
 		appendStringInfo(buf, "{%d,%d}", elem->min, elem->max);
 
+	/* A fixed count is normalized to greedy, so '?' cannot be read as {0,1} */
 	if (RPRElemIsReluctant(elem))
 	{
-		if (elem->min == 1 && elem->max == 1)
-			appendStringInfoString(buf, "{1}"); /* make reluctant ?
-												 * unambiguous */
+		Assert(elem->min != elem->max);
 		appendStringInfoChar(buf, '?');
 	}
 

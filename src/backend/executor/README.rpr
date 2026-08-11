@@ -251,6 +251,15 @@ never different rows.
   (h) Single-child unwrap
       SEQ(A) -> A,  (A){1,1} -> A
 
+  (i) Reluctance normalization: a fixed count leaves reluctance nothing
+      to decide, so it is cleared wherever min == max
+      A{2}? -> A{2},  (A B){2}? -> (A B){2}
+      This runs before and after each node's own rewrites, since (b), (c),
+      (e) and (g) decline a reluctant node: without it (A{2}?){3} would
+      stay nested where (A{2}){3} collapses to A{6}.  ((f)'s alternative
+      deduplication is indifferent to reluctance, and a quantifier never
+      lands on an ALT node, so (d) never sees one.)
+
 IV-4. Phase 4: NFA Element Array Generation
 
 Transforms the optimized parse tree into a flat array of RPRPatternElement.
@@ -416,8 +425,10 @@ Example: PATTERN ((B C)* | A)   -- GROUP + ALT combined
 
 IV-4a. Reluctant Flag (RPR_ELEM_RELUCTANT)
 
-The reluctant flag is set during Phase 4 (fillRPRPattern) when the parse
-tree node has reluctant == true. It reverses the priority of quantifier
+The reluctant flag is set during Phase 4 (fillRPRPattern) from the parse
+tree node's reluctant field.  Phase 1 (i) has already cleared that field
+wherever min == max, so A{2}? and (A B){2}? reach here as the plain
+A{2} and (A B){2}.  The flag reverses the priority of quantifier
 expansion at runtime:
 
   Greedy (default):  try loop-back first, then exit  (prefer longer match)

@@ -1316,8 +1316,9 @@ WINDOW w AS (
      1
 (3 rows)
 
--- {n}? (exactly n, reluctant)
--- Reluctant quantifier: prefer shortest match
+-- {n}? (exactly n): min == max, so the reluctant flag is cleared and the
+-- plan is indistinguishable from A{2}.  This pins the normalization, not
+-- shortest-match behaviour.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -4945,8 +4946,9 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- Quantifier NO multiply: reluctant GROUP child (((A B){2}?){3}) stays nested
--- a reluctant quantifier on a GROUP is not subject to multiplication
+-- Quantifier multiply: (((A B){2}?){3}) -> (a b){6}
+-- {2}? has a fixed count, so reluctance is normalized away and the
+-- multiplication that (((A B){2}){3}) gets applies here too
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4955,7 +4957,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: ((a b){2}?){3}
+   Pattern: (a b){6}
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -5573,23 +5575,38 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 (6 rows)
 
 -- Reluctant optimization bypass: quantifier multiply (outer reluctant)
--- (A{2}){3}? stays as (a{2}){3}? (greedy merges to a{6})
+-- (A+){2,4}? stays nested where the greedy (A+){2,4} multiplies to a{2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN ((A{2}){3}?) DEFINE A AS val > 0);
+             PATTERN ((A+){2,4}?) DEFINE A AS val > 0);
                                   QUERY PLAN                                   
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a{2}){3}?
+   Pattern: (a+){2,4}?
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
 (6 rows)
 
 -- Reluctant optimization bypass: quantifier multiply (inner reluctant)
--- (A{2}?){3} stays as (a{2}?){3} (greedy merges to a{6})
+-- (A{2,3}?){3} stays as (a{2,3}?){3} (greedy (A{2,3}){3} merges to a{6,9})
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN ((A{2,3}?){3}) DEFINE A AS val > 0);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a{2,3}?){3}
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_plan
+(6 rows)
+
+-- Fixed count normalizes away: (A{2}?){3} -> a{6}, same as (A{2}){3}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -5598,7 +5615,54 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: (a{2}?){3}
+   Pattern: a{6}
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_plan
+(6 rows)
+
+-- {0,} is the only brace spelling that reaches an unbounded min 0
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{0,}) DEFINE A AS val > 0);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a*"
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_plan
+(6 rows)
+
+-- Bare {1} and {1,1} carry no quantifier, on a VAR or on a GROUP
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{1} B{1,1} (C){1})
+             DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a b c
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_plan
+(6 rows)
+
+-- A reluctant {1,1} normalizes to a bare variable
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{1,1}? (B C){1})
+             DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a b c
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_plan
@@ -6114,10 +6178,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING
          ->  Seq Scan on rpr_plan
 (6 rows)
 
--- Reluctant {1}? quantifier deparse
--- A{1}? is a reluctant {1,1} quantifier.  The deparse code must
--- output "{1}" explicitly to disambiguate from a bare "?" quantifier
--- (which would mean {0,1}).
+-- Reluctant {1}? quantifier: min == max, so the plan normalizes it away
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM rpr_plan
 WINDOW w AS (
@@ -6130,7 +6191,7 @@ WINDOW w AS (
 --------------------------------------------------------------------------------
  WindowAgg
    Window: w AS (ORDER BY val ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-   Pattern: a{1}? b
+   Pattern: a b
    ->  Sort
          Sort Key: val
          ->  Seq Scan on rpr_plan
