@@ -252,9 +252,12 @@ flattenSeqChildren(List *children)
 	{
 		RPRPatternNode *opt = optimizeRPRPattern(child);
 
-		/* GROUP{1,1} should have been unwrapped by optimizeGroupPattern */
+		/*
+		 * GROUP{1,1} should have been unwrapped by optimizeGroupPattern;
+		 * tryUnwrapGroup() does so regardless of reluctance.
+		 */
 		Assert(!(opt->nodeType == RPR_PATTERN_GROUP &&
-				 opt->min == 1 && opt->max == 1 && opt->reluctant == false));
+				 opt->min == 1 && opt->max == 1));
 
 		if (opt->nodeType == RPR_PATTERN_SEQ)
 		{
@@ -1006,7 +1009,7 @@ tryUnwrapGroup(RPRPatternNode *pattern)
 	 * the child and unwrap.  E.g., (A)?? -> A??, (A)+? -> A+?
 	 */
 	if (child->nodeType == RPR_PATTERN_VAR &&
-		child->min == 1 && child->max == 1 && child->reluctant == false)
+		child->min == 1 && child->max == 1)
 	{
 		child->min = pattern->min;
 		child->max = pattern->max;
@@ -1058,25 +1061,41 @@ optimizeGroupPattern(RPRPatternNode *pattern)
 static RPRPatternNode *
 optimizeRPRPattern(RPRPatternNode *pattern)
 {
+	RPRPatternNode *result = pattern;
+
 	/* Pattern nodes from parser are never NULL */
 	Assert(pattern != NULL);
 
 	check_stack_depth();
 
+	/*
+	 * A fixed count leaves reluctance nothing to decide.  Drop it here: the
+	 * merge and multiplication rewrites below decline a reluctant node, so
+	 * {n,n}? would otherwise miss what {n,n} gets.
+	 */
+	if (pattern->min == pattern->max)
+		pattern->reluctant = false;
+
 	switch (pattern->nodeType)
 	{
 		case RPR_PATTERN_VAR:
-			return pattern;
+			break;
 		case RPR_PATTERN_SEQ:
-			return optimizeSeqPattern(pattern);
+			result = optimizeSeqPattern(pattern);
+			break;
 		case RPR_PATTERN_ALT:
-			return optimizeAltPattern(pattern);
+			result = optimizeAltPattern(pattern);
+			break;
 		case RPR_PATTERN_GROUP:
-			return optimizeGroupPattern(pattern);
+			result = optimizeGroupPattern(pattern);
+			break;
 	}
 
-	pg_unreachable();
-	return pattern;
+	/* Again: a rewrite may have produced a fixed count of its own */
+	if (result->min == result->max)
+		result->reluctant = false;
+
+	return result;
 }
 
 /*
