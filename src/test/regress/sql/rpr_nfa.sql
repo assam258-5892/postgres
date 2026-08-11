@@ -4,8 +4,8 @@
 -- ============================================================
 --
 -- This test suite validates the NFA (Non-deterministic Finite
--- Automaton) runtime execution engine in nodeWindowAgg.c,
--- focusing on update_reduced_frame and related functions.
+-- Automaton) runtime execution engine in execRPR.c, driven by
+-- update_reduced_frame() in nodeWindowAgg.c.
 --
 -- Test Strategy:
 --   Diagonal pattern style using ARRAY flags to explicitly
@@ -31,6 +31,7 @@
 --   DEFINE Special Cases
 --   Absorption Dynamic Flags
 --   Zero-Consumption Cycle Detection
+--   Standard Clause 7: Formal Pattern Matching Rules
 --
 -- Responsibility:
 --   - NFA runtime execution paths
@@ -891,8 +892,10 @@ WINDOW w AS (
 -- the engine must prefer the fast-forward (exit) path for reluctant
 -- groups and suppress longer matches once exit reaches FIN, mirroring the
 -- sibling min<=count<max branch.  The 2-level greedy/reluctant matrix plus a
--- min>=2 boundary and single-quantifier controls localize the behaviour: only
--- the all-reluctant case (rr) should differ.
+-- min>=2 boundary and single-quantifier controls localize the behaviour: the
+-- inner quantifier decides whether a row is consumed, so every column whose
+-- body is reluctant stays at zero, and the two with a greedy body differ by
+-- their outer quantifier -- gg takes the longest match, rg one row.
 WITH t(id, isa) AS (VALUES (1, true), (2, true), (3, true), (4, false))
 SELECT id,
        count(*) OVER gg  AS gg,     -- (A?)+      greedy / greedy
@@ -1665,8 +1668,7 @@ WINDOW w AS (
 );
 
 -- A+? B (reluctant plus): exits A at first B availability
--- (Same scenario as greedy-vs-reluctant comparison above; retained for
--- standalone quantifier coverage alongside A{1,3}? and A{2,3}? below)
+-- (Standalone reluctant-plus case; compare with A{1,3}? and A{3,5}? below)
 WITH test_reluctant_plus AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A','_']),
@@ -1737,7 +1739,7 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- Nested quantifier flattening must not widen the matching language (H-1).
+-- Nested quantifier flattening must not widen the matching language.
 -- (A{k,})* with k >= 2 reaches repetition counts {0} UNION [k, INF); the gap
 -- 1..k-1 is unreachable, so it must NOT collapse to A*.  An isolated single A
 -- must yield an EMPTY match (count 0), not a length-1 match.
@@ -2136,9 +2138,8 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
--- altPriority replacement (A B C | D)
--- D branch (higher altPriority) matches first at row 1,
--- then A B C branch (lower altPriority) replaces it at row 3.
+-- Branch preference (A B C | D): D completes first at row 1, but the
+-- earlier-written A B C branch is preferred and replaces the match at row 3.
 WITH test_alt_replace AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A', 'D']),
@@ -3639,10 +3640,6 @@ WINDOW w AS (
 );
 
 -- N FOLLOWING + SKIP TO NEXT ROW: overlapping matches bounded by frame
--- Row 1: frame [1,4], A(1-3) B(4) -> match
--- Row 2: frame [2,5], A(2-3) B(4) -> match
--- Row 3: frame [3,6], A(3) B(4) -> match
--- Row 5: frame [5,6], A(5) B(6) -> match
 WITH test_n_skip_next AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -4556,7 +4553,6 @@ WINDOW w AS (
 
 -- ((A|B){1,2}) greedy: lexicographic > length
 -- Standard example: preferment AA, AB, A, BA, BB, B
--- Single A preferred over B-starting longer match
 WITH test_quant_lex_greedy AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A','B']),
@@ -4805,8 +4801,6 @@ WINDOW w AS (
 
 -- (A?){0,3}: min=0, nullable inner.
 -- A never matches but A? matches empty, satisfying min=0 immediately.
--- NFA reports 3 length-0 matches (one per row); first_value / last_value
--- are NULL because the window frame for an empty match has no rows.
 WITH test_728_min0 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -4829,7 +4823,6 @@ WINDOW w AS (
 
 -- (A?){1,3}: min=1, nullable inner.
 -- A never matches; one empty iteration satisfies min=1.
--- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_min1 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -4852,7 +4845,6 @@ WINDOW w AS (
 
 -- (A?){2,3}: min=2, nullable inner.  Per ISO/IEC 19075-5 7.2.8 STR06 = (STRE STRE)
 -- is valid: two empty iterations satisfy min=2.
--- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_min2 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -4874,9 +4866,6 @@ WINDOW w AS (
 );
 
 -- (A?){2,3} mixed: some rows match A, some don't
--- Rows 1-2: A matches, greedy takes 2 -> min satisfied (real match)
--- Row 3: A doesn't match, two empty iterations satisfy min=2 (length-0 match)
--- Row 4: A matches 1 real iter + 1 ff empty exit -> match 4-4
 WITH test_728_min2_mixed AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -4956,8 +4945,6 @@ WINDOW w AS (
 -- fires as a parallel exit path (EXIT ONLY, no greedy/reluctant loop).
 -- Data: alternating A, B rows (6 rows)
 -- Greedy: each row gets the longest match from its starting position.
--- Row 1: 3 iters (A@1,B@2)(A@3,B@4)(A@5,B@6) -> 1-6
--- Row 5: 1 real iter + 1 ff empty exit -> 5-6
 WITH test_728_multi_body AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -4983,7 +4970,6 @@ WINDOW w AS (
 );
 
 -- (A? B?){2,3}: pure empty body (nothing matches A or B).
--- NFA reports 3 length-0 matches; first/last_value NULL over empty frame.
 WITH test_728_multi_empty AS (
     SELECT * FROM (VALUES
         (1, ARRAY['C']),
@@ -5006,9 +4992,6 @@ WINDOW w AS (
 );
 
 -- (A? B?){2,3}: mixed real and empty iterations
--- Row 1: iter1 real (A@1,B@2), iter2 at row 3 empty -> ff exit, match 1-2
--- Row 3: C doesn't match A or B -> NULL
--- Row 4: iter1 real (A@4,B@5), iter2 at end empty -> ff exit, match 4-5
 WITH test_728_multi_mixed AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
