@@ -1153,8 +1153,8 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     expression. <literal>PATTERN</literal> defines a sequence of rows that
     satisfies certain conditions using variables defined
     in the <literal>DEFINE</literal> clause (an empty <literal>PATTERN()</literal>
-    is not supported). Each pattern variable can be followed by a quantifier
-    to specify how many times it should match:
+    is not accepted by the syntax). Each pattern variable can be followed
+    by a quantifier to specify how many times it should match:
     <literal>*</literal> (zero or more),
     <literal>+</literal> (one or more),
     <literal>?</literal> (zero or one),
@@ -1166,8 +1166,9 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     Reluctant quantifiers (e.g., <literal>*?</literal>, <literal>+?</literal>,
     <literal>??</literal>, <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}?</literal>)
     are supported.
-    The exclusion (<literal>{-</literal> and <literal>-}</literal>)
-    and the permutation (<literal>PERMUTE</literal>) are not supported.
+    The exclusion (<literal>{-</literal> and <literal>-}</literal>) is not
+    accepted by the syntax, and the permutation
+    (<literal>PERMUTE</literal>) is rejected as an unsupported feature.
     <literal>PERMUTE</literal> is recognized wherever
     a <literal>(</literal> follows it, so a pattern variable of that name has
     to be written <literal>"permute"</literal> in that position.
@@ -1188,7 +1189,22 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
 
     Conversely, variables defined in the <literal>DEFINE</literal> clause
     but not used in the <literal>PATTERN</literal> clause are rejected
-    with an error.
+    with an error.  The <literal>DEFINE</literal> clause itself is not
+    optional: leaving it out is a syntax error, even where every pattern
+    variable would evaluate as <literal>TRUE</literal>.
+   </para>
+
+   <para>
+    Row pattern recognition constrains the frame clause it is attached to.
+    The frame must be written in <literal>ROWS</literal> mode
+    as <literal>BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING</literal>, or
+    as <literal>BETWEEN CURRENT ROW
+    AND <replaceable>offset</replaceable> FOLLOWING</literal> with
+    a positive <replaceable>offset</replaceable>.
+    <literal>RANGE</literal> and <literal>GROUPS</literal> mode, any other
+    frame start or end, and
+    any <replaceable>frame_exclusion</replaceable> option other
+    than <literal>EXCLUDE NO OTHERS</literal> are rejected with an error.
    </para>
 
    <para>
@@ -1196,10 +1212,20 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     used in the <literal>PATTERN</literal> clause is 240.
     If this limit is exceeded, an error will be raised.
     Additionally, the maximum nesting depth of pattern groups
-    (parentheses) is 254 levels.
+    (parentheses) is 254 levels.  An alternation costs a level of its own,
+    so a pattern that nests alternations reaches the limit at about half
+    as many parentheses.
     However, pattern optimizations such as flattening nested sequences
     and simplifying nested quantifiers may reduce the effective depth,
     so this limit is rarely reached in practice.
+   </para>
+
+   <para>
+    Row pattern recognition cannot appear anywhere in a common table
+    expression that belongs to a <literal>WITH RECURSIVE</literal> clause;
+    such a query is rejected with an error.  The same restriction reaches
+    <command>CREATE RECURSIVE VIEW</command>, which is rewritten
+    to <literal>WITH RECURSIVE</literal>.
    </para>
 
    <para>
@@ -2320,11 +2346,23 @@ SELECT 2+2;
 
    <para>
     <productname>PostgreSQL</productname> supports row pattern recognition
-    within the <literal>WINDOW</literal> clause.  The SQL standard defines
-    more subclauses: <literal>MEASURES</literal> and
+    both in a <literal>WINDOW</literal> clause entry and in an
+    inline <literal>OVER ( ... )</literal> specification.  The SQL standard
+    defines more subclauses: <literal>MEASURES</literal> and
     <literal>SUBSET</literal>.  They are not currently supported
     in <productname>PostgreSQL</productname>.  Also in the standard there are
     more variations in the <literal>AFTER MATCH</literal> clause.
+   </para>
+
+   <para>
+    The largest difference is in <literal>DEFINE</literal>: a column
+    reference qualified by a pattern variable, such
+    as <literal>A.price</literal>, is not implemented and is rejected as an
+    unsupported feature, even though the standard writes
+    its <literal>DEFINE</literal> examples that way.  An unqualified column
+    reference in a <literal>DEFINE</literal> expression therefore always
+    reads the row being tested, and other rows of the match are reachable
+    only through the navigation operations.
    </para>
   </refsect2>
 

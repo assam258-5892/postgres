@@ -120,7 +120,7 @@ ORDER BY id;
 -- kept separate regardless of equivalence.
 
 -- Non-RPR baseline: two inline windows with identical spec are
--- deduped by the planner into a single WindowAgg node, confirming
+-- deduped by the parser into a single WindowAgg node, confirming
 -- that the dedup path is active for non-RPR windows.
 EXPLAIN (COSTS OFF)
 SELECT
