@@ -135,11 +135,11 @@ ORDER BY dt;
 
 DROP TABLE stock_price;
 
--- Auto-generated DEFINE
+-- Pattern variables with no DEFINE entry
 CREATE TABLE rpr_auto (id INT, val INT);
 INSERT INTO rpr_auto VALUES (1, 10), (2, 20), (3, 30), (4, 15);
 
--- One variable undefined (B auto-generated as "B IS TRUE")
+-- B has no DEFINE entry, so it matches every row
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_auto
 WINDOW w AS (
@@ -158,7 +158,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B C)
     DEFINE A AS val > 0
-    -- B and C auto-generated as "B IS TRUE", "C IS TRUE"
+    -- B and C have no DEFINE entry, so they match every row
 )
 ORDER BY id;
 
@@ -337,7 +337,7 @@ ORDER BY id;
 
 DROP TABLE rpr_complex;
 
--- Pattern variable not in PATTERN (should be ignored)
+-- Extra DEFINE variable not present in PATTERN
 CREATE TABLE rpr_unused (id INT);
 INSERT INTO rpr_unused VALUES (1), (2);
 
@@ -384,11 +384,6 @@ INSERT INTO rpr_frame VALUES
 -- Valid frame options
 
 -- ROWS: counts physical rows (1 FOLLOWING = next 1 physical row)
--- Expected result: Each row can see 1 physical row ahead
--- id=1,2,3 (val=10): can see next row -> cnt=2
--- id=4,5 (val=20): can see next row -> cnt=2
--- id=6 (val=30): no next row -> cnt=1
--- Result: [2,2,2,2,2,1]
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -531,8 +526,8 @@ WINDOW w AS (
 )
 ORDER BY id;
 
--- A non-constant frame end offset is allowed; a zero value is still rejected,
--- this time at execution time (a literal cannot exercise that path).
+-- A non-constant frame end offset is allowed; a zero value is rejected by the
+-- same execution-time check the literal 0 above reaches.
 PREPARE rpr_end_offset(int8) AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
@@ -636,7 +631,6 @@ WINDOW w AS (
     DEFINE A AS val >= 10, B AS val > 15
 )
 ORDER BY id;
--- Expected: Pattern matching should reset for each partition
 
 -- PARTITION BY with RANGE frame
 SELECT id, grp, val, COUNT(*) OVER w as cnt
@@ -900,7 +894,6 @@ SELECT id, count(*) OVER w FROM rpr_reluctant
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? A?? A) DEFINE A AS TRUE);
 
 -- *? (zero or more, reluctant)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -911,7 +904,6 @@ WINDOW w AS (
 );
 
 -- +? (one or more, reluctant)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -922,7 +914,6 @@ WINDOW w AS (
 );
 
 -- ?? (zero or one, reluctant)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -933,7 +924,6 @@ WINDOW w AS (
 );
 
 -- {n,}? (n or more, reluctant)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -944,7 +934,6 @@ WINDOW w AS (
 );
 
 -- {n,m}? (n to m, reluctant)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -966,8 +955,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {,m}? (up to m, reluctant) - COMPLETELY UNTESTED RULE!
--- Reluctant quantifier: prefer shortest match
+-- {,m}? (up to m, reluctant)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1110,10 +1098,10 @@ WINDOW w AS (
 );
 
 -- Token-separated reluctant quantifiers (space between quantifier and ?)
--- These may be tokenized differently by the lexer
+-- Whitespace between the quantifier and "?" is insignificant: each form below
+-- returns exactly what its unseparated counterpart above returns.
 
 -- * ? (token separated)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1124,7 +1112,6 @@ WINDOW w AS (
 );
 
 -- + ? (token separated)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1135,7 +1122,6 @@ WINDOW w AS (
 );
 
 -- {2,} ? (token separated)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1166,7 +1152,6 @@ WINDOW w AS (
 );
 
 -- ? ? (parsed as ?? reluctant quantifier)
--- Reluctant quantifier: prefer shortest match
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1334,9 +1319,9 @@ WINDOW w AS (
 
 DROP TABLE rpr_bounds;
 
--- Pattern element-count boundary at RPR_ELEMIDX_MAX (32767).  Alternating
--- distinct variables stop the optimizer from merging consecutive elements, so
--- each "A B" pair contributes two elements; scanRPRPattern adds one FIN marker.
+-- Pattern element-count boundary (maximum 32767 elements, the FIN marker
+-- included).  Alternating distinct variables stop the optimizer from merging
+-- consecutive elements, so each "A B" pair contributes two elements.
 -- ECHO is silenced so the generated multi-thousand-token patterns do not flood
 -- the expected output.
 --   16383 pairs         -> 32766 + 1 FIN = 32767 = maximum, accepted.
@@ -1477,7 +1462,7 @@ FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val / 0) > 0);
 
 -- Here the null reaches the DEFINE predicate itself instead of an IS NULL
--- test: an all-NULL target row would have made v IS NULL true and matched the
+-- An all-NULL target row would have made v IS NULL true and matched the
 -- first row, so this pins the predicate side of the same behaviour.
 WITH t(id, v) AS (VALUES (1, 10), (2, 20))
 SELECT id, count(*) OVER w AS cnt
@@ -1494,7 +1479,7 @@ WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE
 
 -- XXX Folding evaluates the argument while planning, with the current row's
 -- value standing in for the target row's, so this divides by zero even though
--- PREV has no row to navigate to.  A separate patch will deal with it.
+-- PREV has no row to navigate to.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
@@ -1663,7 +1648,7 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     PATTERN (A+)
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
--- accepted: the SQL body inlines and folds to a constant, so no volatile call
+-- The SQL body inlines and folds to a constant, so no volatile call
 -- is left for the check to find
 CREATE OR REPLACE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
   LANGUAGE sql VOLATILE;
@@ -1675,8 +1660,8 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
 
--- accepted: no OVER references the window, so flattening the subquery drops
--- it before the check runs, the same way an unreferenced CTE is never planned
+-- No OVER references the window, so flattening the subquery drops it
+-- before the check runs, the same way an unreferenced CTE is never planned
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (
@@ -1684,15 +1669,15 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS random() > 0.5)) s
 ORDER BY id;
 
--- error: OFFSET 0 keeps the subquery, so its DEFINE is checked
+-- ERROR: OFFSET 0 keeps the subquery, so its DEFINE is checked
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
 
--- accepted: WHERE false makes the subquery rel dummy, so the planner never
--- plans it and nothing looks at its DEFINE
+-- WHERE false makes the subquery rel dummy, so the planner never plans it
+-- and nothing looks at its DEFINE
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (
@@ -1700,7 +1685,7 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub
 WHERE false;
 
--- accepted: the volatile is in a dead CASE arm that folds away, so nothing
+-- The volatile is in a dead CASE arm that folds away, so nothing
 -- volatile is left for the check to find
 SELECT id FROM (
  SELECT id FROM nt
@@ -1710,7 +1695,7 @@ SELECT id FROM (
                                   ELSE val > 5 END)) s
 ORDER BY id;
 
--- error: folding can splice in a volatile that parse analysis never saw -- a
+-- ERROR: folding can splice in a volatile that parse analysis never saw -- a
 -- STABLE function whose default argument is volatile -- and the check runs late
 -- enough to catch it
 CREATE FUNCTION rpr_off_leak(n bigint DEFAULT (random() * 5)::bigint)
@@ -1721,7 +1706,7 @@ SELECT count(*) OVER w FROM generate_series(1, 100) g(v)
 DROP FUNCTION rpr_off_leak(bigint);
 
 
--- accepted: a UNION ALL leaf is flattened like any other subquery, so its
+-- A UNION ALL leaf is flattened like any other subquery, so its
 -- unreferenced window goes the same way
 SELECT id FROM (
  SELECT id FROM nt
@@ -1731,7 +1716,7 @@ SELECT id FROM (
  UNION ALL
  SELECT id FROM nt) s;
 
--- accepted: an unreferenced CTE is never planned, so nothing looks at its
+-- An unreferenced CTE is never planned, so nothing looks at its
 -- DEFINE
 WITH unused AS (
  SELECT id FROM nt
@@ -1740,7 +1725,7 @@ WITH unused AS (
     PATTERN (A+) DEFINE A AS random() > 0.5))
 SELECT 1;
 
--- error: referencing it plans the CTE, and the check reaches the DEFINE there
+-- ERROR: referencing it plans the CTE, and the check reaches the DEFINE there
 WITH used AS (
  SELECT id FROM nt
  WINDOW w AS (
@@ -2721,11 +2706,9 @@ SELECT pg_get_viewdef('rpr_quant_n_plus_v'::regclass);
 -- ============================================================
 CREATE TABLE rpr_glue (id INT, val INT);
 INSERT INTO rpr_glue VALUES (1, 5), (2, 8), (3, 9), (4, -1), (5, 6), (6, -2);
--- Quantifier glued to the alternation operator '|' without a space (0059).
--- The lexer glues the trailing '|' into one Op token; the grammar reattaches it
--- as the lowest-precedence alternation once the surrounding sequence is built.
--- Deparse is canonical, so the glued, spaced, and mixed-spacing forms all
--- reduce to the same PATTERN -- one deparse per shape proves the parse tree.
+-- Quantifier glued to the alternation operator '|' without a space.  The
+-- lexer glues the trailing '|' into one Op token; the grammar reattaches it as
+-- the lowest-precedence alternation once the surrounding sequence is built.
 
 -- Op-char quantifiers (*, +, ?, *?, +?, ??) glued to '|'.
 CREATE VIEW rpr_dp_op AS SELECT
@@ -2926,7 +2909,7 @@ WINDOW w AS (
     DEFINE A AS B.val > 0
 );
 
--- DEFINE-only variable qualified name: still a pattern variable, not a range variable
+-- DEFINE-only variable used as a qualifier
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -2972,7 +2955,6 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS (items).amount > 10
 );
--- Expected: rows where (items).amount > 10 form matches; counts reflect frame size
 
 -- Composite type field selection (qualified forms): the ColumnRef portion ("A.items" or
 -- "rpr_composite.items") is what gets quoted; the trailing ".amount" lives in
@@ -3044,7 +3026,7 @@ WINDOW w AS (
     DEFINE A AS val > (SELECT max(val) FROM rpr_err)
 );
 
--- Pattern variable not used (should work, extra vars ignored)
+-- DEFINE variables that do not appear in PATTERN
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_err
 WINDOW w AS (
@@ -3765,7 +3747,6 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -- ============================================================
 -- Tests absorption marker display in EXPLAIN output
 -- Markers: ~ = branch element, # = comparison point
--- Files: explain.c (append_rpr_quantifier, deparse_rpr_pattern)
 
 -- Simple VAR: A+ -> a+# (comparison point)
 EXPLAIN (COSTS OFF)
@@ -3915,7 +3896,6 @@ WINDOW w AS (
 -- Absorption Analysis Tests
 -- ============================================================
 -- Tests context absorption optimization (O(n^2) -> O(n))
--- Files: rpr.c (computeAbsorbability)
 
 -- Simple Absorbable Pattern: A+ B
 -- Pattern starts with unbounded VAR
@@ -4238,7 +4218,7 @@ ORDER BY id;
 CREATE TABLE rpr_fallback (id INT, val INT);
 INSERT INTO rpr_fallback VALUES (1, 10), (2, 20);
 
--- Test: min quantifier overflow causes optimization fallback (min == max case)
+-- Min quantifier overflow causes optimization fallback (min == max case)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4247,9 +4227,8 @@ WINDOW w AS (
     PATTERN ((A{2000000000}){2})
     DEFINE A AS val > 0
 );
--- Expected: Fallback - pattern not merged due to min overflow (4000000000 > INT32_MAX)
 
--- Test: max-only quantifier overflow causes optimization fallback
+-- Max-only quantifier overflow causes optimization fallback
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4258,9 +4237,8 @@ WINDOW w AS (
     PATTERN ((A{1,2000000000}){2})
     DEFINE A AS val > 0
 );
--- Expected: Fallback - min OK (2*1=2), but max overflow (2*2000000000 > INT32_MAX)
 
--- Test: max quantifier exceeds valid range (2147483647 = INT_MAX, limit is 2147483646)
+-- Max quantifier exceeds valid range (2147483647 = INT_MAX, limit is 2147483646)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4270,7 +4248,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Test: nested unbounded with large min causes overflow fallback
+-- Nested unbounded with large min causes overflow fallback
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4279,9 +4257,8 @@ WINDOW w AS (
     PATTERN ((A{2000000000,}){2000000000,})
     DEFINE A AS val > 0
 );
--- Expected: Fallback - min overflow (2000000000 * 2000000000 > INT32_MAX)
 
--- Test: prefix mismatch causes optimization fallback
+-- Prefix mismatch causes optimization fallback
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4290,9 +4267,8 @@ WINDOW w AS (
     PATTERN (A B (C D)+)
     DEFINE A AS val > 0, B AS val > 5, C AS val > 10, D AS val > 15
 );
--- Expected: Fallback - prefix elements don't match GROUP content
 
--- Test: consecutive VAR merge whose min sum is exactly INF causes fallback.
+-- Consecutive VAR merge whose min sum is exactly INF causes fallback.
 -- 1073741824 + 1073741823 = 2147483647 = INT32_MAX = RPR_QUANTITY_INF.
 -- Merging would yield a VAR with min == INF, so the merge must fall back and
 -- leave the two VARs unmerged (mirrors the multiply path's >= INF guard).
@@ -4304,9 +4280,8 @@ WINDOW w AS (
     PATTERN (A{1073741824,} A{1073741823,})
     DEFINE A AS val > 0
 );
--- Expected: Fallback - VARs not merged (min sum 2147483647 == INF)
 
--- Test: one more than that sum does not fit in int32.  The fallback looks the
+-- One more than that sum does not fit in int32.  The fallback looks the
 -- same as the case above; this one reaches the overflow check instead of the
 -- >= INF comparison.
 EXPLAIN (COSTS OFF)
@@ -4318,7 +4293,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Test: VAR merge falls back when the max sum lands exactly on INF.
+-- VAR merge falls back when the max sum lands exactly on INF.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4327,7 +4302,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741823} A{1,1073741824})
     DEFINE A AS val > 0
 );
--- Test: one below that sum is the largest max the merge may keep.
+-- One below that sum is the largest max the merge may keep.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4336,7 +4311,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741822} A{1,1073741824})
     DEFINE A AS val > 0
 );
--- Test: one above that does not fit in int32; the overflow check rejects it.
+-- One above that does not fit in int32; the overflow check rejects it.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4345,7 +4320,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741824} A{1,1073741824})
     DEFINE A AS val > 0
 );
--- Test: an operand that is already unbounded still merges.
+-- An operand that is already unbounded still merges.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4354,7 +4329,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741823} A{1,})
     DEFINE A AS val > 0
 );
--- Test: consecutive GROUP merge whose min sum is exactly INF causes fallback.
+-- Consecutive GROUP merge whose min sum is exactly INF causes fallback.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4363,9 +4338,8 @@ WINDOW w AS (
     PATTERN ((A B){1073741824,} (A B){1073741823,})
     DEFINE A AS val > 0, B AS val > 5
 );
--- Expected: Fallback - GROUPs not merged (min sum 2147483647 == INF)
 
--- Test: consecutive GROUP merge whose max sum is exactly INF causes fallback,
+-- Consecutive GROUP merge whose max sum is exactly INF causes fallback,
 -- where one less merges.  Without the guard the merged max would alias INF and
 -- a bounded pattern would become unbounded.
 EXPLAIN (COSTS OFF)
@@ -4385,7 +4359,7 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5
 );
 
--- Test: the prefix merge adds one iteration, so it declines a min already at
+-- The prefix merge adds one iteration, so it declines a min already at
 -- INF - 1 and a max already at INF - 1; one less than either merges.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
@@ -4420,7 +4394,7 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5
 );
 
--- Test: the suffix merge has the same boundary as the prefix merge.
+-- The suffix merge has the same boundary as the prefix merge.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -4444,7 +4418,6 @@ DROP TABLE rpr_fallback;
 -- Planner Integration Tests
 -- ============================================================
 -- Tests full planning pipeline and WindowAgg plan node creation
--- Files: planner.c, createplan.c
 
 CREATE TABLE rpr_planner (id INT, category VARCHAR(10), val INT);
 INSERT INTO rpr_planner VALUES
@@ -4524,25 +4497,8 @@ SELECT id, category, val,
 FROM rpr_planner
 ORDER BY id;
 
--- Window with Aggregate Functions
-SELECT category,
-       COUNT(*) OVER w as window_cnt,
-       COUNT(*) as agg_cnt
-FROM rpr_planner
-WINDOW w AS (
-    PARTITION BY category
-    ORDER BY id
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    PATTERN (A+)
-    DEFINE A AS val > 0
-)
-GROUP BY category
-ORDER BY category;
--- (GROUP BY after WINDOW clause is not valid SQL syntax)
-
 -- ============================================================
 -- Subquery and CTE Tests
--- Files: planner.c, prepjointree.c
 -- ============================================================
 -- Tests RPR with subqueries and CTEs
 
@@ -4629,7 +4585,6 @@ SELECT * FROM cte2 ORDER BY id;
 
 -- ============================================================
 -- JOIN Tests
--- Files: prepjointree.c, setrefs.c
 -- ============================================================
 -- Tests RPR with JOINs and multiple table references
 
@@ -4716,7 +4671,6 @@ DROP TABLE rpr_join1, rpr_join2;
 
 -- ============================================================
 -- Complex Expression Tests
--- Files: createplan.c, setrefs.c
 -- ============================================================
 -- Tests complex target list expressions
 
@@ -4803,7 +4757,6 @@ DROP TABLE rpr_target;
 
 -- ============================================================
 -- Set Operations Tests
--- Files: planner.c
 -- ============================================================
 -- Tests RPR with UNION, INTERSECT, EXCEPT
 
@@ -4901,7 +4854,6 @@ DROP TABLE rpr_set1, rpr_set2;
 
 -- ============================================================
 -- Sorting and Grouping Tests
--- Files: planner.c, createplan.c
 -- ============================================================
 -- Tests RPR interaction with sorting and grouping
 
@@ -5116,7 +5068,7 @@ DROP TABLE rpr_stress;
 CREATE TABLE rpr_errors (id INT, val INT);
 INSERT INTO rpr_errors VALUES (1, 10), (2, 20);
 
--- Test: DEFINE variable not in PATTERN (error)
+-- DEFINE variable not in PATTERN (error)
 SELECT id, val, COUNT(*) OVER w FROM rpr_errors
 WINDOW w AS (
     ORDER BY id
@@ -5125,9 +5077,8 @@ WINDOW w AS (
     DEFINE
       B AS TRUE
 );
--- Expected: Error - B is not used in PATTERN
 
--- Test: 240 variables in PATTERN and DEFINE (boundary - should succeed)
+-- 240 variables in PATTERN and DEFINE (boundary - should succeed)
 SELECT COUNT(*) OVER w FROM rpr_errors
 WINDOW w AS (
     ORDER BY id
@@ -5170,7 +5121,6 @@ WINDOW w AS (
     V221 AS val > 0, V222 AS val > 0, V223 AS val > 0, V224 AS val > 0, V225 AS val > 0, V226 AS val > 0, V227 AS val > 0, V228 AS val > 0, V229 AS val > 0, V230 AS val > 0,
     V231 AS val > 0, V232 AS val > 0, V233 AS val > 0, V234 AS val > 0, V235 AS val > 0, V236 AS val > 0, V237 AS val > 0, V238 AS val > 0, V239 AS val > 0, V240 AS val > 0
 );
--- Expected: Success - exactly at RPR_VARID_MAX boundary
 
 -- ERROR: 241 variables in PATTERN, 240 in DEFINE (exceeds limit with implicit TRUE)
 SELECT COUNT(*) OVER w FROM rpr_errors
@@ -5217,8 +5167,7 @@ WINDOW w AS (
     V231 AS val > 0, V232 AS val > 0, V233 AS val > 0, V234 AS val > 0, V235 AS val > 0, V236 AS val > 0, V237 AS val > 0, V238 AS val > 0, V239 AS val > 0, V240 AS val > 0
 );
 
--- Pattern nesting-depth boundary at RPR_DEPTH_MAX (255; effective maximum
--- 254, since scanRPRPatternRecursive() rejects depth >= RPR_DEPTH_MAX).
+-- Pattern nesting-depth boundary: 254 levels are accepted, 255 rejected.
 -- Reluctant quantifiers are not subject to quantifier multiplication, so the
 -- nesting survives optimization and still reaches the depth check.
 -- ECHO is silenced so the generated deeply nested patterns do not flood the
@@ -5242,7 +5191,7 @@ DROP TABLE rpr_errors;
 -- Basic Pattern Matching
 -- ============================================================
 
--- Test: A? (optional, greedy)
+-- A? (optional, greedy)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5253,7 +5202,7 @@ WINDOW w AS (
     DEFINE A AS val > 50
 );
 
--- Test: A{2} (exact count)
+-- A{2} (exact count)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5264,7 +5213,7 @@ WINDOW w AS (
     DEFINE A AS val <= 50
 );
 
--- Test: A{1,3} (bounded range, greedy)
+-- A{1,3} (bounded range, greedy)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5275,7 +5224,7 @@ WINDOW w AS (
     DEFINE A AS val <= 50
 );
 
--- Test: A | B (simple alternation)
+-- A | B (simple alternation)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5286,7 +5235,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 70
 );
 
--- Test: A | B | C (three-way alternation)
+-- A | B | C (three-way alternation)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5297,7 +5246,7 @@ WINDOW w AS (
     DEFINE A AS val <= 20, B AS val BETWEEN 40 AND 60, C AS val > 80
 );
 
--- Test: A B C (concatenation)
+-- A B C (concatenation)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5308,7 +5257,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val BETWEEN 31 AND 60, C AS val > 60
 );
 
--- Test: A B? C (optional middle)
+-- A B? C (optional middle)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5319,7 +5268,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val BETWEEN 31 AND 60, C AS val > 60
 );
 
--- Test: (A B)+ (grouped quantifier)
+-- (A B)+ (grouped quantifier)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5330,7 +5279,7 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- Test: (A | B)+ C (alternation with quantifier)
+-- (A | B)+ C (alternation with quantifier)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -5341,9 +5290,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val BETWEEN 31 AND 60, C AS val > 80
 );
 
--- Test: (A+ | (A | B)+)* - nested alternation inside quantified group
--- Previously caused infinite recursion in alternation handling when the inner
--- BEGIN(+)'s skip jump was followed as an ALT branch pointer.
+-- (A+ | (A | B)+)* - nested alternation inside quantified group
 SELECT id, flags, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
 FROM (VALUES
     (1, ARRAY['A', 'B']),
@@ -5363,9 +5310,9 @@ WINDOW w AS (
 -- ============================================================
 -- Pathological Patterns
 -- ============================================================
--- These patterns previously caused issues. Now optimized or handled safely.
+-- Nested unbounded quantifiers that the optimizer collapses.
 
--- Test: (A*)* - nested unbounded (optimized to A*)
+-- (A*)* - nested unbounded (optimized to A*)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -5376,7 +5323,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- Test: (A*)+ - inner nullable (optimized to A*)
+-- (A*)+ - inner nullable (optimized to A*)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -5387,7 +5334,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- Test: (A+)* - outer nullable (optimized to A*)
+-- (A+)* - outer nullable (optimized to A*)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -5398,7 +5345,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- Test: (A+)+ - both require match (optimized to A+)
+-- (A+)+ - both require match (optimized to A+)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -5409,7 +5356,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- Test: (((A)*)*)*  - triple nested (optimized to A*)
+-- (((A)*)*)*  - triple nested (optimized to A*)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 3) v)
 WINDOW w AS (
