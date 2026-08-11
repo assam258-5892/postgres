@@ -514,6 +514,11 @@ Structural conditions (isUnboundedStart + computeAbsorbabilityRecursive):
             ABSORBABLE | ABSORBABLE_BRANCH set on A.
             B and END get no flags -> absorption stops once past A.
 
+A reluctant group disqualifies its whole subtree.  computeAbsorbability-
+Recursive() returns at such a BEGIN, so (A+ B)+? gets no flags at all
+even though A+ itself is greedy: the group prefers its shorter
+alternative, which is the opposite of the ordering absorption relies on.
+
 Absorbability is determined per-element, not per-pattern.
 Absorption comparison is performed only when a state resides at an
 element with the RPR_ELEM_ABSORBABLE flag. Once a state leaves the
