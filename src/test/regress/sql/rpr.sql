@@ -346,7 +346,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   UPDOWN AS price > PREV(price) AND price > NEXT(price)
 );
 
--- PREV returns NULL at partition's first row (null_slot path)
+-- PREV returns NULL at the partition's first row (no earlier row to fetch)
 SELECT company, tdate, price, count(*) OVER w
 FROM stock
 WINDOW w AS (
@@ -359,7 +359,7 @@ WINDOW w AS (
   REST AS PREV(price) IS NOT NULL
 );
 
--- NEXT returns NULL at partition's last row (null_slot path)
+-- NEXT returns NULL at the partition's last row (no later row to fetch)
 SELECT company, tdate, price, count(*) OVER w
 FROM stock
 WINDOW w AS (
@@ -647,8 +647,8 @@ WINDOW w AS (
 );
 DROP SEQUENCE rpr_seq;
 
--- A volatile DEFINE is now rejected in the planner, not at parse time, so a
--- view that hides one is created successfully and only errors when read.
+-- A volatile DEFINE is rejected in the planner, so a view that hides one is
+-- created successfully and errors only when read.
 CREATE TEMP VIEW rpr_volatile_view AS
 SELECT company, tdate, price, count(*) OVER w
 FROM stock
@@ -881,8 +881,8 @@ EXECUTE test_prev_offset(NULL);
 DEALLOCATE test_prev_offset;
 
 -- 2-arg PREV/NEXT: host variable with positive value.  A generic plan keeps
--- the parameter as a Param, which is what reaches the RPR_NAV_OFFSET_NEEDS_EVAL
--- path; a custom plan would fold it to a Const and settle the reach at init.
+-- the parameter as a Param, so the offset is resolved at run time; a custom
+-- plan would fold it to a constant and settle the reach at init.
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w, count(*) OVER w
@@ -927,12 +927,9 @@ WINDOW w AS (
     DEFINE A AS price > PREV(price, 1) AND price < NEXT(price, 1)
 );
 
--- Pass-by-ref types: two PREV calls targeting different positions.
--- Verifies that datumCopy in RESTORE prevents dangling pointers when
--- nav_slot is re-fetched for the second navigation.
--- tdate::text gives distinct text values per row (e.g. '07-01-2023').
--- B matches when 1-back date text > 2-back date text (always true for
--- ascending dates), so B+ extends the full partition after A.
+-- Pass-by-ref types: two PREV calls targeting different positions, so the
+-- first navigation result must survive the second fetch.  B compares the
+-- 1-back and 2-back tdate text.
 SELECT company, tdate, tdate::text AS tdate_text,
        first_value(tdate::text) OVER w, last_value(tdate::text) OVER w, count(*) OVER w
 FROM stock
@@ -1037,7 +1034,7 @@ FROM rpr_nav WINDOW w AS (
 );
 
 -- SKIP TO NEXT ROW with FIRST(val) = LAST(val): overlapping match attempts.
--- With ONE ROW PER MATCH, each row shows only its first match result.
+-- Each row reports only the match that starts at it.
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
 FROM rpr_nav WINDOW w AS (
     ORDER BY id
@@ -1138,8 +1135,6 @@ DROP TABLE rpr_names;
 -- Compound navigation: PREV(FIRST(val), M)
 -- rpr_nav: (1,10),(2,20),(3,30),(4,10),(5,50),(6,10)
 -- PREV(FIRST(val), 1): target = match_start + 0 - 1 = match_start - 1
--- At match_start=1: target=0 -> out of range -> NULL
--- At match_start=3: target=2(val=20) -> 20 > 0 -> true
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav WINDOW w AS (
     ORDER BY id
@@ -1466,7 +1461,6 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 );
 
 -- nth_value beyond reduced frame (no IGNORE NULLS)
--- Tests WinGetSlotInFrame/WinGetFuncArgInFrame out-of-frame with RPR
 SELECT company, tdate, price,
  nth_value(price, 5) OVER w AS nth_5
 FROM stock
@@ -1514,7 +1508,7 @@ SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER 
   B AS price > 100
 );
 
--- SKIP TO NEXT ROW with limited frame (Ishii-san's test case)
+-- SKIP TO NEXT ROW with limited frame
 -- Each row should produce its own match within its frame
 WITH data AS (
  SELECT * FROM (VALUES
@@ -1533,8 +1527,6 @@ WINDOW w AS (
 );
 
 -- Limited frame with absorption test
--- Row 0: frame [0,2], can't see B at row 3 -> no match
--- Row 1: frame [1,3], can see A A B -> should match rows 1-3
 WITH frame_absorb_test AS (
  SELECT * FROM (VALUES
   (0, 'A'), (1, 'A'), (2, 'A'), (3, 'B')
@@ -1678,7 +1670,6 @@ count(*) OVER w
 );
 
 -- ReScan test: LATERAL join forces WindowAgg rescan with RPR
--- Tests ExecReScanWindowAgg clearing nav_slot
 SELECT g.x, sub.*
 FROM generate_series(1, 2) g(x),
 LATERAL (
@@ -1773,7 +1764,7 @@ SELECT match_first, match_last, match_len FROM result WHERE match_len > 0;
 
 -- JIT PREV/NEXT navigation test: 100K rows with PREV in DEFINE.
 -- Exercises EEOP_RPR_NAV_SET/RESTORE JIT code paths (has_rpr_nav reload)
--- at scale. V-shape: price rises then falls, repeated across partition.
+-- at scale.  A single V: price falls to zero at the midpoint, then rises.
 SET jit = on;
 SET jit_above_cost = 0;
 WITH data AS (
@@ -1873,7 +1864,6 @@ WITH data AS (
   );
 
 -- nth_value beyond reduced frame with IGNORE NULLS
--- Tests ignorenulls_getfuncarginframe early out-of-frame check
 SELECT company, tdate, price,
  nth_value(price, 5) IGNORE NULLS OVER w AS nth_5_in
 FROM stock
@@ -1925,9 +1915,8 @@ WINDOW w AS (
 );
 
 --
--- last_value IGNORE NULLS with reduced frame containing all NULLs
--- Exercises ignorenulls_getfuncarginframe SEEK_TAIL out-of-frame path
--- when notnull_relpos >= num_reduced_frame.
+-- last_value IGNORE NULLS when the reduced frame ends with NULLs
+-- The search for a non-NULL value runs past the end of the reduced frame.
 --
 CREATE TEMP TABLE rpr_nullval (id INT, val INT);
 INSERT INTO rpr_nullval VALUES (1, 10), (2, NULL), (3, NULL), (4, 20);
@@ -2047,7 +2036,7 @@ CREATE TEMP TABLE rpr_consec_null (id INT, val INT);
 INSERT INTO rpr_consec_null VALUES
  (1, 100), (2, NULL), (3, NULL), (4, NULL), (5, 200), (6, 300);
 
--- PREV(val) IS NULL succeeds for both null_slot (first row) and actual NULL
+-- PREV(val) IS NULL is true for a genuine NULL in the previous row
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_consec_null
 WINDOW w AS (
