@@ -205,9 +205,8 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );');
 
--- Regression test: Sequential alternations at same depth
+-- Sequential alternations at the same depth
 -- Verifies that "((B | C) (D | E))" correctly outputs as "(b | c) (d | e)"
--- Previously failed due to missing parentheses on ALT depth decrease
 CREATE VIEW rpr_ev_basic_deparse_seqalt AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -315,7 +314,7 @@ WINDOW w AS (
         D AS cat = ''D'', E AS cat = ''E''
 );');
 
--- Complex pattern with high state count
+-- Complex pattern: quantified sequence with a star element
 CREATE VIEW rpr_ev_state_complex AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -366,7 +365,6 @@ WINDOW w AS (
 );');
 
 -- State explosion pattern - many alternations
--- Pattern (A|B)(A|B)(A|B)(A|B) can create many parallel states
 CREATE VIEW rpr_ev_state_explosion AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -523,7 +521,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2
 );');
 
--- (A{2,})* must NOT flatten to a* (H-1): counts {0} UNION [2, INF) leave 1
+-- (A{2,})* must NOT flatten to a*: counts {0} UNION [2, INF) leave 1
 -- unreachable.  The planner keeps it as (a{2,})*, not a*.
 CREATE VIEW rpr_ev_nested_quant_no_flatten AS
 SELECT count(*) OVER w
@@ -686,7 +684,7 @@ WINDOW w AS (
     DEFINE A AS v % 10 = 1, B AS v % 10 = 2, C AS v % 10 = 3
 );');
 
--- High context absorption - unbounded group
+-- Unbounded group followed by a trailing element
 CREATE VIEW rpr_ev_ctx_absorb_group AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1036,7 +1034,7 @@ WINDOW w AS (
         D AS cat = ''D'', E AS cat = ''E''
 );');
 
--- Variable length matches - min/max/avg differ
+-- Unbounded quantifier over a repeating cycle
 CREATE VIEW rpr_ev_mlen_variable AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1878,7 +1876,7 @@ WINDOW w AS (
     DEFINE A AS v % 100 <> 0, B AS v % 100 = 0
 );');
 
--- High state merge ratio
+-- Alternation with plus quantifier over 500 rows
 CREATE VIEW rpr_ev_perf_high_merge AS
 SELECT count(*) OVER w
 FROM generate_series(1, 500) AS s(v)
@@ -2563,7 +2561,8 @@ WINDOW w AS (
 );');
 
 -- Unit (1,1) group as an alternation branch (emits no BEGIN/END)
--- Pattern: ((A B) | C) - control: takes the variable path, not deparse_rpr_group
+-- Pattern: ((A B) | C) - control: a {1,1} group emits no BEGIN/END, so the
+-- branch deparses as a plain sequence
 CREATE VIEW rpr_ev_alt_grp_unit AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2584,7 +2583,8 @@ WINDOW w AS (
 );');
 
 -- Quantified variable as the first alternation branch
--- Pattern: (A+ | C) - control: deparse_rpr_var already opens the leading paren
+-- Pattern: (A+ | C) - control: a quantified variable as the leading branch;
+-- the ALT supplies the enclosing parentheses
 CREATE VIEW rpr_ev_alt_var_first AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -3334,7 +3334,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- High skip count scenario
+-- Sparse five-element pattern over 500 rows
 CREATE VIEW rpr_ev_scale_high_skip AS
 SELECT count(*) OVER w
 FROM generate_series(1, 500) AS s(v)
@@ -3483,7 +3483,7 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, $1)
 );
 
--- No navigation function: offset 0
+-- No navigation function
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3492,7 +3492,7 @@ WINDOW w AS (
     DEFINE A AS v > 0
 );
 
--- NEXT only: no backward navigation, offset 0
+-- NEXT only: no backward navigation
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3559,7 +3559,7 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, $1)
 );
 
--- FIRST(v): retain all (references match_start row)
+-- FIRST(v) with no offset (references the match start row)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (

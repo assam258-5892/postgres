@@ -1192,6 +1192,19 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
+    Row pattern recognition constrains the frame clause it is attached to.
+    The frame must be written in <literal>ROWS</literal> mode
+    as <literal>BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING</literal>, or
+    as <literal>BETWEEN CURRENT ROW
+    AND <replaceable>offset</replaceable> FOLLOWING</literal> with
+    a positive <replaceable>offset</replaceable>.
+    <literal>RANGE</literal> and <literal>GROUPS</literal> mode, any other
+    frame start or end, and
+    the <replaceable>frame_exclusion</replaceable> options are rejected with
+    an error.
+   </para>
+
+   <para>
     Note that the maximum number of unique pattern variables
     used in the <literal>PATTERN</literal> clause is 240.
     If this limit is exceeded, an error will be raised.

@@ -561,8 +561,9 @@ WHERE pos &lt; 3;
     logical expression, which means it must
     return <literal>TRUE</literal>, <literal>FALSE</literal>
     or <literal>NULL</literal>. The expression may comprise column references
-    and functions. Window functions, aggregate functions and subqueries are
-    not allowed. An example of <literal>DEFINE</literal> is as follows.
+    and non-volatile functions. Window functions, aggregate functions,
+    set-returning functions, whole-row references and subqueries are not
+    allowed. An example of <literal>DEFINE</literal> is as follows.
 
 <programlisting>
 DEFINE
@@ -597,11 +598,13 @@ DEFINE
     rows which satisfies the PATTERN is found, in the starting row all columns
     or functions are shown in the target list. Note that aggregations only
     look into the matched rows, rather than the whole frame. On the second or
-    subsequent rows all window functions are shown as NULL. Aggregates on
+    subsequent rows the window functions that read the frame, such
+    as <function>first_value()</function>, are shown as NULL, while functions
+    that do not depend on the frame, such
+    as <function>row_number()</function>, are unaffected. Aggregates on
     non-starting rows return their initial value: for example,
     <function>count()</function> returns 0 and <function>sum()</function>
-    returns NULL. For rows that do not match the PATTERN, window functions
-    are likewise shown as NULL and aggregates return their initial value.
+    returns NULL. Rows that do not match the PATTERN behave the same way.
     Example of a <literal>SELECT</literal> using
     the <literal>DEFINE</literal> and <literal>PATTERN</literal> clause is as
     follows.
@@ -661,7 +664,7 @@ FROM stock
     and simplifying nested quantifiers
     (e.g., <literal>(A*)*</literal> becomes <literal>A*</literal>).
     These optimizations reduce pattern complexity and also decrease
-    nesting depth, making the 253-level depth limit rarely encountered.
+    nesting depth, making the 254-level depth limit rarely encountered.
     They are applied transparently and can be observed
     in <command>EXPLAIN</command> output.
    </para>
