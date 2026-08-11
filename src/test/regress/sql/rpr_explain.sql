@@ -940,6 +940,52 @@ WINDOW w AS (
     DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
 );');
 
+-- A fixed count leaves reluctance nothing to decide, so (A+ B){2}? is
+-- normalized to (A+ B){2} and absorbs where the unbounded (A+ B)+? above
+-- does not.  The two spellings below have to report the same marker and the
+-- same absorbed count as each other; that is what the normalization buys.
+CREATE VIEW rpr_ev_ctx_absorb_fixed_greedy AS
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B){2})
+    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_fixed_greedy'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B){2})
+    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
+);');
+
+CREATE VIEW rpr_ev_ctx_absorb_fixed_reluctant AS
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B){2}?)
+    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
+);
+SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_ctx_absorb_fixed_reluctant'), E'\n')) AS line WHERE line ~ 'PATTERN';
+SELECT rpr_explain_filter('
+EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT count(*) OVER w
+FROM generate_series(1, 50) AS s(v)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ B){2}?)
+    DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
+);');
+
 -- Alternation, non-absorbable branch match survives absorption: A+ B | C
 -- The dominating A+ run absorbs redundant contexts, but the recorded C matches
 -- are not absorbable, so they survive (2 matched, not 0)

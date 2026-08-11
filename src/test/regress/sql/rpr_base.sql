@@ -940,8 +940,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {n}? (exactly n, reluctant)
--- Reluctant quantifier: prefer shortest match
+-- {n}? (exactly n): min == max, so the reluctant flag is cleared and the
+-- plan is indistinguishable from A{2}.  This pins the normalization, not
+-- shortest-match behaviour.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -3212,8 +3213,9 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){3}) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: reluctant GROUP child (((A B){2}?){3}) stays nested
--- a reluctant quantifier on a GROUP is not subject to multiplication
+-- Quantifier multiply: (((A B){2}?){3}) -> (a b){6}
+-- {2}? has a fixed count, so reluctance is normalized away and the
+-- multiplication that (((A B){2}){3}) gets applies here too
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -3485,18 +3487,44 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+? (A B)) DEFINE A AS val <= 50, B AS val > 50);
 
 -- Reluctant optimization bypass: quantifier multiply (outer reluctant)
--- (A{2}){3}? stays as (a{2}){3}? (greedy merges to a{6})
+-- (A+){2,4}? stays nested where the greedy (A+){2,4} multiplies to a{2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN ((A{2}){3}?) DEFINE A AS val > 0);
+             PATTERN ((A+){2,4}?) DEFINE A AS val > 0);
 
 -- Reluctant optimization bypass: quantifier multiply (inner reluctant)
--- (A{2}?){3} stays as (a{2}?){3} (greedy merges to a{6})
+-- (A{2,3}?){3} stays as (a{2,3}?){3} (greedy (A{2,3}){3} merges to a{6,9})
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN ((A{2,3}?){3}) DEFINE A AS val > 0);
+
+-- Fixed count normalizes away: (A{2}?){3} -> a{6}, same as (A{2}){3}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}?){3}) DEFINE A AS val > 0);
+
+-- {0,} is the only brace spelling that reaches an unbounded min 0
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{0,}) DEFINE A AS val > 0);
+
+-- Bare {1} and {1,1} carry no quantifier, on a VAR or on a GROUP
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{1} B{1,1} (C){1})
+             DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
+
+-- A reluctant {1,1} normalizes to a bare variable
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w FROM rpr_plan
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A{1,1}? (B C){1})
+             DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
 -- Reluctant optimization bypass: PREFIX merge
 -- A B (A B)+? stays separate (greedy merges to (a b){2,})
@@ -3721,10 +3749,7 @@ SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+) DEFINE A AS val > 0);
 
--- Reluctant {1}? quantifier deparse
--- A{1}? is a reluctant {1,1} quantifier.  The deparse code must
--- output "{1}" explicitly to disambiguate from a bare "?" quantifier
--- (which would mean {0,1}).
+-- Reluctant {1}? quantifier: min == max, so the plan normalizes it away
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM rpr_plan
 WINDOW w AS (
