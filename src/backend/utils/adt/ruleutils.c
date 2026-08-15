@@ -390,6 +390,9 @@ static void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
+static void set_define_names(deparse_namespace *dpns, Query *query);
+static bool set_define_names_walker(Node *node, deparse_namespace *dpns);
+static void pin_define_colname(deparse_namespace *dpns, Var *var);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -4433,6 +4436,12 @@ set_deparse_for_query(deparse_namespace *dpns, Query *query,
 		 * the query jointree.
 		 */
 		set_using_names(dpns, (Node *) query->jointree, NIL);
+
+		/*
+		 * Pin the column names that DEFINE clauses reference, so that they
+		 * still resolve as written when the query is re-parsed.
+		 */
+		set_define_names(dpns, query);
 	}
 
 	/*
@@ -4733,6 +4742,122 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 	else
 		elog(ERROR, "unrecognized node type: %d",
 			 (int) nodeTag(jtnode));
+}
+
+/*
+ * set_define_names: pin the column names that DEFINE clauses reference
+ *
+ * Within a DEFINE clause a column can only be named without a qualifier,
+ * since the qualifier slot names a pattern variable; get_rule_define()
+ * deparses with varprefix off for that reason.  So an unqualified reference
+ * there has to resolve exactly as printed, much like a column merged by
+ * USING.  If another relation of the same query later acquires a column of
+ * that name, re-parsing the deparsed query would find the name ambiguous.
+ *
+ * We therefore treat such a name the way set_using_names() treats a merged
+ * USING name: register it in dpns->using_names, so that no other RTE can be
+ * given that name, and store it into the owning RTE's colnames entry, which
+ * exempts the column itself from being renamed.  set_relation_column_names()
+ * then does the rest, uniquifying the intruding column to name_1 and printing
+ * a column alias list for its RTE.
+ */
+static void
+set_define_names(deparse_namespace *dpns, Query *query)
+{
+	ListCell   *lc;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			(void) set_define_names_walker((Node *) wc->defineClause, dpns);
+	}
+}
+
+/*
+ * Walk a DEFINE clause, pinning the name of every column it references.
+ */
+static bool
+set_define_names_walker(Node *node, deparse_namespace *dpns)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Var))
+	{
+		pin_define_colname(dpns, (Var *) node);
+		return false;
+	}
+	/* Sub-selects are not allowed here, but be safe: they have own namespace */
+	if (IsA(node, Query))
+		return false;
+	return expression_tree_walker(node, set_define_names_walker, dpns);
+}
+
+/*
+ * pin_define_colname: reserve the printed name of one DEFINE-referenced column
+ */
+static void
+pin_define_colname(deparse_namespace *dpns, Var *var)
+{
+	RangeTblEntry *rte;
+	deparse_columns *colinfo;
+	AttrNumber	attno = var->varattno;
+	char	   *colname;
+	ListCell   *lc;
+
+	/* Only ordinary columns of this query level have a name to pin */
+	if (var->varlevelsup != 0 || attno <= 0)
+		return;
+	if (var->varno < 1 || var->varno > list_length(dpns->rtable))
+		return;
+
+	rte = rt_fetch(var->varno, dpns->rtable);
+	colinfo = deparse_columns_fetch(var->varno, dpns);
+
+	/*
+	 * Find the name this column is going to be printed with.  If a name was
+	 * assigned already, that is the one to protect; set_using_names() does
+	 * that both for a join's merged column and for the input columns it was
+	 * merged from.
+	 */
+	if (attno <= colinfo->num_cols && colinfo->colnames[attno - 1] != NULL)
+		colname = colinfo->colnames[attno - 1];
+	else if (rte->rtekind == RTE_RELATION)
+	{
+		/* Consult the catalogs, as set_relation_column_names() will */
+		colname = get_attname(rte->relid, attno, true);
+		if (colname == NULL)
+			return;				/* dropped column */
+		expand_colnames_array_to(colinfo, attno);
+		colinfo->colnames[attno - 1] = colname;
+	}
+	else if (rte->rtekind != RTE_JOIN &&
+			 attno <= list_length(rte->eref->colnames))
+	{
+		colname = strVal(list_nth(rte->eref->colnames, attno - 1));
+		if (colname[0] == '\0')
+			return;				/* dropped column */
+		expand_colnames_array_to(colinfo, attno);
+		colinfo->colnames[attno - 1] = colname;
+	}
+	else
+	{
+		/*
+		 * A join column that set_using_names() left alone.  Its name is taken
+		 * from the child column later on, and the child is pinned in its own
+		 * right if the DEFINE clause reaches it, so there is nothing to do.
+		 */
+		return;
+	}
+
+	/* Reserve the name query-wide, unless it is reserved already */
+	foreach(lc, dpns->using_names)
+	{
+		if (strcmp((char *) lfirst(lc), colname) == 0)
+			return;
+	}
+	dpns->using_names = lappend(dpns->using_names, colname);
 }
 
 /*
