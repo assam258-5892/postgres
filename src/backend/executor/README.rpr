@@ -631,7 +631,7 @@ two states coexist within the context:
   State 2: elemIdx=5 (waiting for C, via branch B)
 
 In this case, since the (elemIdx, counts) of the two states are equal,
-nfa_add_state_unique() retains only State 1 (branch A), which was
+nfa_append_state_unique() retains only State 1 (branch A), which was
 added first.
 Because DFS processes the first branch of ALT first, the state via A
 is registered first, and the state via B is discarded as a duplicate.
@@ -1102,7 +1102,7 @@ Example: PATTERN (A | B) C
   The first branch A of the ALT takes precedence over the second branch B.
   When both A and B can match, the match via A is selected.
 
-nfa_add_state_unique() prevents duplicate addition of the same state,
+nfa_append_state_unique() prevents duplicate addition of the same state,
 so the state added first (= from the preferred branch) is retained.
 
 IX-3. Routing Function: nfa_route_to_elem()
@@ -1118,7 +1118,7 @@ is handled in two places.
 nfa_route_to_elem() branches on the type of the next element:
 
   If the next element is VAR:
-    (1) Add the state to the context (nfa_add_state_unique)
+    (1) Add the state to the context (nfa_append_state_unique)
     (2) If the VAR has min=0, also add a skip path (recurse via next).
         A reluctant VAR (A??, A*?) reverses the order: the skip path goes
         first, and the waiting state is dropped if it reaches FIN
@@ -1231,7 +1231,7 @@ IX-4. Per-Element advance Behavior
   In SKIP PAST LAST ROW mode, upon reaching FIN, subsequent contexts
   that started within the match range are immediately pruned.
 
-IX-5. State Deduplication: nfa_add_state_unique()
+IX-5. State Deduplication: nfa_append_state_unique()
 
 When adding a new state to a context, it is compared against existing
 states;
@@ -1276,7 +1276,7 @@ To prevent this:
 
   Nothing else is marked, because nothing else can cycle.  A revisit is
   a cycle only when it carries no progress, and a state is really
-  (elemIdx, counts) -- the identity nfa_add_state_unique() compares.
+  (elemIdx, counts) -- the identity nfa_append_state_unique() compares.
   A VAR consumes a row, and so does every derivation of a body that
   cannot match empty; a loop-back into either is progress, not a cycle.
   Marking them would discard legitimate re-entry and lose the match
@@ -1640,7 +1640,7 @@ XII-5. Execution Optimization Summary
     VARs (count >= max) within the absorbable region (ABSORBABLE_BRANCH)
     through END chains to reach the comparison point (ABSORBABLE END).
     This process can also produce duplicate states reaching the same END.
-    nfa_add_state_unique() blocks duplicate addition during advance.  The
+    nfa_append_state_unique() blocks duplicate addition during advance.  The
     inline advance adds nothing -- it moves states in place -- so the
     duplicates it leaves on an END are collapsed when the next advance
     re-adds their successors.
