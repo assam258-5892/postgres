@@ -3087,12 +3087,14 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		 * Allocate the per-row varMatched cache.  varNames are built in
 		 * DEFINE order, so varId equals the DEFINE list index and no mapping
 		 * is needed.
+		 *
+		 * The grammar makes DEFINE mandatory for a row pattern window, and
+		 * this branch runs only for one, so the list is never empty and
+		 * rpr_prepare_row() can reset the cache unconditionally.
 		 */
-		if (winstate->defineClauseExprs != NIL)
-			winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
-											  list_length(winstate->defineClauseExprs));
-		else
-			winstate->nfaVarMatched = NULL;
+		Assert(winstate->defineClauseExprs != NIL);
+		winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
+										  list_length(winstate->defineClauseExprs));
 
 		/* Copy match_start dependency bitmapset for per-context evaluation */
 		winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
@@ -4635,8 +4637,6 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 	 */
 	for (currentPos = startPos; targetCtx->states != NULL; currentPos++)
 	{
-		bool		rowExists;
-
 		/*
 		 * Evaluate variables for this row - done only once, shared by all
 		 * contexts.
@@ -4648,10 +4648,9 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 		 */
 		winstate->currentpos = currentPos;
 		winstate->nav_match_start = targetCtx->matchStartRow;
-		rowExists = rpr_prepare_row(winobj, currentPos, winstate->nfaVarMatched);
 
 		/* No more rows in partition? Finalize all contexts */
-		if (!rowExists)
+		if (!rpr_prepare_row(winobj, currentPos, winstate->nfaVarMatched))
 		{
 			ExecRPRFinalizeAllContexts(winstate, currentPos - 1);
 			/* Clean up dead contexts from finalization */
@@ -4858,9 +4857,8 @@ rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched)
 	 * Reset the per-row cache to "unevaluated"; each variable's DEFINE is
 	 * evaluated lazily at first consumption in nfa_eval_var_match.
 	 */
-	if (varMatched != NULL)
-		memset(varMatched, 0,
-			   sizeof(RPRVarMatch) * list_length(winstate->defineClauseExprs));
+	memset(varMatched, 0,
+		   sizeof(RPRVarMatch) * list_length(winstate->defineClauseExprs));
 
 	return true;				/* Row exists */
 }
