@@ -1229,6 +1229,18 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
+    A column reference in the <literal>DEFINE</literal> clause must be
+    written without a qualifier.  The SQL standard reserves the qualifier
+    slot for a pattern variable, so a table name or alias is rejected
+    there, and a pattern variable qualifier is rejected as not supported.
+    The column name therefore has to resolve on its own across the
+    whole <literal>FROM</literal> clause, and an ambiguous name is
+    rejected.  Where the name is not unique, rename the column in
+    the <literal>FROM</literal> clause, for example with a column alias on
+    a subquery.
+   </para>
+
+   <para>
     The purpose of a <literal>WINDOW</literal> clause is to specify the
     behavior of <firstterm>window functions</firstterm> appearing in the query's
     <link linkend="sql-select-list"><command>SELECT</command> list</link> or

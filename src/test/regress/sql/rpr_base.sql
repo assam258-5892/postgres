@@ -2377,47 +2377,158 @@ WINDOW w AS (ORDER BY s.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (UP+) DEFINE UP AS val > 0);
 SELECT pg_get_viewdef('rpr_serial_join'::regclass);
 
--- Ambiguity introduced after the view was created: ALTER TABLE adds a column
--- whose name already appears in the other side of the join, so the deparser
--- must qualify or alias it.  sv3 shows the same text is rejected on a fresh
--- CREATE VIEW; sv4 shows the alias form that survives.  These stay temporary
--- and are dropped at the end: sv is deliberately unrestorable, so leaving it
--- in place would hand pg_dump a view that cannot be restored.
-CREATE TEMP TABLE sa (id int, price int);
-CREATE TEMP TABLE sb (id int, qty int);
-INSERT INTO sa VALUES (1,10),(2,20);
-INSERT INTO sb VALUES (1,5),(2,7);
+-- A DEFINE clause can only name a column without a qualifier, so the name has
+-- to resolve exactly as printed.  When another relation of the query acquires
+-- a column of that name, the deparser pushes the newcomer aside with a column
+-- alias list, the same way it protects a column merged by USING.
 
-CREATE TEMP VIEW sv AS
-SELECT a.id, count(*) OVER w AS cnt
-FROM sa a JOIN sb b ON a.id = b.id
-WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN (UP+) DEFINE UP AS price > 0);
+CREATE TABLE rpr_pin (id INT, val INT);
+CREATE TABLE rpr_pin_other (id INT);
+INSERT INTO rpr_pin VALUES (1, 10), (2, 20), (3, 15);
+INSERT INTO rpr_pin_other VALUES (1), (2), (3);
 
-ALTER TABLE sb ADD COLUMN price int;
+CREATE VIEW rpr_pin_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_pin, rpr_pin_other
+WHERE rpr_pin.id = rpr_pin_other.id
+WINDOW w AS (ORDER BY rpr_pin.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS val > 0);
 
-SELECT pg_get_viewdef('sv'::regclass, true);
+-- names reached through a navigation operation are pinned too
+CREATE VIEW rpr_pin_nav_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_pin, rpr_pin_other
+WHERE rpr_pin.id = rpr_pin_other.id
+WINDOW w AS (ORDER BY rpr_pin.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS PREV(val) < val);
 
--- ERROR: the deparsed text above no longer re-parses
-CREATE TEMP VIEW sv3 AS
-SELECT a.id, count(*) OVER w AS cnt
-FROM sa a JOIN sb b ON a.id = b.id
-WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN (UP+) DEFINE UP AS price > 0);
+-- no collision yet, so no column alias list
+SELECT pg_get_viewdef('rpr_pin_v'::regclass, true);
 
-CREATE TEMP VIEW sv4 AS
-SELECT a.id, count(*) OVER w AS cnt
-FROM sa a (id, price) JOIN sb b (id, qty, price_1) ON a.id = b.id
-WINDOW w AS (ORDER BY a.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN (UP+) DEFINE UP AS price > 0);
+ALTER TABLE rpr_pin_other ADD COLUMN val INT;
 
-SELECT pg_get_viewdef('sv4'::regclass, true);
-SELECT * FROM sv4;
-SELECT * FROM sv;
+SELECT pg_get_viewdef('rpr_pin_v'::regclass, true);
+SELECT pg_get_viewdef('rpr_pin_nav_v'::regclass, true);
 
-DROP VIEW sv4;
-DROP VIEW sv;
-DROP TABLE sa, sb;
+-- and the deparsed text builds an identical view
+CREATE VIEW rpr_pin_v2 AS
+ SELECT count(*) OVER w AS cnt
+   FROM rpr_pin,
+    rpr_pin_other rpr_pin_other(id, val_1)
+  WHERE rpr_pin.id = rpr_pin_other.id
+  WINDOW w AS (ORDER BY rpr_pin.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  AFTER MATCH SKIP PAST LAST ROW
+  INITIAL
+  PATTERN (a+)
+  DEFINE
+  a AS val > 0);
+
+SELECT pg_get_viewdef('rpr_pin_v'::regclass, true)
+     = pg_get_viewdef('rpr_pin_v2'::regclass, true) AS identical;
+
+-- a column merged by USING is pinned the same way
+CREATE TABLE rpr_pin_l (x INT, y INT);
+CREATE TABLE rpr_pin_r (x INT, z INT);
+CREATE TABLE rpr_pin_x (id INT);
+
+CREATE VIEW rpr_pin_using_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_pin_l JOIN rpr_pin_r USING (x), rpr_pin_x
+WINDOW w AS (ORDER BY rpr_pin_l.y
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x > 0);
+
+ALTER TABLE rpr_pin_x ADD COLUMN x INT;
+
+SELECT pg_get_viewdef('rpr_pin_using_v'::regclass, true);
+
+-- a JOIN ... ON behaves the same, and the view keeps returning its rows
+CREATE TABLE rpr_pin_j1 (id INT, price INT);
+CREATE TABLE rpr_pin_j2 (id INT, qty INT);
+INSERT INTO rpr_pin_j1 VALUES (1, 10), (2, 20);
+INSERT INTO rpr_pin_j2 VALUES (1, 5), (2, 7);
+
+CREATE VIEW rpr_pin_on_v AS
+SELECT j1.id, count(*) OVER w AS cnt
+FROM rpr_pin_j1 j1 JOIN rpr_pin_j2 j2 ON j1.id = j2.id
+WINDOW w AS (ORDER BY j1.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS price > 0);
+
+ALTER TABLE rpr_pin_j2 ADD COLUMN price INT;
+
+SELECT pg_get_viewdef('rpr_pin_on_v'::regclass, true);
+SELECT * FROM rpr_pin_on_v ORDER BY id;
+
+-- An aliased join hides its inputs, so the name that gets printed is the join's
+-- own, taken from varnosyn, not the child column the Var carries in varno.
+-- Pinning the child instead would reserve a name that never reaches the output
+-- and leave the printed one free for a later column to collide with.
+CREATE TABLE rpr_pin_a (i INT, x INT);
+CREATE TABLE rpr_pin_b (k INT, y INT);
+CREATE TABLE rpr_pin_c (m INT);
+INSERT INTO rpr_pin_a VALUES (1, 10), (2, 20);
+INSERT INTO rpr_pin_b VALUES (1, 5), (2, 7);
+INSERT INTO rpr_pin_c VALUES (100), (200);
+
+CREATE VIEW rpr_pin_alias_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_pin_a JOIN rpr_pin_b ON rpr_pin_a.i = rpr_pin_b.k) j(p, q, r, s),
+     rpr_pin_c
+WINDOW w AS (ORDER BY rpr_pin_c.m
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A)
+             DEFINE A AS q > 0);
+
+ALTER TABLE rpr_pin_c ADD COLUMN q INT;
+
+SELECT pg_get_viewdef('rpr_pin_alias_v'::regclass, true);
+SELECT * FROM rpr_pin_alias_v;
+
+-- and the deparsed text builds a view that returns the same rows
+CREATE VIEW rpr_pin_alias_v2 AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_pin_a JOIN rpr_pin_b ON rpr_pin_a.i = rpr_pin_b.k) j(p, q, r, s),
+     rpr_pin_c rpr_pin_c(m, q_1)
+WINDOW w AS (ORDER BY rpr_pin_c.m
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             AFTER MATCH SKIP PAST LAST ROW
+             INITIAL
+             PATTERN (a)
+             DEFINE a AS q > 0);
+SELECT * FROM rpr_pin_alias_v2;
+DROP VIEW rpr_pin_alias_v2;
+
+-- Without a user column alias list the join still keeps the printed name, and
+-- the input relation is the one that moves aside.
+CREATE VIEW rpr_pin_alias_v3 AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_pin_a JOIN rpr_pin_b ON rpr_pin_a.i = rpr_pin_b.k) j, rpr_pin_c
+WINDOW w AS (ORDER BY rpr_pin_c.m
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A)
+             DEFINE A AS x > 0);
+SELECT pg_get_viewdef('rpr_pin_alias_v3'::regclass, true);
+
+DROP VIEW rpr_pin_alias_v3;
+DROP VIEW rpr_pin_alias_v;
+DROP TABLE rpr_pin_a, rpr_pin_b, rpr_pin_c;
+
+-- The same query written fresh is rejected, since nothing pins the name for
+-- it.  Pinning is what lets the stored definition above still reparse.
+SELECT j1.id, count(*) OVER w AS cnt
+FROM rpr_pin_j1 j1 JOIN rpr_pin_j2 j2 ON j1.id = j2.id
+WINDOW w AS (ORDER BY j1.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS price > 0);
+
 
 -- Materialized view (if supported)
 
