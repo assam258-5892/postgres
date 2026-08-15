@@ -5011,8 +5011,13 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			else
 				colname = real_colname;
 
-			/* Unique-ify and insert into colinfo */
-			colname = make_colname_unique(colname, dpns, colinfo);
+			/*
+			 * Unique-ify and insert into colinfo.  An RTE not in the FROM
+			 * clause, such as a rule's NEW or OLD, has nowhere to carry a
+			 * column alias list, so a renamed column would not reparse.
+			 */
+			if (rte->inFromCl)
+				colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
 			add_to_names_hash(colinfo, colname);
