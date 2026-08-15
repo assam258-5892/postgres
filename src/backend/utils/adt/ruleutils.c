@@ -5272,11 +5272,17 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			 * Unique-ify and insert into colinfo, unless this RTE has nowhere
 			 * to carry a column alias list: a renamed column would then reach
 			 * the output only where it is referenced, naming a column that no
-			 * longer exists.  A TABLEFUNC RTE is such a one -- its column
-			 * names are written into the clause that produces them, which is
-			 * why printaliases is forced off for it below.
+			 * longer exists.  Two kinds have nowhere.  A relation RTE outside
+			 * the FROM clause is one -- a rule's NEW or OLD, or the target of
+			 * an UPDATE or DELETE; other kinds reach here with inFromCl clear
+			 * and still get printed, the subquery an INSERT ... SELECT reads
+			 * from among them, so those are renamed as before.  A TABLEFUNC
+			 * RTE is the other: its column names are written into the clause
+			 * that produces them, which is why printaliases is forced off for
+			 * it below.
 			 */
-			if (rte->rtekind != RTE_TABLEFUNC)
+			if (rte->rtekind != RTE_TABLEFUNC &&
+				(rte->inFromCl || rte->rtekind != RTE_RELATION))
 				colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
