@@ -678,8 +678,15 @@ Flow of update_reduced_frame():
 
 Pseudocode of the row processing loop:
 
-  targetCtx = ExecRPRGetHeadContext(pos)
+  targetCtx = NULL
+  if nfaContext != NULL:                    -- head is the oldest context
+      if nfaContext->matchStartRow > pos:   -- pos already skipped past
+          return
+      if nfaContext->matchStartRow == pos:
+          targetCtx = nfaContext
   if targetCtx == NULL:
+      if pos <= nfaLastProcessedRow:        -- already unmatched or skipped
+          return
       targetCtx = ExecRPRStartContext(pos)
 
   for currentPos = startPos; targetCtx->states != NULL; currentPos++:
@@ -1361,12 +1368,14 @@ X-4. Bounded Frame Handling
   rejected, since it would reduce the frame to the single current row.
 
   When the frame is bounded (e.g., ROWS BETWEEN CURRENT ROW AND 5
-  FOLLOWING), ExecRPRProcessRow receives hasLimitedFrame=true and
-  frameOffset indicating the upper bound.  Before the match phase,
-  any context whose match has exceeded the frame boundary
-  (currentPos >= matchStartRow + frameOffset + 1) is finalized early
-  by forcing a mismatch.  This prevents matches from extending beyond
-  the window frame.  The sum is clamped to PG_INT64_MAX on overflow.
+  FOLLOWING), ExecRPRProcessRow derives the upper bound itself from
+  winstate->frameOptions and winstate->endOffsetValue, using a
+  frameOffset of -1 to mean the frame runs to the partition end.
+  Before the match phase, any context whose match has exceeded the
+  frame boundary (currentPos >= matchStartRow + frameOffset + 1) is
+  finalized early by forcing a mismatch.  This prevents matches from
+  extending beyond the window frame.  The sum is clamped to
+  PG_INT64_MAX on overflow.
 
   Note that bounded frames also disable context absorption at the
   planner level (see VIII-3(b)), since the frame boundary breaks the
