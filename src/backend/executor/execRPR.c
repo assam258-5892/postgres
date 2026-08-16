@@ -829,114 +829,10 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 
 		if (RPRElemIsVar(elem))
 		{
-			bool		matched;
 			int			depth = elem->depth;
 			int32		count = state->counts[depth];
 
-			matched = nfa_eval_var_match(winstate, elem, varMatched);
-
-			if (matched)
-			{
-				/*
-				 * Increment count, saturating at RPR_COUNT_INF to avoid int32
-				 * overflow; a saturated count then compares as "unbounded".
-				 */
-				if (count < RPR_COUNT_INF)
-					count++;
-
-				/* Max constraint should not be exceeded */
-				Assert(elem->max == RPR_QUANTITY_INF || count <= elem->max);
-
-				state->counts[depth] = count;
-
-				/*
-				 * For VAR at max count with END next, advance through END
-				 * chain to reach the absorption comparison point.  Only
-				 * deterministic exits (count >= max, max finite) are handled;
-				 * unbounded VARs stay for advance phase.
-				 *
-				 * In nested patterns like ((A (B C){2}){2})+, a VAR reaching
-				 * its max triggers an exit cascade: inner END increments
-				 * inner group count, which may itself reach max, requiring an
-				 * exit to the next outer END.  The loop below walks this
-				 * chain.
-				 *
-				 * ABSORBABLE_BRANCH marks elements inside the absorbable
-				 * region; ABSORBABLE marks the outermost comparison point
-				 * where count-dominance is evaluated.  We chain through
-				 * BRANCH elements until reaching the ABSORBABLE point or an
-				 * element that can still loop (count < max).
-				 */
-				if (RPRElemIsAbsorbableBranch(elem) &&
-					!RPRElemIsAbsorbable(elem) &&
-					count >= elem->max &&
-					RPRElemIsEnd(&elements[elem->next]))
-				{
-					RPRPatternElement *endElem = &elements[elem->next];
-					int			endDepth = endElem->depth;
-					int32		endCount = state->counts[endDepth];
-
-					/* Increment group count */
-					if (endCount < RPR_COUNT_INF)
-						endCount++;
-					Assert(endElem->max == RPR_QUANTITY_INF ||
-						   endCount <= endElem->max);
-
-					state->elemIdx = elem->next;
-					state->counts[endDepth] = endCount;
-
-					/*
-					 * Leaf VAR exited (reached max): clear its own count so
-					 * the next occupant enters with zero, as nfa_advance_var
-					 * does on exit (this inline path replaces that exit).
-					 * depth > endDepth, so this leaves the group count just
-					 * written intact.
-					 */
-					Assert(endDepth < depth);
-					state->counts[depth] = 0;
-
-					/*
-					 * Chain through END elements within the absorbable region
-					 * (ABSORBABLE_BRANCH) until reaching the comparison point
-					 * (ABSORBABLE).  Continue only on must-exit path (count
-					 * >= max) with END next.
-					 */
-					while (RPRElemIsAbsorbableBranch(endElem) &&
-						   !RPRElemIsAbsorbable(endElem) &&
-						   endCount >= endElem->max &&
-						   RPRElemIsEnd(&elements[endElem->next]))
-					{
-						RPRPatternElement *outerEnd = &elements[endElem->next];
-						int			outerDepth = outerEnd->depth;
-						int32		outerCount = state->counts[outerDepth];
-
-						/*
-						 * Exit this intermediate group: clear its own count
-						 * (count-clear policy).  It sits below the absorbable
-						 * comparison point, so it is excluded from the
-						 * dominance comparison; the comparison point where
-						 * the chain stops keeps its count.
-						 */
-						state->counts[endDepth] = 0;
-
-						/* Increment outer group count */
-						if (outerCount < RPR_COUNT_INF)
-							outerCount++;
-						Assert(outerEnd->max == RPR_QUANTITY_INF ||
-							   outerCount <= outerEnd->max);
-
-						state->elemIdx = endElem->next;
-						state->counts[outerDepth] = outerCount;
-
-						/* Advance to next END in chain */
-						endElem = outerEnd;
-						endDepth = outerDepth;
-						endCount = outerCount;
-					}
-				}
-				/* else: stay at VAR for advance phase */
-			}
-			else
+			if (!nfa_eval_var_match(winstate, elem, varMatched))
 			{
 				/*
 				 * Not matched - remove state. Exit alternatives were already
@@ -946,6 +842,104 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 				nfa_state_free(winstate, state);
 				continue;
 			}
+
+			/*
+			 * Increment count, saturating at RPR_COUNT_INF to avoid int32
+			 * overflow; a saturated count then compares as "unbounded".
+			 */
+			if (count < RPR_COUNT_INF)
+				count++;
+
+			/* Max constraint should not be exceeded */
+			Assert(elem->max == RPR_QUANTITY_INF || count <= elem->max);
+
+			state->counts[depth] = count;
+
+			/*
+			 * For VAR at max count with END next, advance through END chain
+			 * to reach the absorption comparison point.  Only deterministic
+			 * exits (count >= max, max finite) are handled; unbounded VARs
+			 * stay for advance phase.
+			 *
+			 * In nested patterns like ((A (B C){2}){2})+, a VAR reaching its
+			 * max triggers an exit cascade: inner END increments inner group
+			 * count, which may itself reach max, requiring an exit to the
+			 * next outer END.  The loop below walks this chain.
+			 *
+			 * ABSORBABLE_BRANCH marks elements inside the absorbable region;
+			 * ABSORBABLE marks the outermost comparison point where
+			 * count-dominance is evaluated.  We chain through BRANCH elements
+			 * until reaching the ABSORBABLE point or an element that can
+			 * still loop (count < max).
+			 */
+			if (RPRElemIsAbsorbableBranch(elem) &&
+				!RPRElemIsAbsorbable(elem) &&
+				count >= elem->max &&
+				RPRElemIsEnd(&elements[elem->next]))
+			{
+				RPRPatternElement *endElem = &elements[elem->next];
+				int			endDepth = endElem->depth;
+				int32		endCount = state->counts[endDepth];
+
+				/* Increment group count */
+				if (endCount < RPR_COUNT_INF)
+					endCount++;
+				Assert(endElem->max == RPR_QUANTITY_INF ||
+					   endCount <= endElem->max);
+
+				state->elemIdx = elem->next;
+				state->counts[endDepth] = endCount;
+
+				/*
+				 * Leaf VAR exited (reached max): clear its own count so the
+				 * next occupant enters with zero, as nfa_advance_var does on
+				 * exit (this inline path replaces that exit). depth >
+				 * endDepth, so this leaves the group count just written
+				 * intact.
+				 */
+				Assert(endDepth < depth);
+				state->counts[depth] = 0;
+
+				/*
+				 * Chain through END elements within the absorbable region
+				 * (ABSORBABLE_BRANCH) until reaching the comparison point
+				 * (ABSORBABLE).  Continue only on must-exit path (count >=
+				 * max) with END next.
+				 */
+				while (RPRElemIsAbsorbableBranch(endElem) &&
+					   !RPRElemIsAbsorbable(endElem) &&
+					   endCount >= endElem->max &&
+					   RPRElemIsEnd(&elements[endElem->next]))
+				{
+					RPRPatternElement *outerEnd = &elements[endElem->next];
+					int			outerDepth = outerEnd->depth;
+					int32		outerCount = state->counts[outerDepth];
+
+					/*
+					 * Exit this intermediate group: clear its own count
+					 * (count-clear policy).  It sits below the absorbable
+					 * comparison point, so it is excluded from the dominance
+					 * comparison; the comparison point where the chain stops
+					 * keeps its count.
+					 */
+					state->counts[endDepth] = 0;
+
+					/* Increment outer group count */
+					if (outerCount < RPR_COUNT_INF)
+						outerCount++;
+					Assert(outerEnd->max == RPR_QUANTITY_INF ||
+						   outerCount <= outerEnd->max);
+
+					state->elemIdx = endElem->next;
+					state->counts[outerDepth] = outerCount;
+
+					/* Advance to next END in chain */
+					endElem = outerEnd;
+					endDepth = outerDepth;
+					endCount = outerCount;
+				}
+			}
+			/* else: stay at VAR for advance phase */
 		}
 		/* Non-VAR elements: keep as-is for advance phase */
 
