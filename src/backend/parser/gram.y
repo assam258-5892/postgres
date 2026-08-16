@@ -17720,23 +17720,22 @@ row_pattern_alt:
 				}
 			| row_pattern_alt '|' row_pattern_seq
 				{
-					RPRPatternNode *n;
-					RPRPatternNode *rhs = splitRPRTrailingAlt((RPRPatternNode *) $3,
+					RPRPatternNode *lhs = castNode(RPRPatternNode, $1);
+					RPRPatternNode *rhs = splitRPRTrailingAlt(castNode(RPRPatternNode, $3),
 															 yyscanner);
 
 					/* If left side is already ALT, append to it */
-					if (IsA($1, RPRPatternNode) &&
-						((RPRPatternNode *) $1)->nodeType == RPR_PATTERN_ALT)
+					if (lhs->nodeType == RPR_PATTERN_ALT)
 					{
-						n = (RPRPatternNode *) $1;
-						n->children = lappend(n->children, rhs);
-						$$ = (Node *) n;
+						lhs->children = lappend(lhs->children, rhs);
+						$$ = (Node *) lhs;
 					}
 					else
 					{
-						n = makeNode(RPRPatternNode);
+						RPRPatternNode *n = makeNode(RPRPatternNode);
+
 						n->nodeType = RPR_PATTERN_ALT;
-						n->children = list_make2($1, rhs);
+						n->children = list_make2(lhs, rhs);
 						n->min = 1;
 						n->max = 1;
 						n->reluctant = false;
@@ -17750,25 +17749,24 @@ row_pattern_seq:
 			row_pattern_term					{ $$ = $1; }
 			| row_pattern_seq row_pattern_term
 				{
-					RPRPatternNode *n;
+					RPRPatternNode *seq = castNode(RPRPatternNode, $1);
 
 					/*
 					 * If left side is already SEQ, append to it.  A glued
 					 * quantifier's trailing_alt stays on the child term;
 					 * row_pattern_alt splits on it once the seq is complete.
 					 */
-					if (IsA($1, RPRPatternNode) &&
-						((RPRPatternNode *) $1)->nodeType == RPR_PATTERN_SEQ)
+					if (seq->nodeType == RPR_PATTERN_SEQ)
 					{
-						n = (RPRPatternNode *) $1;
-						n->children = lappend(n->children, $2);
-						$$ = (Node *) n;
+						seq->children = lappend(seq->children, $2);
+						$$ = (Node *) seq;
 					}
 					else
 					{
-						n = makeNode(RPRPatternNode);
+						RPRPatternNode *n = makeNode(RPRPatternNode);
+
 						n->nodeType = RPR_PATTERN_SEQ;
-						n->children = list_make2($1, $2);
+						n->children = list_make2(seq, $2);
 						n->min = 1;
 						n->max = 1;
 						n->reluctant = false;
