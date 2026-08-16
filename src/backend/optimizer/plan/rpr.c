@@ -96,14 +96,12 @@ static void computeAbsorbability(RPRPattern *pattern);
  * rprPatternEqual
  *		Compare two RPRPatternNode trees for equality.
  *
- * Returns true if the trees are structurally identical.
+ * Returns true if the trees are structurally identical.  Neither argument
+ * may be NULL: a children list never holds one.
  */
 static bool
 rprPatternEqual(RPRPatternNode *a, RPRPatternNode *b)
 {
-	/* Pattern nodes in children lists must never be NULL */
-	Assert(a != NULL && b != NULL);
-
 	/* Must have same node type and quantifiers */
 	if (a->nodeType != b->nodeType)
 		return false;
@@ -2075,7 +2073,7 @@ buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 		/* Parser always assigns a name to each DEFINE entry */
 		Assert(te->resname != NULL);
 
-		varNamesStack[numVars++] = pstrdup(te->resname);
+		varNamesStack[numVars++] = te->resname;
 	}
 
 	/* Scan pattern: collect variables, count elements, validate limits */
