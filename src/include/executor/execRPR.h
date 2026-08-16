@@ -19,13 +19,10 @@
 /* NFA context management */
 extern RPRNFAContext *ExecRPRStartContext(WindowAggState *winstate,
 										  int64 startPos);
-extern RPRNFAContext *ExecRPRGetHeadContext(WindowAggState *winstate,
-											int64 pos);
 extern void ExecRPRFreeContext(WindowAggState *winstate, RPRNFAContext *ctx);
 
 /* NFA processing */
-extern void ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos,
-							  bool hasLimitedFrame, int64 frameOffset);
+extern void ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos);
 extern void ExecRPRCleanupDeadContexts(WindowAggState *winstate,
 									   RPRNFAContext *excludeCtx);
 extern void ExecRPRFinalizeAllContexts(WindowAggState *winstate, int64 lastPos);
