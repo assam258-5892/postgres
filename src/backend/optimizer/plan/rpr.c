@@ -50,15 +50,15 @@ static bool rprPatternChildrenEqual(List *a, List *b);
 static int64 rprNodeRowCount(RPRPatternNode *node);
 static int64 rprBodyRowCount(List *children);
 static bool rprBodyHasUniformLength(List *children);
-static List *flattenSeqChildren(List *children);
-static List *mergeConsecutiveVars(List *children);
-static List *mergeConsecutiveGroups(List *children);
-static List *mergeConsecutiveAlts(List *children);
-static List *mergeGroupPrefixSuffix(List *children);
+static void flattenSeqChildren(RPRPatternNode *pattern);
+static void mergeConsecutiveVars(RPRPatternNode *pattern);
+static void mergeConsecutiveGroups(RPRPatternNode *pattern);
+static void mergeConsecutiveAlts(RPRPatternNode *pattern);
+static void mergeGroupPrefixSuffix(RPRPatternNode *pattern);
 static RPRPatternNode *optimizeSeqPattern(RPRPatternNode *pattern);
 
-static List *flattenAltChildren(List *children);
-static List *removeDuplicateAlternatives(List *children);
+static void flattenAltChildren(RPRPatternNode *pattern);
+static void removeDuplicateAlternatives(RPRPatternNode *pattern);
 static RPRPatternNode *optimizeAltPattern(RPRPatternNode *pattern);
 
 static RPRPatternNode *tryMultiplyQuantifiers(RPRPatternNode *pattern);
@@ -236,18 +236,15 @@ rprBodyHasUniformLength(List *children)
  * Example:
  *   SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
  *
- * Returns a new list with optimized children, with nested SEQ children
- * flattened into the parent list.  The helpers in this file follow two
- * conventions -- this one, mergeConsecutiveGroups() and
- * mergeGroupPrefixSuffix() build a new list, the rest edit cells in place --
- * so a caller must always assign the return value.
+ * Replaces pattern->children with the optimized list, nested SEQ children
+ * flattened into it.
  */
-static List *
-flattenSeqChildren(List *children)
+static void
+flattenSeqChildren(RPRPatternNode *pattern)
 {
 	List	   *newChildren = NIL;
 
-	foreach_node(RPRPatternNode, child, children)
+	foreach_node(RPRPatternNode, child, pattern->children)
 	{
 		RPRPatternNode *opt = optimizeRPRPattern(child);
 
@@ -269,7 +266,7 @@ flattenSeqChildren(List *children)
 		}
 	}
 
-	return newChildren;
+	pattern->children = newChildren;
 }
 
 /*
@@ -281,9 +278,11 @@ flattenSeqChildren(List *children)
  *
  * Only merges non-reluctant VAR nodes with the same variable name.
  */
-static List *
-mergeConsecutiveVars(List *children)
+static void
+mergeConsecutiveVars(RPRPatternNode *pattern)
 {
+	List	   *children = pattern->children;
+
 	for (int outerpos = 0; outerpos < list_length(children); outerpos++)
 	{
 		RPRPatternNode *rprpattern = list_nth_node(RPRPatternNode, children, outerpos);
@@ -338,7 +337,7 @@ mergeConsecutiveVars(List *children)
 		}
 	}
 
-	return children;
+	pattern->children = children;
 }
 
 /*
@@ -357,13 +356,13 @@ mergeConsecutiveVars(List *children)
  * forms reach the same rows in the same order; without one, they need not --
  * (A | B B)+ (A | B B)+ prefers a four-row match where (A | B B){2,} takes two.
  */
-static List *
-mergeConsecutiveGroups(List *children)
+static void
+mergeConsecutiveGroups(RPRPatternNode *pattern)
 {
 	List	   *mergedChildren = NIL;
 	RPRPatternNode *prev = NULL;
 
-	foreach_node(RPRPatternNode, child, children)
+	foreach_node(RPRPatternNode, child, pattern->children)
 	{
 		if (child->nodeType == RPR_PATTERN_GROUP && child->reluctant == false)
 		{
@@ -421,7 +420,7 @@ mergeConsecutiveGroups(List *children)
 	if (prev != NULL)
 		mergedChildren = lappend(mergedChildren, prev);
 
-	return mergedChildren;
+	pattern->children = mergedChildren;
 }
 
 /*
@@ -435,9 +434,10 @@ mergeConsecutiveGroups(List *children)
  * in the SEQ.  This step detects consecutive identical ALT nodes and wraps
  * them in a GROUP with the appropriate quantifier.
  */
-static List *
-mergeConsecutiveAlts(List *children)
+static void
+mergeConsecutiveAlts(RPRPatternNode *pattern)
 {
+	List	   *children = pattern->children;
 	int			count = 1;
 
 	for (int outerpos = 0; outerpos < list_length(children); outerpos++)
@@ -485,7 +485,7 @@ mergeConsecutiveAlts(List *children)
 		count = 1;				/* reset */
 	}
 
-	return children;
+	pattern->children = children;
 }
 
 /*
@@ -518,9 +518,10 @@ mergeConsecutiveAlts(List *children)
  * content consumes a fixed number of rows, which leaves it nothing to decide;
  * see mergeConsecutiveGroups for why that condition is the right one.
  */
-static List *
-mergeGroupPrefixSuffix(List *children)
+static void
+mergeGroupPrefixSuffix(RPRPatternNode *pattern)
 {
+	List	   *children = pattern->children;
 	List	   *result = NIL;
 	int			numChildren = list_length(children);
 	int			i;
@@ -671,7 +672,7 @@ mergeGroupPrefixSuffix(List *children)
 		result = lappend(result, child);
 	}
 
-	return result;
+	pattern->children = result;
 }
 
 /*
@@ -690,19 +691,19 @@ static RPRPatternNode *
 optimizeSeqPattern(RPRPatternNode *pattern)
 {
 	/* Recursively optimize children and flatten nested SEQ/GROUP{1,1} */
-	pattern->children = flattenSeqChildren(pattern->children);
+	flattenSeqChildren(pattern);
 
 	/* Merge consecutive identical VAR nodes */
-	pattern->children = mergeConsecutiveVars(pattern->children);
+	mergeConsecutiveVars(pattern);
 
 	/* Merge consecutive identical GROUP nodes */
-	pattern->children = mergeConsecutiveGroups(pattern->children);
+	mergeConsecutiveGroups(pattern);
 
 	/* Merge consecutive identical ALT nodes into GROUP */
-	pattern->children = mergeConsecutiveAlts(pattern->children);
+	mergeConsecutiveAlts(pattern);
 
 	/* Merge prefix/suffix into GROUP with matching children */
-	pattern->children = mergeGroupPrefixSuffix(pattern->children);
+	mergeGroupPrefixSuffix(pattern);
 
 	/* Unwrap single-item SEQ: SEQ[A] -> A */
 	if (list_length(pattern->children) == 1)
@@ -719,12 +720,13 @@ optimizeSeqPattern(RPRPatternNode *pattern)
  *   (A | (B | C)) -> (A | B | C)
  *
  * Splices each nested ALT's children into the parent list at the position the
- * ALT occupied.  Edits the list in place and returns it; the pointer may have
- * been reallocated, so the caller must assign the result.
+ * ALT occupied.
  */
-static List *
-flattenAltChildren(List *children)
+static void
+flattenAltChildren(RPRPatternNode *pattern)
 {
+	List	   *children = pattern->children;
+
 	for (int outerpos = 0; outerpos < list_length(children);)
 	{
 		ListCell   *lc = list_nth_cell(children, outerpos);
@@ -761,7 +763,7 @@ flattenAltChildren(List *children)
 		}
 	}
 
-	return children;
+	pattern->children = children;
 }
 
 /*
@@ -772,12 +774,13 @@ flattenAltChildren(List *children)
  *   (A | B | A) -> (A | B)
  *   (X | Y | X | Z | Y) -> (X | Y | Z)
  *
- * Deletes the later occurrences in place and returns the list, keeping the
- * first of each; the pointer may have been reallocated.
+ * Deletes the later occurrences, keeping the first of each.
  */
-static List *
-removeDuplicateAlternatives(List *children)
+static void
+removeDuplicateAlternatives(RPRPatternNode *pattern)
 {
+	List	   *children = pattern->children;
+
 	for (int outerpos = 0; outerpos < list_length(children); outerpos++)
 	{
 		RPRPatternNode *rprpattern;
@@ -797,7 +800,7 @@ removeDuplicateAlternatives(List *children)
 		}
 	}
 
-	return children;
+	pattern->children = children;
 }
 
 /*
@@ -813,10 +816,10 @@ static RPRPatternNode *
 optimizeAltPattern(RPRPatternNode *pattern)
 {
 	/* Recursively optimize children and flatten nested ALT */
-	pattern->children = flattenAltChildren(pattern->children);
+	flattenAltChildren(pattern);
 
 	/* Remove duplicate alternatives */
-	pattern->children = removeDuplicateAlternatives(pattern->children);
+	removeDuplicateAlternatives(pattern);
 
 	/* Unwrap single-item ALT: ALT[A] -> A */
 	if (list_length(pattern->children) == 1)
