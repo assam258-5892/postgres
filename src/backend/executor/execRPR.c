@@ -288,6 +288,9 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
 	if (memcmp(s1->counts, s2->counts, sizeof(int32) * compareDepth) != 0)
 		return false;
 
+	/* isAbsorbable follows from the element and the counts compared above */
+	Assert(s1->isAbsorbable == s2->isAbsorbable);
+
 	return true;
 }
 
@@ -1671,24 +1674,20 @@ ExecRPRStartContext(WindowAggState *winstate, int64 startPos)
 {
 	RPRNFAContext *ctx;
 	RPRPattern *pattern = winstate->rpPattern;
-	RPRPatternElement *elem;
 
 	ctx = nfa_context_make(winstate);
 	ctx->matchStartRow = startPos;
 	ctx->states = nfa_state_make(winstate); /* initial state at elem 0 */
 
-	elem = &pattern->elements[0];
-
-	if (RPRElemIsAbsorbableBranch(elem))
-	{
-		ctx->states->isAbsorbable = true;
-	}
-	else
-	{
-		ctx->hasAbsorbableState = false;
-		ctx->allStatesAbsorbable = false;
-		ctx->states->isAbsorbable = false;
-	}
+	/*
+	 * The only state so far sits on element 0, and computeAbsorbability()
+	 * marks that element ABSORBABLE_BRANCH exactly when it calls the pattern
+	 * absorbable, so the pattern's flag answers for the state -- as it
+	 * already did for the context flags nfa_context_make() set.
+	 */
+	Assert(RPRElemIsAbsorbableBranch(&pattern->elements[0]) ==
+		   pattern->isAbsorbable);
+	ctx->states->isAbsorbable = pattern->isAbsorbable;
 
 	/*
 	 * Add to tail of active context list (doubly-linked, oldest-first).
