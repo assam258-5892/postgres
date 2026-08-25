@@ -4789,7 +4789,7 @@ do_edit(const char *filename_arg, PQExpBuffer query_buf,
 
 		fname = (const char *) fnametmp;
 
-		fd = open(fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+		fd = pg_open(fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
 		if (fd != -1)
 			stream = fdopen(fd, "w");
 

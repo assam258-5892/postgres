@@ -62,7 +62,7 @@ do_syncfs(const char *path)
 {
 	int			fd;
 
-	fd = open(path, O_RDONLY, 0);
+	fd = pg_open(path, O_RDONLY, 0);
 
 	if (fd < 0)
 	{
@@ -361,7 +361,7 @@ pre_sync_fname(const char *fname, bool isdir)
 #ifdef PG_FLUSH_DATA_WORKS
 	int			fd;
 
-	fd = open(fname, O_RDONLY | PG_BINARY, 0);
+	fd = pg_open(fname, O_RDONLY | PG_BINARY, 0);
 
 	if (fd < 0)
 	{
@@ -420,7 +420,7 @@ fsync_fname(const char *fname, bool isdir)
 	 * unsupported operations, e.g. opening a directory under Windows), and
 	 * logging others.
 	 */
-	fd = open(fname, flags, 0);
+	fd = pg_open(fname, flags, 0);
 	if (fd < 0)
 	{
 		if (errno == EACCES || (isdir && errno == EISDIR))
@@ -494,7 +494,7 @@ durable_rename(const char *oldfile, const char *newfile)
 	if (fsync_fname(oldfile, false) != 0)
 		return -1;
 
-	fd = open(newfile, PG_BINARY | O_RDWR, 0);
+	fd = pg_open(newfile, PG_BINARY | O_RDWR, 0);
 	if (fd < 0)
 	{
 		if (errno != ENOENT)
