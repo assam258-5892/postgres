@@ -101,7 +101,7 @@ pg_open_tzfile(const char *name, char *canonname)
 		fullname[fullnamelen] = '/';
 		/* test above ensured this will fit: */
 		strcpy(fullname + fullnamelen + 1, name);
-		result = open(fullname, O_RDONLY | PG_BINARY, 0);
+		result = pg_open(fullname, O_RDONLY | PG_BINARY, 0);
 		if (result >= 0)
 			return result;
 		/* If that didn't work, fall through to do it the hard way */
@@ -138,7 +138,7 @@ pg_open_tzfile(const char *name, char *canonname)
 	if (canonname)
 		strlcpy(canonname, fullname + orignamelen + 1, TZ_STRLEN_MAX + 1);
 
-	return open(fullname, O_RDONLY | PG_BINARY, 0);
+	return pg_open(fullname, O_RDONLY | PG_BINARY, 0);
 }
 
 

@@ -186,7 +186,7 @@ scan_file(const char *fn, int segmentno)
 		   mode == PG_MODE_CHECK);
 
 	flags = (mode == PG_MODE_ENABLE) ? O_RDWR : O_RDONLY;
-	f = open(fn, PG_BINARY | flags, 0);
+	f = pg_open(fn, PG_BINARY | flags, 0);
 
 	if (f < 0)
 		pg_fatal("could not open file \"%s\": %m", fn);
