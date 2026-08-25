@@ -44,7 +44,7 @@ importFile(PGconn *conn, char *filename)
 	/*
 	 * open the file to be read in
 	 */
-	fd = open(filename, O_RDONLY, 0666);
+	fd = pg_open(filename, O_RDONLY, 0666);
 	if (fd < 0)
 	{							/* error */
 		fprintf(stderr, "cannot open unix file\"%s\"\n", filename);
@@ -187,7 +187,7 @@ exportFile(PGconn *conn, Oid lobjId, char *filename)
 	/*
 	 * open the file to be written to
 	 */
-	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+	fd = pg_open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
 	{							/* error */
 		fprintf(stderr, "cannot open unix file\"%s\"",

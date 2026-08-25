@@ -109,7 +109,7 @@ SlruReadSwitchPageSlow(SlruSegState *state, uint64 pageno)
 		}
 
 		state->fn = SlruFileName(state, segno);
-		if ((state->fd = open(state->fn, O_RDONLY | PG_BINARY, 0)) < 0)
+		if ((state->fd = pg_open(state->fn, O_RDONLY | PG_BINARY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m", state->fn);
 		state->segno = segno;
 	}
@@ -215,8 +215,8 @@ SlruWriteSwitchPageSlow(SlruSegState *state, uint64 pageno)
 
 		/* Create the segment */
 		state->fn = SlruFileName(state, segno);
-		if ((state->fd = open(state->fn, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-							  pg_file_create_mode)) < 0)
+		if ((state->fd = pg_open(state->fn, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+								 pg_file_create_mode)) < 0)
 		{
 			pg_fatal("could not create file \"%s\": %m", state->fn);
 		}
