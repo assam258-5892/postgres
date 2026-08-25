@@ -321,7 +321,7 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 		snprintf(xlogfpath, MAXPGPATH, "%s/" XLOGDIR "/%s",
 				 xlogreader->segcxt.ws_dir, xlogfname);
 
-		xlogreadfd = open(xlogfpath, O_RDONLY | PG_BINARY, 0);
+		xlogreadfd = pg_open(xlogfpath, O_RDONLY | PG_BINARY, 0);
 
 		if (xlogreadfd < 0)
 		{

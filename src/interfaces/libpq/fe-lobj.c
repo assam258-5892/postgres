@@ -661,7 +661,7 @@ lo_import_internal(PGconn *conn, const char *filename, Oid oid)
 	/*
 	 * open the file to be read in
 	 */
-	fd = open(filename, O_RDONLY | PG_BINARY, 0666);
+	fd = pg_open(filename, O_RDONLY | PG_BINARY, 0666);
 	if (fd < 0)
 	{							/* error */
 		libpq_append_conn_error(conn, "could not open file \"%s\": %s",
@@ -765,7 +765,7 @@ lo_export(PGconn *conn, Oid lobjId, const char *filename)
 	/*
 	 * create the file to be written to
 	 */
-	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC | PG_BINARY, 0666);
+	fd = pg_open(filename, O_CREAT | O_WRONLY | O_TRUNC | PG_BINARY, 0666);
 	if (fd < 0)
 	{
 		/* We must do lo_close before setting the errorMessage */

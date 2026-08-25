@@ -511,7 +511,7 @@ make_rfile(const char *filename, bool missing_ok)
 
 	rf = pg_malloc0_object(rfile);
 	rf->filename = pstrdup(filename);
-	if ((rf->fd = open(filename, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((rf->fd = pg_open(filename, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		if (missing_ok && errno == ENOENT)
 		{
@@ -633,9 +633,9 @@ write_reconstructed_file(const char *input_filename,
 
 	/* Open the output file, except in dry_run mode. */
 	if (!dry_run &&
-		(wfd = open(output_filename,
-					O_RDWR | PG_BINARY | O_CREAT | O_EXCL,
-					pg_file_create_mode)) < 0)
+		(wfd = pg_open(output_filename,
+					   O_RDWR | PG_BINARY | O_CREAT | O_EXCL,
+					   pg_file_create_mode)) < 0)
 		pg_fatal("could not open file \"%s\": %m", output_filename);
 
 	/* Read and write the blocks as required. */

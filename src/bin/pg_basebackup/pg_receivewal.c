@@ -336,7 +336,7 @@ FindStreamingStart(uint32 *tli)
 
 			snprintf(fullpath, sizeof(fullpath), "%s/%s", basedir, dirent->d_name);
 
-			fd = open(fullpath, O_RDONLY | PG_BINARY, 0);
+			fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0);
 			if (fd < 0)
 				pg_fatal("could not open compressed file \"%s\": %m",
 						 fullpath);
@@ -382,7 +382,7 @@ FindStreamingStart(uint32 *tli)
 			memset(&dec_opt, 0, sizeof(dec_opt));
 			snprintf(fullpath, sizeof(fullpath), "%s/%s", basedir, dirent->d_name);
 
-			fd = open(fullpath, O_RDONLY | PG_BINARY, 0);
+			fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0);
 			if (fd < 0)
 				pg_fatal("could not open file \"%s\": %m", fullpath);
 

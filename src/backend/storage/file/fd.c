@@ -1115,9 +1115,9 @@ BasicOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 
 tryAgain:
 #ifdef PG_O_DIRECT_USE_F_NOCACHE
-	fd = open(fileName, fileFlags & ~PG_O_DIRECT, fileMode);
+	fd = pg_open(fileName, fileFlags & ~PG_O_DIRECT, fileMode);
 #else
-	fd = open(fileName, fileFlags, fileMode);
+	fd = pg_open(fileName, fileFlags, fileMode);
 #endif
 
 	if (fd >= 0)

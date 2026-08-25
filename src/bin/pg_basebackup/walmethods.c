@@ -144,7 +144,7 @@ dir_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 	 * does not do any system calls to fsync() to make changes permanent on
 	 * disk.
 	 */
-	fd = open(tmppath, O_WRONLY | O_CREAT | PG_BINARY, pg_file_create_mode);
+	fd = pg_open(tmppath, O_WRONLY | O_CREAT | PG_BINARY, pg_file_create_mode);
 	if (fd < 0)
 	{
 		wwmethod->lasterrno = errno;
@@ -592,7 +592,7 @@ dir_existsfile(WalWriteMethod *wwmethod, const char *pathname)
 	snprintf(tmppath, sizeof(tmppath), "%s/%s",
 			 dir_data->basedir, pathname);
 
-	fd = open(tmppath, O_RDONLY | PG_BINARY, 0);
+	fd = pg_open(tmppath, O_RDONLY | PG_BINARY, 0);
 	if (fd < 0)
 
 		/*
@@ -847,9 +847,9 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 		/*
 		 * We open the tar file only when we first try to write to it.
 		 */
-		tar_data->fd = open(tar_data->tarfilename,
-							O_WRONLY | O_CREAT | PG_BINARY,
-							pg_file_create_mode);
+		tar_data->fd = pg_open(tar_data->tarfilename,
+							   O_WRONLY | O_CREAT | PG_BINARY,
+							   pg_file_create_mode);
 		if (tar_data->fd < 0)
 		{
 			wwmethod->lasterrno = errno;

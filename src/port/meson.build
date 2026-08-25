@@ -16,6 +16,7 @@ pgport_sources = [
   'pg_strong_random.c',
   'pgcheckdir.c',
   'pgmkdirp.c',
+  'pgopen.c',
   'pgsleep.c',
   'pgstrcasecmp.c',
   'pgstrsignal.c',

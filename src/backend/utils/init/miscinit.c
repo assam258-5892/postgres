@@ -1223,7 +1223,7 @@ CreateLockFile(const char *filename, bool amPostmaster,
 		 * Think not to make the file protection weaker than 0600/0640.  See
 		 * comments below.
 		 */
-		fd = open(filename, O_RDWR | O_CREAT | O_EXCL, pg_file_create_mode);
+		fd = pg_open(filename, O_RDWR | O_CREAT | O_EXCL, pg_file_create_mode);
 		if (fd >= 0)
 			break;				/* Success; exit the retry loop */
 
@@ -1240,7 +1240,7 @@ CreateLockFile(const char *filename, bool amPostmaster,
 		 * Read the file to get the old owner's PID.  Note race condition
 		 * here: file might have been deleted since we tried to create it.
 		 */
-		fd = open(filename, O_RDONLY, pg_file_create_mode);
+		fd = pg_open(filename, O_RDONLY, pg_file_create_mode);
 		if (fd < 0)
 		{
 			if (errno == ENOENT)
@@ -1530,7 +1530,7 @@ AddToDataDirLockFile(int target_line, const char *str)
 	char		srcbuffer[BLCKSZ];
 	char		destbuffer[BLCKSZ];
 
-	fd = open(DIRECTORY_LOCK_FILE, O_RDWR | PG_BINARY, 0);
+	fd = pg_open(DIRECTORY_LOCK_FILE, O_RDWR | PG_BINARY, 0);
 	if (fd < 0)
 	{
 		ereport(LOG,
@@ -1654,7 +1654,7 @@ RecheckDataDirLockFile(void)
 	long		file_pid;
 	char		buffer[BLCKSZ];
 
-	fd = open(DIRECTORY_LOCK_FILE, O_RDWR | PG_BINARY, 0);
+	fd = pg_open(DIRECTORY_LOCK_FILE, O_RDWR | PG_BINARY, 0);
 	if (fd < 0)
 	{
 		/*

@@ -360,8 +360,8 @@ tarOpen(ArchiveHandle *AH, const char *filename, char mode)
 			name = _tempnam(NULL, "pg_temp_");
 			if (name == NULL)
 				break;
-			fd = open(name, O_RDWR | O_CREAT | O_EXCL | O_BINARY |
-					  O_TEMPORARY, S_IRUSR | S_IWUSR);
+			fd = pg_open(name, O_RDWR | O_CREAT | O_EXCL | O_BINARY |
+						 O_TEMPORARY, S_IRUSR | S_IWUSR);
 			free(name);
 
 			if (fd != -1)		/* created a file */
