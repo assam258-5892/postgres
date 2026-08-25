@@ -1830,7 +1830,7 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 			pg_fatal("server does not support incremental backup");
 
 		/* Open the file. */
-		fd = open(incremental_manifest, O_RDONLY | PG_BINARY, 0);
+		fd = pg_open(incremental_manifest, O_RDONLY | PG_BINARY, 0);
 		if (fd < 0)
 			pg_fatal("could not open file \"%s\": %m", incremental_manifest);
 

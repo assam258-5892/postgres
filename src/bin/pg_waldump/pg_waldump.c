@@ -187,7 +187,7 @@ open_file_in_directory(const char *directory, const char *fname)
 	Assert(directory != NULL);
 
 	snprintf(fpath, MAXPGPATH, "%s/%s", directory, fname);
-	fd = open(fpath, O_RDONLY | PG_BINARY, 0);
+	fd = pg_open(fpath, O_RDONLY | PG_BINARY, 0);
 
 	if (fd < 0 && errno != ENOENT)
 		pg_fatal("could not open file \"%s\": %m", fname);

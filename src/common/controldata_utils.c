@@ -94,7 +94,7 @@ retry:
 				 errmsg("could not open file \"%s\" for reading: %m",
 						ControlFilePath)));
 #else
-	if ((fd = open(ControlFilePath, O_RDONLY | PG_BINARY, 0)) == -1)
+	if ((fd = pg_open(ControlFilePath, O_RDONLY | PG_BINARY, 0)) == -1)
 		pg_fatal("could not open file \"%s\" for reading: %m",
 				 ControlFilePath);
 #endif
@@ -226,8 +226,8 @@ update_controlfile(const char *DataDir,
 				 errmsg("could not open file \"%s\": %m",
 						ControlFilePath)));
 #else
-	if ((fd = open(ControlFilePath, O_WRONLY | PG_BINARY,
-				   pg_file_create_mode)) == -1)
+	if ((fd = pg_open(ControlFilePath, O_WRONLY | PG_BINARY,
+					  pg_file_create_mode)) == -1)
 		pg_fatal("could not open file \"%s\": %m", ControlFilePath);
 #endif
 
