@@ -334,7 +334,7 @@ readfile(const char *path, int *numlines)
 	 * snapshot, but in practice, for a small file, it's close enough for the
 	 * current use.
 	 */
-	fd = open(path, O_RDONLY | PG_BINARY, 0);
+	fd = pg_open(path, O_RDONLY | PG_BINARY, 0);
 	if (fd < 0)
 		return NULL;
 	if (fstat(fd, &statbuf) < 0)
@@ -537,7 +537,7 @@ start_postmaster(void)
 		 * will have, the log file might end up with permissions settings that
 		 * prevent the postmaster from writing on it.
 		 */
-		int			fd = open(log_file, O_RDWR, 0);
+		int			fd = pg_open(log_file, O_RDWR, 0);
 
 		if (fd == -1)
 		{

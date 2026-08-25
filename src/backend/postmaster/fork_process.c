@@ -96,7 +96,7 @@ fork_process(void)
 			 * Use open() not stdio, to ensure we control the open flags. Some
 			 * Linux security environments reject anything but O_WRONLY.
 			 */
-			int			fd = open(oomfilename, O_WRONLY, 0);
+			int			fd = pg_open(oomfilename, O_WRONLY, 0);
 
 			/* We ignore all errors */
 			if (fd >= 0)

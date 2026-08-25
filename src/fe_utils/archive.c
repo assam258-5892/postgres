@@ -71,7 +71,7 @@ RestoreArchivedFile(const char *path, const char *xlogfname,
 						 (long long int) expectedSize);
 			else
 			{
-				int			xlogfd = open(xlogpath, O_RDONLY | PG_BINARY, 0);
+				int			xlogfd = pg_open(xlogpath, O_RDONLY | PG_BINARY, 0);
 
 				if (xlogfd < 0)
 					pg_fatal("could not open file \"%s\" restored from archive: %m",

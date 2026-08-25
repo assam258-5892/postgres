@@ -65,7 +65,7 @@ copy_file(const char *src, const char *dst,
 	{
 		int			fd;
 
-		if ((fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+		if ((fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m", src);
 		if (close(fd) < 0)
 			pg_fatal("could not close file \"%s\": %m", src);
@@ -149,7 +149,7 @@ checksum_file(const char *src, pg_checksum_context *checksum_ctx)
 	if (checksum_ctx->type == CHECKSUM_TYPE_NONE)
 		return;
 
-	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("could not open file \"%s\": %m", src);
 
 	buffer = pg_malloc(buffer_size);
@@ -181,11 +181,11 @@ copy_file_blocks(const char *src, const char *dst,
 	ssize_t		rb;
 	size_t		offset = 0;
 
-	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("could not open file \"%s\": %m", src);
 
-	if ((dest_fd = open(dst, O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
-						pg_file_create_mode)) < 0)
+	if ((dest_fd = pg_open(dst, O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
+						   pg_file_create_mode)) < 0)
 		pg_fatal("could not open file \"%s\": %m", dst);
 
 	buffer = pg_malloc(buffer_size);
@@ -235,11 +235,11 @@ copy_file_clone(const char *src, const char *dest,
 		int			src_fd;
 		int			dest_fd;
 
-		if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+		if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m", src);
 
-		if ((dest_fd = open(dest, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-							pg_file_create_mode)) < 0)
+		if ((dest_fd = pg_open(dest, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+							   pg_file_create_mode)) < 0)
 			pg_fatal("could not create file \"%s\": %m", dest);
 
 		if (ioctl(dest_fd, FICLONE, src_fd) < 0)
@@ -278,11 +278,11 @@ copy_file_by_range(const char *src, const char *dest,
 	int			dest_fd;
 	ssize_t		nbytes;
 
-	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("could not open file \"%s\": %m", src);
 
-	if ((dest_fd = open(dest, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-						pg_file_create_mode)) < 0)
+	if ((dest_fd = pg_open(dest, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+						   pg_file_create_mode)) < 0)
 		pg_fatal("could not create file \"%s\": %m", dest);
 
 	do

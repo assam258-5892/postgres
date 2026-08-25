@@ -118,7 +118,7 @@ load_backup_manifest(char *backup_directory)
 
 	/* Open the manifest file. */
 	snprintf(pathname, MAXPGPATH, "%s/backup_manifest", backup_directory);
-	if ((fd = open(pathname, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(pathname, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		if (errno == ENOENT)
 		{

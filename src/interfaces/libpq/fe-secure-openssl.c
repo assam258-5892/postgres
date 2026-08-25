@@ -778,7 +778,7 @@ SSL_CTX_keylog_cb(const SSL *ssl, const char *line)
 	if (conn == NULL)
 		return;
 
-	fd = open(conn->sslkeylogfile, O_WRONLY | O_APPEND | O_CREAT, 0600);
+	fd = pg_open(conn->sslkeylogfile, O_WRONLY | O_APPEND | O_CREAT, 0600);
 
 	if (fd == -1)
 	{
