@@ -244,9 +244,9 @@ static void
 flush_manifest(manifest_writer *mwriter)
 {
 	if (mwriter->fd == -1 &&
-		(mwriter->fd = open(mwriter->pathname,
-							O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
-							pg_file_create_mode)) < 0)
+		(mwriter->fd = pg_open(mwriter->pathname,
+							   O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
+							   pg_file_create_mode)) < 0)
 		pg_fatal("could not open file \"%s\": %m", mwriter->pathname);
 
 	if (mwriter->buf.len > 0)

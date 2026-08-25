@@ -2316,8 +2316,8 @@ DebugFileOpen(void)
 		 *
 		 * Make sure we can write the file, and find out if it's a tty.
 		 */
-		if ((fd = open(OutputFileName, O_CREAT | O_APPEND | O_WRONLY,
-					   0666)) < 0)
+		if ((fd = pg_open(OutputFileName, O_CREAT | O_APPEND | O_WRONLY,
+						  0666)) < 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not open file \"%s\": %m", OutputFileName)));
