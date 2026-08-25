@@ -302,7 +302,7 @@ main(int argc, char **argv)
 	/*
 	 * If the backup directory cannot be found, treat this as a fatal error.
 	 */
-	dir = opendir(context.backup_directory);
+	dir = pg_opendir(context.backup_directory);
 	if (dir == NULL)
 		report_fatal_error("could not open directory \"%s\": %m",
 						   context.backup_directory);
@@ -418,7 +418,7 @@ parse_manifest_file(char *manifest_path)
 	const size_t chunk_size = READ_CHUNK_SIZE;
 
 	/* Open the manifest file. */
-	if ((fd = open(manifest_path, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(manifest_path, O_RDONLY | PG_BINARY, 0)) < 0)
 		report_fatal_error("could not open file \"%s\": %m", manifest_path);
 
 	/* Figure out how big the manifest is. */
@@ -638,7 +638,7 @@ verify_plain_backup_directory(verifier_context *context, char *relpath,
 	struct dirent *dirent;
 
 	/* Open the directory unless the caller did it. */
-	if (dir == NULL && ((dir = opendir(fullpath)) == NULL))
+	if (dir == NULL && ((dir = pg_opendir(fullpath)) == NULL))
 	{
 		report_backup_error(context,
 							"could not open directory \"%s\": %m", fullpath);
@@ -1030,7 +1030,7 @@ verify_tar_file(verifier_context *context, char *relpath, char *fullpath,
 	pg_log_debug("reading \"%s\"", fullpath);
 
 	/* Open the target file. */
-	if ((fd = open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		report_backup_error(context, "could not open file \"%s\": %m",
 							relpath);
@@ -1138,7 +1138,7 @@ verify_file_checksum(verifier_context *context, manifest_file *m,
 	int			checksumlen;
 
 	/* Open the target file. */
-	if ((fd = open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		report_backup_error(context, "could not open file \"%s\": %m",
 							relpath);

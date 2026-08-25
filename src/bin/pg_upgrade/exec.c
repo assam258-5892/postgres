@@ -125,7 +125,7 @@ exec_prog(const char *log_filename, const char *opt_log_file,
 	}
 #endif
 
-	log = fopen(log_file, "a");
+	log = pg_fopen(log_file, "a");
 
 #ifdef WIN32
 	{
@@ -141,7 +141,7 @@ exec_prog(const char *log_filename, const char *opt_log_file,
 		for (iter = 0; iter < 4 && log == NULL; iter++)
 		{
 			pg_usleep(1000000); /* 1 sec */
-			log = fopen(log_file, "a");
+			log = pg_fopen(log_file, "a");
 		}
 	}
 #endif
@@ -204,7 +204,7 @@ exec_prog(const char *log_filename, const char *opt_log_file,
 	 * never reused while the server is running, so it works fine.  We could
 	 * log these commands to a third file, but that just adds complexity.
 	 */
-	if ((log = fopen(log_file, "a")) == NULL)
+	if ((log = pg_fopen(log_file, "a")) == NULL)
 		pg_fatal("could not write to log file \"%s\": %m", log_file);
 	fprintf(log, "\n\n");
 	fclose(log);
@@ -227,7 +227,7 @@ pid_lock_file_exists(const char *datadir)
 
 	snprintf(path, sizeof(path), "%s/postmaster.pid", datadir);
 
-	if ((fd = open(path, O_RDONLY, 0)) < 0)
+	if ((fd = pg_open(path, O_RDONLY, 0)) < 0)
 	{
 		/* ENOTDIR means we will throw a more useful error later */
 		if (errno != ENOENT && errno != ENOTDIR)
@@ -272,7 +272,7 @@ win32_check_directory_write_permissions(void)
 	 * We open a file we would normally create anyway.  We do this even in
 	 * 'check' mode, which isn't ideal, but this is the best we can do.
 	 */
-	if ((fd = open(GLOBALS_DUMP_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)) < 0)
+	if ((fd = pg_open(GLOBALS_DUMP_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)) < 0)
 		return -1;
 	close(fd);
 

@@ -674,7 +674,7 @@ readfile(const char *path)
 	int			maxlines;
 	int			n;
 
-	if ((infile = fopen(path, "r")) == NULL)
+	if ((infile = pg_fopen(path, "r")) == NULL)
 		pg_fatal("could not open file \"%s\" for reading: %m", path);
 
 	initStringInfo(&line);
@@ -718,7 +718,7 @@ writefile(char *path, char **lines)
 	FILE	   *out_file;
 	char	  **line;
 
-	if ((out_file = fopen(path, "w")) == NULL)
+	if ((out_file = pg_fopen(path, "w")) == NULL)
 		pg_fatal("could not open file \"%s\" for writing: %m", path);
 	for (line = lines; *line != NULL; line++)
 	{
@@ -1026,7 +1026,7 @@ write_version_file(const char *extrapath)
 	else
 		path = psprintf("%s/%s/PG_VERSION", pg_data, extrapath);
 
-	if ((version_file = fopen(path, PG_BINARY_W)) == NULL)
+	if ((version_file = pg_fopen(path, PG_BINARY_W)) == NULL)
 		pg_fatal("could not open file \"%s\" for writing: %m", path);
 	if (fprintf(version_file, "%s\n", PG_MAJORVERSION) < 0 ||
 		fclose(version_file))
@@ -1045,7 +1045,7 @@ set_null_conf(void)
 	char	   *path;
 
 	path = psprintf("%s/postgresql.conf", pg_data);
-	conf_file = fopen(path, PG_BINARY_W);
+	conf_file = pg_fopen(path, PG_BINARY_W);
 	if (conf_file == NULL)
 		pg_fatal("could not open file \"%s\" for writing: %m", path);
 	if (fclose(conf_file))
@@ -1688,7 +1688,7 @@ get_su_pwd(void)
 		 * file permissions may not exist at all, so we'll skip the paranoia
 		 * for now.
 		 */
-		FILE	   *pwf = fopen(pwfilename, "r");
+		FILE	   *pwf = pg_fopen(pwfilename, "r");
 
 		if (!pwf)
 			pg_fatal("could not open file \"%s\" for reading: %m",

@@ -245,7 +245,7 @@ open_none(const char *path, int fd, const char *mode, CompressFileHandle *CFH)
 	}
 	else
 	{
-		CFH->private_data = fopen(path, mode);
+		CFH->private_data = pg_fopen(path, mode);
 		if (CFH->private_data == NULL)
 			return false;
 	}
@@ -258,7 +258,7 @@ open_write_none(const char *path, const char *mode, CompressFileHandle *CFH)
 {
 	Assert(CFH->private_data == NULL);
 
-	CFH->private_data = fopen(path, mode);
+	CFH->private_data = pg_fopen(path, mode);
 	if (CFH->private_data == NULL)
 		return false;
 

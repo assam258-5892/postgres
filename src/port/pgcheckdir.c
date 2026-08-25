@@ -39,7 +39,7 @@ pg_check_dir(const char *dir)
 	bool		mount_found = false;
 	int			readdir_errno;
 
-	chkdir = opendir(dir);
+	chkdir = pg_opendir(dir);
 	if (chkdir == NULL)
 		return (errno == ENOENT) ? 0 : -1;
 

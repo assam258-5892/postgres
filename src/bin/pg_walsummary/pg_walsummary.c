@@ -104,7 +104,7 @@ main(int argc, char *argv[])
 		BlockNumber limit_block;
 
 		ws.filename = argv[optind++];
-		if ((ws.fd = open(ws.filename, O_RDONLY | PG_BINARY, 0)) < 0)
+		if ((ws.fd = pg_open(ws.filename, O_RDONLY | PG_BINARY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m", ws.filename);
 
 		reader = CreateBlockRefTableReader(walsummary_read_callback, &ws,

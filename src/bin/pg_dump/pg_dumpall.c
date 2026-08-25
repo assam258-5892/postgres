@@ -553,7 +553,7 @@ main(int argc, char *argv[])
 	 */
 	if (filename)
 	{
-		OPF = fopen(filename, PG_BINARY_W);
+		OPF = pg_fopen(filename, PG_BINARY_W);
 		if (!OPF)
 			pg_fatal("could not open output file \"%s\": %m",
 					 filename);
@@ -1682,7 +1682,7 @@ dumpDatabases(PGconn *conn)
 
 		if (filename)
 		{
-			OPF = fopen(filename, PG_BINARY_A);
+			OPF = pg_fopen(filename, PG_BINARY_A);
 			if (!OPF)
 				pg_fatal("could not re-open the output file \"%s\": %m",
 						 filename);

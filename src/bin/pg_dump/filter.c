@@ -42,7 +42,7 @@ filter_init(FilterStateData *fstate, const char *filename, exit_function f_exit)
 
 	if (strcmp(filename, "-") != 0)
 	{
-		fstate->fp = fopen(filename, "r");
+		fstate->fp = pg_fopen(filename, "r");
 		if (!fstate->fp)
 		{
 			pg_log_error("could not open filter file \"%s\": %m", filename);

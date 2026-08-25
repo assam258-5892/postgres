@@ -96,7 +96,7 @@ CleanupPriorWALFiles(void)
 	struct dirent *xlde;
 	char		walfile[MAXPGPATH];
 
-	xldir = opendir(archiveLocation);
+	xldir = pg_opendir(archiveLocation);
 	if (xldir == NULL)
 		pg_fatal("could not open archive location \"%s\": %m",
 				 archiveLocation);

@@ -293,7 +293,7 @@ do_copy(const char *args)
 				copystream = popen(options->file, PG_BINARY_R);
 			}
 			else
-				copystream = fopen(options->file, PG_BINARY_R);
+				copystream = pg_fopen(options->file, PG_BINARY_R);
 		}
 		else if (!options->psql_inout)
 			copystream = pset.cur_cmd_source;
@@ -312,7 +312,7 @@ do_copy(const char *args)
 				copystream = popen(options->file, PG_BINARY_W);
 			}
 			else
-				copystream = fopen(options->file, PG_BINARY_W);
+				copystream = pg_fopen(options->file, PG_BINARY_W);
 		}
 		else if (!options->psql_inout)
 			copystream = pset.queryFout;

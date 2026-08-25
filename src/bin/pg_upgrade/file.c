@@ -43,12 +43,12 @@ cloneFile(const char *src, const char *dst,
 	int			src_fd;
 	int			dest_fd;
 
-	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("error while cloning relation \"%s.%s\": could not open file \"%s\": %m",
 				 schemaName, relName, src);
 
-	if ((dest_fd = open(dst, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-						pg_file_create_mode)) < 0)
+	if ((dest_fd = pg_open(dst, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+						   pg_file_create_mode)) < 0)
 		pg_fatal("error while cloning relation \"%s.%s\": could not create file \"%s\": %m",
 				 schemaName, relName, dst);
 
@@ -83,12 +83,12 @@ copyFile(const char *src, const char *dst,
 	int			dest_fd;
 	char	   *buffer;
 
-	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("error while copying relation \"%s.%s\": could not open file \"%s\": %m",
 				 schemaName, relName, src);
 
-	if ((dest_fd = open(dst, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-						pg_file_create_mode)) < 0)
+	if ((dest_fd = pg_open(dst, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+						   pg_file_create_mode)) < 0)
 		pg_fatal("error while copying relation \"%s.%s\": could not create file \"%s\": %m",
 				 schemaName, relName, dst);
 
@@ -152,12 +152,12 @@ copyFileByRange(const char *src, const char *dst,
 	int			dest_fd;
 	ssize_t		nbytes;
 
-	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((src_fd = pg_open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("error while copying relation \"%s.%s\": could not open file \"%s\": %m",
 				 schemaName, relName, src);
 
-	if ((dest_fd = open(dst, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-						pg_file_create_mode)) < 0)
+	if ((dest_fd = pg_open(dst, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+						   pg_file_create_mode)) < 0)
 		pg_fatal("error while copying relation \"%s.%s\": could not create file \"%s\": %m",
 				 schemaName, relName, dst);
 
@@ -210,12 +210,12 @@ check_file_clone(void)
 		int			src_fd;
 		int			dest_fd;
 
-		if ((src_fd = open(existing_file, O_RDONLY | PG_BINARY, 0)) < 0)
+		if ((src_fd = pg_open(existing_file, O_RDONLY | PG_BINARY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m",
 					 existing_file);
 
-		if ((dest_fd = open(new_link_file, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-							pg_file_create_mode)) < 0)
+		if ((dest_fd = pg_open(new_link_file, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+							   pg_file_create_mode)) < 0)
 			pg_fatal("could not create file \"%s\": %m",
 					 new_link_file);
 
@@ -247,12 +247,12 @@ check_copy_file_range(void)
 		int			src_fd;
 		int			dest_fd;
 
-		if ((src_fd = open(existing_file, O_RDONLY | PG_BINARY, 0)) < 0)
+		if ((src_fd = pg_open(existing_file, O_RDONLY | PG_BINARY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m",
 					 existing_file);
 
-		if ((dest_fd = open(new_link_file, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-							pg_file_create_mode)) < 0)
+		if ((dest_fd = pg_open(new_link_file, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+							   pg_file_create_mode)) < 0)
 			pg_fatal("could not create file \"%s\": %m",
 					 new_link_file);
 

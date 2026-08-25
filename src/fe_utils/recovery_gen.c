@@ -136,7 +136,7 @@ WriteRecoveryConfig(PGconn *pgconn, const char *target_dir, PQExpBuffer contents
 	snprintf(filename, MAXPGPATH, "%s/%s", target_dir,
 			 use_recovery_conf ? "recovery.conf" : "postgresql.auto.conf");
 
-	cf = fopen(filename, use_recovery_conf ? "w" : "a");
+	cf = pg_fopen(filename, use_recovery_conf ? "w" : "a");
 	if (cf == NULL)
 		pg_fatal("could not open file \"%s\": %m", filename);
 
@@ -148,7 +148,7 @@ WriteRecoveryConfig(PGconn *pgconn, const char *target_dir, PQExpBuffer contents
 	if (!use_recovery_conf)
 	{
 		snprintf(filename, MAXPGPATH, "%s/%s", target_dir, "standby.signal");
-		cf = fopen(filename, "w");
+		cf = pg_fopen(filename, "w");
 		if (cf == NULL)
 			pg_fatal("could not create file \"%s\": %m", filename);
 

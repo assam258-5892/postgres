@@ -223,7 +223,7 @@ main(int argc, char *const argv[])
 				if (strcmp(output_filename, "-") == 0)
 					base_yyout = stdout;
 				else
-					base_yyout = fopen(output_filename, PG_BINARY_W);
+					base_yyout = pg_fopen(output_filename, PG_BINARY_W);
 
 				if (base_yyout == NULL)
 				{
@@ -322,7 +322,7 @@ main(int argc, char *const argv[])
 					ptr2ext[4] = '\0';
 				}
 
-				base_yyin = fopen(input_filename, PG_BINARY_R);
+				base_yyin = pg_fopen(input_filename, PG_BINARY_R);
 			}
 
 			if (out_option == 0)	/* calculate the output name */
@@ -339,7 +339,7 @@ main(int argc, char *const argv[])
 					ptr2ext[1] = (header_mode == true) ? 'h' : 'c';
 					ptr2ext[2] = '\0';
 
-					base_yyout = fopen(output_filename, PG_BINARY_W);
+					base_yyout = pg_fopen(output_filename, PG_BINARY_W);
 					if (base_yyout == NULL)
 					{
 						fprintf(stderr, _("%s: could not open file \"%s\": %m\n"),

@@ -1579,7 +1579,7 @@ SortTocFromFile(Archive *AHX)
 	ropt->idWanted = pg_malloc0_array(bool, AH->maxDumpId);
 
 	/* Setup the file */
-	fh = fopen(ropt->tocFile, PG_BINARY_R);
+	fh = pg_fopen(ropt->tocFile, PG_BINARY_R);
 	if (!fh)
 		pg_fatal("could not open TOC file \"%s\": %m", ropt->tocFile);
 
@@ -2290,7 +2290,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 		}
 		else
 		{
-			fh = fopen(AH->fSpec, PG_BINARY_R);
+			fh = pg_fopen(AH->fSpec, PG_BINARY_R);
 			if (!fh)
 				pg_fatal("could not open input file \"%s\": %m", AH->fSpec);
 		}

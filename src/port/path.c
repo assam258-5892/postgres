@@ -850,7 +850,7 @@ make_absolute_path(const char *path)
 #endif
 			}
 
-			if (getcwd(buf, buflen))
+			if (pg_getcwd(buf, buflen))
 				break;
 			else if (errno == ERANGE)
 			{

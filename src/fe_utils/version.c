@@ -53,7 +53,7 @@ get_pg_version(const char *datadir, char **version_str)
 	snprintf(ver_filename, sizeof(ver_filename), "%s/PG_VERSION",
 			 datadir);
 
-	if ((version_fd = fopen(ver_filename, "r")) == NULL)
+	if ((version_fd = pg_fopen(ver_filename, "r")) == NULL)
 		pg_fatal("could not open version file \"%s\": %m", ver_filename);
 
 	if (fstat(fileno(version_fd), &st) != 0)

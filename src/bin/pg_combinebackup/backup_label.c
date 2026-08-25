@@ -138,9 +138,9 @@ write_backup_label(char *output_directory, StringInfo buf,
 
 	snprintf(output_filename, MAXPGPATH, "%s/backup_label", output_directory);
 
-	if ((output_fd = open(output_filename,
-						  O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
-						  pg_file_create_mode)) < 0)
+	if ((output_fd = pg_open(output_filename,
+							 O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
+							 pg_file_create_mode)) < 0)
 		pg_fatal("could not open file \"%s\": %m", output_filename);
 
 	while (buf->cursor < buf->len)

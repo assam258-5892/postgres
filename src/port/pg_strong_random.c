@@ -153,7 +153,7 @@ pg_strong_random(void *buf, size_t len)
 	char	   *p = buf;
 	ssize_t		res;
 
-	f = open("/dev/urandom", O_RDONLY, 0);
+	f = pg_open("/dev/urandom", O_RDONLY, 0);
 	if (f == -1)
 		return false;
 

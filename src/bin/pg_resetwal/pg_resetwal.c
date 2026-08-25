@@ -418,7 +418,7 @@ main(int argc, char *argv[])
 	 * Check for a postmaster lock file --- if there is one, refuse to
 	 * proceed, on grounds we might be interfering with a live installation.
 	 */
-	if ((fd = open("postmaster.pid", O_RDONLY, 0)) < 0)
+	if ((fd = pg_open("postmaster.pid", O_RDONLY, 0)) < 0)
 	{
 		if (errno != ENOENT)
 			pg_fatal("could not open file \"%s\" for reading: %m",
@@ -606,7 +606,7 @@ read_controlfile(void)
 	char	   *buffer;
 	pg_crc32c	crc;
 
-	if ((fd = open(XLOG_CONTROL_FILE, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(XLOG_CONTROL_FILE, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		/*
 		 * If pg_control is not there at all, or we can't read it, the odds
@@ -979,7 +979,7 @@ FindEndOfXLOG(void)
 	 * any present have been used; in most scenarios this should be
 	 * conservative, because of xlog.c's attempts to pre-create files.
 	 */
-	xldir = opendir(XLOGDIR);
+	xldir = pg_opendir(XLOGDIR);
 	if (xldir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", XLOGDIR);
 
@@ -1032,7 +1032,7 @@ KillExistingXLOG(void)
 	struct dirent *xlde;
 	char		path[MAXPGPATH + sizeof(XLOGDIR)];
 
-	xldir = opendir(XLOGDIR);
+	xldir = pg_opendir(XLOGDIR);
 	if (xldir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", XLOGDIR);
 
@@ -1067,7 +1067,7 @@ KillExistingArchiveStatus(void)
 	struct dirent *xlde;
 	char		path[MAXPGPATH + sizeof(ARCHSTATDIR)];
 
-	xldir = opendir(ARCHSTATDIR);
+	xldir = pg_opendir(ARCHSTATDIR);
 	if (xldir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", ARCHSTATDIR);
 
@@ -1107,7 +1107,7 @@ KillExistingWALSummaries(void)
 	struct dirent *xlde;
 	char		path[MAXPGPATH + sizeof(WALSUMMARYDIR)];
 
-	xldir = opendir(WALSUMMARYDIR);
+	xldir = pg_opendir(WALSUMMARYDIR);
 	if (xldir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", WALSUMMARYDIR);
 
@@ -1189,8 +1189,8 @@ WriteEmptyXLOG(void)
 
 	unlink(path);
 
-	fd = open(path, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-			  pg_file_create_mode);
+	fd = pg_open(path, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+				 pg_file_create_mode);
 	if (fd < 0)
 		pg_fatal("could not open file \"%s\": %m", path);
 

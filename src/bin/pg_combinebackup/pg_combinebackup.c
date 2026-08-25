@@ -541,7 +541,7 @@ check_backup_label_files(int n_backups, char **backup_dirs)
 		/* Open the backup_label file. */
 		snprintf(pathbuf, MAXPGPATH, "%s/backup_label", backup_dirs[i]);
 		pg_log_debug("reading \"%s\"", pathbuf);
-		if ((fd = open(pathbuf, O_RDONLY, 0)) < 0)
+		if ((fd = pg_open(pathbuf, O_RDONLY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m", pathbuf);
 
 		/*
@@ -957,7 +957,7 @@ process_directory_recursively(Oid tsoid,
 	}
 
 	/* It's time to scan the directory. */
-	if ((dir = opendir(ifulldir)) == NULL)
+	if ((dir = pg_opendir(ifulldir)) == NULL)
 		pg_fatal("could not open directory \"%s\": %m", ifulldir);
 	while (errno = 0, (de = readdir(dir)) != NULL)
 	{
@@ -1227,7 +1227,7 @@ scan_for_existing_tablespaces(char *pathname, cb_options *opt)
 	snprintf(pg_tblspc, MAXPGPATH, "%s/%s", pathname, PG_TBLSPC_DIR);
 	pg_log_debug("scanning \"%s\"", pg_tblspc);
 
-	if ((dir = opendir(pg_tblspc)) == NULL)
+	if ((dir = pg_opendir(pg_tblspc)) == NULL)
 		pg_fatal("could not open directory \"%s\": %m", pg_tblspc);
 
 	while (errno = 0, (de = readdir(dir)) != NULL)

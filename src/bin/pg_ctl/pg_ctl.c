@@ -278,7 +278,7 @@ get_pgpid(bool is_status_request)
 		exit(is_status_request ? 4 : 1);
 	}
 
-	pidf = fopen(pid_file, "r");
+	pidf = pg_fopen(pid_file, "r");
 	if (pidf == NULL)
 	{
 		/* No pid file, not an error on startup */
@@ -338,7 +338,7 @@ readfile(const char *path, int *numlines)
 	 * snapshot, but in practice, for a small file, it's close enough for the
 	 * current use.
 	 */
-	fd = open(path, O_RDONLY | PG_BINARY, 0);
+	fd = pg_open(path, O_RDONLY | PG_BINARY, 0);
 	if (fd < 0)
 		return NULL;
 	if (fstat(fd, &statbuf) < 0)
@@ -541,7 +541,7 @@ start_postmaster(void)
 		 * will have, the log file might end up with permissions settings that
 		 * prevent the postmaster from writing on it.
 		 */
-		int			fd = open(log_file, O_RDWR, 0);
+		int			fd = pg_open(log_file, O_RDWR, 0);
 
 		if (fd == -1)
 		{
@@ -1222,7 +1222,7 @@ do_promote(void)
 
 	snprintf(promote_file, MAXPGPATH, "%s/promote", pg_data);
 
-	if ((prmfile = fopen(promote_file, "w")) == NULL)
+	if ((prmfile = pg_fopen(promote_file, "w")) == NULL)
 	{
 		write_stderr(_("%s: could not create promote signal file \"%s\": %m\n"),
 					 progname, promote_file);
@@ -1295,7 +1295,7 @@ do_logrotate(void)
 
 	snprintf(logrotate_file, MAXPGPATH, "%s/logrotate", pg_data);
 
-	if ((logrotatefile = fopen(logrotate_file, "w")) == NULL)
+	if ((logrotatefile = pg_fopen(logrotate_file, "w")) == NULL)
 	{
 		write_stderr(_("%s: could not create log rotation signal file \"%s\": %m\n"),
 					 progname, logrotate_file);
@@ -2139,13 +2139,13 @@ adjust_data_dir(void)
 
 	/* If there is no postgresql.conf, it can't be a config-only dir */
 	snprintf(filename, sizeof(filename), "%s/postgresql.conf", pg_config);
-	if ((fd = fopen(filename, "r")) == NULL)
+	if ((fd = pg_fopen(filename, "r")) == NULL)
 		return;
 	fclose(fd);
 
 	/* If PG_VERSION exists, it can't be a config-only dir */
 	snprintf(filename, sizeof(filename), "%s/PG_VERSION", pg_config);
-	if ((fd = fopen(filename, "r")) != NULL)
+	if ((fd = pg_fopen(filename, "r")) != NULL)
 	{
 		fclose(fd);
 		return;

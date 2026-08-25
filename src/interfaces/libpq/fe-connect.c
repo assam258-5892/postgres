@@ -6053,7 +6053,7 @@ parseServiceFile(const char *serviceFile,
 
 	*group_found = false;
 
-	f = fopen(serviceFile, "r");
+	f = pg_fopen(serviceFile, "r");
 	if (f == NULL)
 	{
 		libpq_append_error(errorMessage, "service file \"%s\" not found", serviceFile);
@@ -7986,7 +7986,7 @@ passwordFromFile(const char *hostname, const char *port,
 		port = DEF_PGPORT_STR;
 
 	/* If password file cannot be opened, ignore it. */
-	fp = fopen(pgpassfile, "r");
+	fp = pg_fopen(pgpassfile, "r");
 	if (fp == NULL)
 		return NULL;
 

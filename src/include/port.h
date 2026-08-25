@@ -250,6 +250,33 @@ extern int	pg_printf(const char *fmt, ...) pg_attribute_printf(1, 2);
 #endif
 
 /*
+ * On macOS, open() of an ordinary file can fail with EINTR even though our
+ * signal handlers use SA_RESTART: the kernel's open1() turns the ERESTART of
+ * an interrupted sleep into EINTR, so an open() that sleeps, for example while
+ * an Endpoint Security client decides whether to allow it, is never restarted.
+ * fopen(), freopen(), opendir() and getcwd() call open() inside libc and do not
+ * retry it either.  (tmpfile() blocks all signals around its open, so it needs
+ * no retry.)
+ * The pg_ prefix is a warning that these retry on EINTR; elsewhere they are
+ * the plain functions.
+ */
+#ifdef __darwin__
+#include <dirent.h>
+
+extern int	pg_open(const char *path, int flags, mode_t mode);
+extern FILE *pg_fopen(const char *path, const char *mode);
+extern FILE *pg_freopen(const char *path, const char *mode, FILE *stream);
+extern DIR *pg_opendir(const char *path);
+extern char *pg_getcwd(char *buf, size_t size);
+#else
+#define pg_open open
+#define pg_fopen fopen
+#define pg_freopen freopen
+#define pg_opendir opendir
+#define pg_getcwd getcwd
+#endif
+
+/*
  * We use __VA_ARGS__ for printf to prevent replacing references to
  * the "printf" format archetype in format() attribute declarations.
  * That unfortunately means that taking a function pointer to printf
