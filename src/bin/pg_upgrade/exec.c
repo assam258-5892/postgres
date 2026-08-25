@@ -229,7 +229,7 @@ pid_lock_file_exists(const char *datadir)
 
 	snprintf(path, sizeof(path), "%s/postmaster.pid", datadir);
 
-	if ((fd = open(path, O_RDONLY, 0)) < 0)
+	if ((fd = pg_open(path, O_RDONLY, 0)) < 0)
 	{
 		/* ENOTDIR means we will throw a more useful error later */
 		if (errno != ENOENT && errno != ENOTDIR)
@@ -285,7 +285,7 @@ win32_check_directory_write_permissions(void)
 	 * We open a file we would normally create anyway.  We do this even in
 	 * 'check' mode, which isn't ideal, but this is the best we can do.
 	 */
-	if ((fd = open(GLOBALS_DUMP_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)) < 0)
+	if ((fd = pg_open(GLOBALS_DUMP_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)) < 0)
 		return -1;
 	close(fd);
 
