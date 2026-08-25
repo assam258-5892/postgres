@@ -75,7 +75,7 @@ pg_open_tzfile(const char *name, char *canonname)
 	strcat(fullname, "/");
 	strcat(fullname, name);
 
-	return open(fullname, O_RDONLY | PG_BINARY, 0);
+	return pg_open(fullname, O_RDONLY | PG_BINARY, 0);
 }
 
 

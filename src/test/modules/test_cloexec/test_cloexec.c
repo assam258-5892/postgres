@@ -89,7 +89,7 @@ run_parent_tests(const char *testfile1, const char *testfile2)
 	printf("Parent: Opening test files...\n");
 
 	/* Open first file WITH O_CLOEXEC - should NOT be inherited */
-	fd1 = open(testfile1, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+	fd1 = pg_open(testfile1, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
 	if (fd1 < 0)
 	{
 		fprintf(stderr, "Failed to open %s: %s\n", testfile1, strerror(errno));
@@ -97,7 +97,7 @@ run_parent_tests(const char *testfile1, const char *testfile2)
 	}
 
 	/* Open second file WITHOUT O_CLOEXEC - should be inherited */
-	fd2 = open(testfile2, O_RDWR | O_CREAT | O_TRUNC, 0600);
+	fd2 = pg_open(testfile2, O_RDWR | O_CREAT | O_TRUNC, 0600);
 	if (fd2 < 0)
 	{
 		fprintf(stderr, "Failed to open %s: %s\n", testfile2, strerror(errno));

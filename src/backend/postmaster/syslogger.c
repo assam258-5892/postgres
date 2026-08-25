@@ -237,7 +237,7 @@ SysLoggerMain(const void *startup_data, size_t startup_data_len)
 	 */
 	if (redirection_done)
 	{
-		int			fd = open(DEVNULL, O_WRONLY, 0);
+		int			fd = pg_open(DEVNULL, O_WRONLY, 0);
 
 		/*
 		 * The closes might look redundant, but they are not: we want to be
