@@ -65,7 +65,7 @@ open_target_file(const char *path, bool trunc)
 	mode = O_WRONLY | O_CREAT | PG_BINARY;
 	if (trunc)
 		mode |= O_TRUNC;
-	dstfd = open(dstpath, mode, pg_file_create_mode);
+	dstfd = pg_open(dstpath, mode, pg_file_create_mode);
 	if (dstfd < 0)
 		pg_fatal("could not open target file \"%s\": %m",
 				 dstpath);
@@ -222,7 +222,7 @@ truncate_target_file(const char *path, off_t newsize)
 
 	snprintf(dstpath, sizeof(dstpath), "%s/%s", datadir_target, path);
 
-	fd = open(dstpath, O_WRONLY, pg_file_create_mode);
+	fd = pg_open(dstpath, O_WRONLY, pg_file_create_mode);
 	if (fd < 0)
 		pg_fatal("could not open file \"%s\" for truncation: %m",
 				 dstpath);
@@ -345,7 +345,7 @@ slurpFile(const char *datadir, const char *path, size_t *filesize)
 
 	snprintf(fullpath, sizeof(fullpath), "%s/%s", datadir, path);
 
-	if ((fd = open(fullpath, O_RDONLY | PG_BINARY, 0)) == -1)
+	if ((fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0)) == -1)
 		pg_fatal("could not open file \"%s\" for reading: %m",
 				 fullpath);
 

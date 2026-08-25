@@ -242,7 +242,7 @@ test_open(void)
 	/*
 	 * test if we can open the target file
 	 */
-	if ((tmpfile = open(filename, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR)) == -1)
+	if ((tmpfile = pg_open(filename, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR)) == -1)
 		die("could not open output file");
 	needs_unlink = 1;
 	if (write(tmpfile, buf, DEFAULT_XLOG_SEG_SIZE) !=
@@ -265,7 +265,7 @@ open_direct(const char *path, int flags, mode_t mode)
 	flags |= O_DIRECT;
 #endif
 
-	fd = open(path, flags, mode);
+	fd = pg_open(path, flags, mode);
 
 #if !defined(O_DIRECT) && defined(F_NOCACHE)
 	if (fd >= 0 && fcntl(fd, F_NOCACHE, 1) < 0)
@@ -332,7 +332,7 @@ test_sync(int writes_per_op)
 	printf(LABEL_FORMAT, "fdatasync");
 	fflush(stdout);
 
-	if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+	if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 		die("could not open output file");
 	START_TIMER;
 	for (ops = 0; alarm_triggered == false; ops++)
@@ -354,7 +354,7 @@ test_sync(int writes_per_op)
 	printf(LABEL_FORMAT, "fsync");
 	fflush(stdout);
 
-	if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+	if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 		die("could not open output file");
 	START_TIMER;
 	for (ops = 0; alarm_triggered == false; ops++)
@@ -378,7 +378,7 @@ test_sync(int writes_per_op)
 	fflush(stdout);
 
 #ifdef HAVE_FSYNC_WRITETHROUGH
-	if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+	if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 		die("could not open output file");
 	START_TIMER;
 	for (ops = 0; alarm_triggered == false; ops++)
@@ -522,7 +522,7 @@ test_file_descriptor_sync(void)
 	START_TIMER;
 	for (ops = 0; alarm_triggered == false; ops++)
 	{
-		if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+		if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 			die("could not open output file");
 		if (write(tmpfile, buf, XLOG_BLCKSZ) != XLOG_BLCKSZ)
 			die("write failed");
@@ -534,7 +534,7 @@ test_file_descriptor_sync(void)
 		 * open and close the file again to be consistent with the following
 		 * test
 		 */
-		if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+		if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 			die("could not open output file");
 		close(tmpfile);
 	}
@@ -550,13 +550,13 @@ test_file_descriptor_sync(void)
 	START_TIMER;
 	for (ops = 0; alarm_triggered == false; ops++)
 	{
-		if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+		if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 			die("could not open output file");
 		if (write(tmpfile, buf, XLOG_BLCKSZ) != XLOG_BLCKSZ)
 			die("write failed");
 		close(tmpfile);
 		/* reopen file */
-		if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+		if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 			die("could not open output file");
 		if (fsync(tmpfile) != 0)
 			die("fsync failed");
@@ -578,7 +578,7 @@ test_non_sync(void)
 	printf(LABEL_FORMAT, "write");
 	fflush(stdout);
 
-	if ((tmpfile = open(filename, O_RDWR | PG_BINARY, 0)) == -1)
+	if ((tmpfile = pg_open(filename, O_RDWR | PG_BINARY, 0)) == -1)
 		die("could not open output file");
 	START_TIMER;
 	for (ops = 0; alarm_triggered == false; ops++)
