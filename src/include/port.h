@@ -250,6 +250,21 @@ extern int	pg_printf(const char *fmt, ...) pg_attribute_printf(1, 2);
 #endif
 
 /*
+ * We add a pg_ prefix as a warning that this retries EINTR, which POSIX
+ * permits open() to fail with and macOS does return.  An open() that has to
+ * sleep can be interrupted -- a saturated vnode table, where opening an
+ * uncached file waits for a vnode to be reclaimed, is one way to get there --
+ * and the filesystem hands the EINTR up rather than asking for a restart, so
+ * SA_RESTART does not cover it.  The read and write paths in fd.c retry
+ * already; open() was the one that did not.
+ */
+#if defined(WIN32) && !defined(__CYGWIN__)
+#define pg_open open
+#else
+extern int	pg_open(const char *path, int flags, mode_t mode);
+#endif
+
+/*
  * We use __VA_ARGS__ for printf to prevent replacing references to
  * the "printf" format archetype in format() attribute declarations.
  * That unfortunately means that taking a function pointer to printf

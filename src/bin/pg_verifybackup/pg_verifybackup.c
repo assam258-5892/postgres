@@ -418,7 +418,7 @@ parse_manifest_file(char *manifest_path)
 	const size_t chunk_size = READ_CHUNK_SIZE;
 
 	/* Open the manifest file. */
-	if ((fd = open(manifest_path, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(manifest_path, O_RDONLY | PG_BINARY, 0)) < 0)
 		report_fatal_error("could not open file \"%s\": %m", manifest_path);
 
 	/* Figure out how big the manifest is. */
@@ -1030,7 +1030,7 @@ verify_tar_file(verifier_context *context, char *relpath, char *fullpath,
 	pg_log_debug("reading \"%s\"", fullpath);
 
 	/* Open the target file. */
-	if ((fd = open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		report_backup_error(context, "could not open file \"%s\": %m",
 							relpath);
@@ -1138,7 +1138,7 @@ verify_file_checksum(verifier_context *context, manifest_file *m,
 	int			checksumlen;
 
 	/* Open the target file. */
-	if ((fd = open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
+	if ((fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		report_backup_error(context, "could not open file \"%s\": %m",
 							relpath);

@@ -449,7 +449,7 @@ saveHistory(char *fname, int max_lines)
 				(void) history_truncate_file(fname, nlines);
 			}
 			/* append_history fails if file doesn't already exist :-( */
-			fd = open(fname, O_CREAT | O_WRONLY | PG_BINARY, 0600);
+			fd = pg_open(fname, O_CREAT | O_WRONLY | PG_BINARY, 0600);
 			if (fd >= 0)
 				close(fd);
 			/* append the appropriate number of lines */
