@@ -541,7 +541,7 @@ Zstd_open(const char *path, int fd, const char *mode,
 	}
 	else
 	{
-		fp = fopen(path, mode);
+		fp = pg_fopen(path, mode);
 		if (fp == NULL)
 		{
 			pg_free(zstdcs);

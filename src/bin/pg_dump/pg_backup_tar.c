@@ -163,7 +163,7 @@ InitArchiveFmt_Tar(ArchiveHandle *AH)
 	{
 		if (AH->fSpec && strcmp(AH->fSpec, "") != 0)
 		{
-			ctx->tarFH = fopen(AH->fSpec, PG_BINARY_W);
+			ctx->tarFH = pg_fopen(AH->fSpec, PG_BINARY_W);
 			if (ctx->tarFH == NULL)
 				pg_fatal("could not open TOC file \"%s\" for output: %m",
 						 AH->fSpec);
@@ -197,7 +197,7 @@ InitArchiveFmt_Tar(ArchiveHandle *AH)
 	{							/* Read Mode */
 		if (AH->fSpec && strcmp(AH->fSpec, "") != 0)
 		{
-			ctx->tarFH = fopen(AH->fSpec, PG_BINARY_R);
+			ctx->tarFH = pg_fopen(AH->fSpec, PG_BINARY_R);
 			if (ctx->tarFH == NULL)
 				pg_fatal("could not open TOC file \"%s\" for input: %m",
 						 AH->fSpec);
@@ -360,8 +360,8 @@ tarOpen(ArchiveHandle *AH, const char *filename, char mode)
 			name = _tempnam(NULL, "pg_temp_");
 			if (name == NULL)
 				break;
-			fd = open(name, O_RDWR | O_CREAT | O_EXCL | O_BINARY |
-					  O_TEMPORARY, S_IRUSR | S_IWUSR);
+			fd = pg_open(name, O_RDWR | O_CREAT | O_EXCL | O_BINARY |
+						 O_TEMPORARY, S_IRUSR | S_IWUSR);
 			free(name);
 
 			if (fd != -1)		/* created a file */

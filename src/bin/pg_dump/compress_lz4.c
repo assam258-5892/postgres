@@ -733,7 +733,7 @@ LZ4Stream_open(const char *path, int fd, const char *mode,
 	}
 	else
 	{
-		state->fp = fopen(path, mode);
+		state->fp = pg_fopen(path, mode);
 		if (state->fp == NULL)
 		{
 			state->errcode = errno;

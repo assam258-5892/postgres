@@ -53,6 +53,7 @@ OBJS = \
 	pg_strong_random.o \
 	pgcheckdir.o \
 	pgmkdirp.o \
+	pgopen.o \
 	pgsleep.o \
 	pgstrcasecmp.o \
 	pgstrsignal.o \

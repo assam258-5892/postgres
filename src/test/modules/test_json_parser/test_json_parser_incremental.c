@@ -145,7 +145,7 @@ main(int argc, char **argv)
 
 	initStringInfo(&json);
 
-	if ((json_file = fopen(testfile, PG_BINARY_R)) == NULL)
+	if ((json_file = pg_fopen(testfile, PG_BINARY_R)) == NULL)
 		pg_fatal("error opening input: %m");
 
 	if (fstat(fileno(json_file), &statbuf) != 0)

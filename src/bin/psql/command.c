@@ -3313,7 +3313,7 @@ exec_command_write(PsqlScanState scan_state, bool active_branch,
 				else
 				{
 					canonicalize_path_enc(fname, pset.encoding);
-					fd = fopen(fname, "w");
+					fd = pg_fopen(fname, "w");
 				}
 				if (!fd)
 				{
@@ -4788,7 +4788,7 @@ do_edit(const char *filename_arg, PQExpBuffer query_buf,
 
 		fname = (const char *) fnametmp;
 
-		fd = open(fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+		fd = pg_open(fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
 		if (fd != -1)
 			stream = fdopen(fd, "w");
 
@@ -4869,7 +4869,7 @@ do_edit(const char *filename_arg, PQExpBuffer query_buf,
 		(before.st_size != after.st_size ||
 		 before.st_mtime != after.st_mtime))
 	{
-		stream = fopen(fname, PG_BINARY_R);
+		stream = pg_fopen(fname, PG_BINARY_R);
 		if (!stream)
 		{
 			pg_log_error("%s: %m", fname);
@@ -4967,7 +4967,7 @@ process_file(char *filename, bool use_relative_path)
 			filename = relpath;
 		}
 
-		fd = fopen(filename, PG_BINARY_R);
+		fd = pg_fopen(filename, PG_BINARY_R);
 
 		if (!fd)
 		{

@@ -1739,13 +1739,13 @@ parse_include(void)
 		memmove(yytext, yytext + 1, strlen(yytext));
 
 		strlcpy(inc_file, yytext, sizeof(inc_file));
-		yyin = fopen(inc_file, "r");
+		yyin = pg_fopen(inc_file, "r");
 		if (!yyin)
 		{
 			if (strlen(inc_file) <= 2 || strcmp(inc_file + strlen(inc_file) - 2, ".h") != 0)
 			{
 				strcat(inc_file, ".h");
-				yyin = fopen(inc_file, "r");
+				yyin = pg_fopen(inc_file, "r");
 			}
 		}
 
@@ -1766,13 +1766,13 @@ parse_include(void)
 				continue;
 			}
 			snprintf(inc_file, sizeof(inc_file), "%s/%s", ip->path, yytext);
-			yyin = fopen(inc_file, "r");
+			yyin = pg_fopen(inc_file, "r");
 			if (!yyin)
 			{
 				if (strcmp(inc_file + strlen(inc_file) - 2, ".h") != 0)
 				{
 					strcat(inc_file, ".h");
-					yyin = fopen(inc_file, "r");
+					yyin = pg_fopen(inc_file, "r");
 				}
 			}
 

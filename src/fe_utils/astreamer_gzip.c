@@ -110,7 +110,19 @@ astreamer_gzip_writer_new(char *pathname, FILE *file,
 
 	if (file == NULL)
 	{
+#ifdef __darwin__
+		/*
+		 * gzopen() opens inside zlib; retry EINTR as pg_open() does.  It can
+		 * fail without setting errno, so clear it first.
+		 */
+		do
+		{
+			errno = 0;
+			streamer->gzfile = gzopen(pathname, "wb");
+		} while (streamer->gzfile == NULL && errno == EINTR);
+#else
 		streamer->gzfile = gzopen(pathname, "wb");
+#endif
 		if (streamer->gzfile == NULL)
 			pg_fatal("could not create compressed file \"%s\": %m",
 					 pathname);

@@ -91,7 +91,7 @@ astreamer_plain_writer_new(char *pathname, FILE *file)
 
 	if (file == NULL)
 	{
-		streamer->file = fopen(pathname, "wb");
+		streamer->file = pg_fopen(pathname, "wb");
 		if (streamer->file == NULL)
 			pg_fatal("could not create file \"%s\": %m", pathname);
 		streamer->should_close_file = true;
@@ -373,7 +373,7 @@ create_file_for_extract(const char *filename, mode_t mode)
 {
 	FILE	   *file;
 
-	file = fopen(filename, "wb");
+	file = pg_fopen(filename, "wb");
 	if (file == NULL)
 		pg_fatal("could not create file \"%s\": %m", filename);
 

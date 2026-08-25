@@ -237,7 +237,7 @@ SysLoggerMain(const void *startup_data, size_t startup_data_len)
 	 */
 	if (redirection_done)
 	{
-		int			fd = open(DEVNULL, O_WRONLY, 0);
+		int			fd = pg_open(DEVNULL, O_WRONLY, 0);
 
 		/*
 		 * The closes might look redundant, but they are not: we want to be
@@ -1245,7 +1245,7 @@ logfile_open(const char *filename, const char *mode, bool allow_errors)
 	 * to be able to write the files ourselves.
 	 */
 	oumask = umask((mode_t) ((~(Log_file_mode | S_IWUSR)) & (S_IRWXU | S_IRWXG | S_IRWXO)));
-	fh = fopen(filename, mode);
+	fh = pg_fopen(filename, mode);
 	umask(oumask);
 
 	if (fh)
@@ -1512,7 +1512,7 @@ update_metainfo_datafile(void)
 
 	/* use the same permissions as the data directory for the new file */
 	oumask = umask(pg_mode_mask);
-	fh = fopen(LOG_METAINFO_DATAFILE_TMP, "w");
+	fh = pg_fopen(LOG_METAINFO_DATAFILE_TMP, "w");
 	umask(oumask);
 
 	if (fh)

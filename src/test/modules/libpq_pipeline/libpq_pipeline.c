@@ -2209,7 +2209,7 @@ main(int argc, char **argv)
 		if (strcmp(tracefile, "-") == 0)
 			trace = stdout;
 		else
-			trace = fopen(tracefile, "w");
+			trace = pg_fopen(tracefile, "w");
 		if (trace == NULL)
 			pg_fatal("could not open file \"%s\": %m", tracefile);
 

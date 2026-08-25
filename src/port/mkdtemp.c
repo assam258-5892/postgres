@@ -180,7 +180,7 @@ GETTEMP(char *path, int *doopen, int domkdir)
 		if (doopen)
 		{
 			if ((*doopen =
-				 open(path, O_CREAT | O_EXCL | O_RDWR, 0600)) >= 0)
+				 pg_open(path, O_CREAT | O_EXCL | O_RDWR, 0600)) >= 0)
 				return 1;
 			if (errno != EEXIST)
 				return 0;

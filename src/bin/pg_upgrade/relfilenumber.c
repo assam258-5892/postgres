@@ -362,7 +362,7 @@ swap_catalog_files(FileNameMap *maps, int size, const char *old_catalog_dir,
 	RelFileNumber rfn;
 
 	/* Move the old catalog files aside. */
-	dir = opendir(new_db_dir);
+	dir = pg_opendir(new_db_dir);
 	if (dir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", new_db_dir);
 	while (errno = 0, (de = readdir(dir)) != NULL)
@@ -389,7 +389,7 @@ swap_catalog_files(FileNameMap *maps, int size, const char *old_catalog_dir,
 	(void) closedir(dir);
 
 	/* Move the new catalog files into place. */
-	dir = opendir(moved_db_dir);
+	dir = pg_opendir(moved_db_dir);
 	if (dir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", moved_db_dir);
 	while (errno = 0, (de = readdir(dir)) != NULL)

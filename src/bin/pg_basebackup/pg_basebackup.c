@@ -1476,7 +1476,7 @@ ReceiveArchiveStreamChunk(size_t r, char *copybuf, void *callback_data)
 								 sizeof(state->manifest_filename),
 								 "%s/backup_manifest.tmp", basedir);
 						state->manifest_file =
-							fopen(state->manifest_filename, "wb");
+							pg_fopen(state->manifest_filename, "wb");
 						if (state->manifest_file == NULL)
 							pg_fatal("could not create file \"%s\": %m",
 									 state->manifest_filename);
@@ -1685,7 +1685,7 @@ ReceiveBackupManifest(PGconn *conn)
 
 	snprintf(state.filename, sizeof(state.filename),
 			 "%s/backup_manifest.tmp", basedir);
-	state.file = fopen(state.filename, "wb");
+	state.file = pg_fopen(state.filename, "wb");
 	if (state.file == NULL)
 		pg_fatal("could not create file \"%s\": %m", state.filename);
 
@@ -1825,7 +1825,7 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 			pg_fatal("server does not support incremental backup");
 
 		/* Open the file. */
-		fd = open(incremental_manifest, O_RDONLY | PG_BINARY, 0);
+		fd = pg_open(incremental_manifest, O_RDONLY | PG_BINARY, 0);
 		if (fd < 0)
 			pg_fatal("could not open file \"%s\": %m", incremental_manifest);
 

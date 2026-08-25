@@ -617,7 +617,7 @@ prepare_tmp_write(const char *fname, XLogDumpPrivate *privateInfo)
 	snprintf(fpath, MAXPGPATH, "%s/%s", TmpWalSegDir, fname);
 
 	/* Open the spill file for writing */
-	file = fopen(fpath, PG_BINARY_W);
+	file = pg_fopen(fpath, PG_BINARY_W);
 	if (file == NULL)
 		pg_fatal("could not create file \"%s\": %m", fpath);
 

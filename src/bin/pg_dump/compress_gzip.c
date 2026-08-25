@@ -400,7 +400,19 @@ Gzip_open(const char *path, int fd, const char *mode, CompressFileHandle *CFH)
 	}
 	else
 	{
+#ifdef __darwin__
+		/*
+		 * gzopen() opens inside zlib; retry EINTR as pg_open() does.  It can
+		 * fail without setting errno, so clear it first.
+		 */
+		do
+		{
+			errno = 0;
+			gzfp = gzopen(path, mode_compression);
+		} while (gzfp == NULL && errno == EINTR);
+#else
 		gzfp = gzopen(path, mode_compression);
+#endif
 		if (gzfp == NULL)
 			return false;
 	}

@@ -238,7 +238,7 @@ get_destination_dir(char *dest_folder)
 	DIR		   *dir;
 
 	Assert(dest_folder != NULL);
-	dir = opendir(dest_folder);
+	dir = pg_opendir(dest_folder);
 	if (dir == NULL)
 		pg_fatal("could not open directory \"%s\": %m", dest_folder);
 
@@ -336,7 +336,7 @@ FindStreamingStart(uint32 *tli_p)
 
 			snprintf(fullpath, sizeof(fullpath), "%s/%s", basedir, dirent->d_name);
 
-			fd = open(fullpath, O_RDONLY | PG_BINARY, 0);
+			fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0);
 			if (fd < 0)
 				pg_fatal("could not open compressed file \"%s\": %m",
 						 fullpath);
@@ -382,7 +382,7 @@ FindStreamingStart(uint32 *tli_p)
 			memset(&dec_opt, 0, sizeof(dec_opt));
 			snprintf(fullpath, sizeof(fullpath), "%s/%s", basedir, dirent->d_name);
 
-			fd = open(fullpath, O_RDONLY | PG_BINARY, 0);
+			fd = pg_open(fullpath, O_RDONLY | PG_BINARY, 0);
 			if (fd < 0)
 				pg_fatal("could not open file \"%s\": %m", fullpath);
 

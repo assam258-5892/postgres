@@ -84,16 +84,16 @@ simple_prompt_extended(const char *prompt, bool echo,
 	 * Unintuitively, we also open termin in mode "w+", even though we only
 	 * read it; that's needed for SetConsoleMode() to succeed.
 	 */
-	termin = fopen("CONIN$", "w+");
-	termout = fopen("CONOUT$", "w+");
+	termin = pg_fopen("CONIN$", "w+");
+	termout = pg_fopen("CONOUT$", "w+");
 #else
 
 	/*
 	 * Do not try to collapse these into one "w+" mode file. Doesn't work on
 	 * some platforms (eg, HPUX 10.20).
 	 */
-	termin = fopen("/dev/tty", "r");
-	termout = fopen("/dev/tty", "w");
+	termin = pg_fopen("/dev/tty", "r");
+	termout = pg_fopen("/dev/tty", "w");
 #endif
 	if (!termin || !termout
 #ifdef WIN32

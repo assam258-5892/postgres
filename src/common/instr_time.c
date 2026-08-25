@@ -283,7 +283,7 @@ tsc_use_by_default(void)
 		FILE	   *fp;
 		char		buf[128];
 
-		fp = fopen("/sys/devices/system/clocksource/clocksource0/current_clocksource", "r");
+		fp = pg_fopen("/sys/devices/system/clocksource/clocksource0/current_clocksource", "r");
 		if (fp)
 		{
 			bool		is_tsc = (fgets(buf, sizeof(buf), fp) != NULL &&

@@ -31,7 +31,7 @@
 #else
 #include "common/logging.h"
 #define LOG_LEVEL PG_LOG_WARNING
-#define OPENDIR(x) opendir(x)
+#define OPENDIR(x) pg_opendir(x)
 #define CLOSEDIR(x) closedir(x)
 #endif
 

@@ -635,7 +635,7 @@ load_resultmap(void)
 
 	/* scan the file ... */
 	snprintf(buf, sizeof(buf), "%s/resultmap", inputdir);
-	f = fopen(buf, "r");
+	f = pg_fopen(buf, "r");
 	if (!f)
 	{
 		/* OK if it doesn't exist, else complain */
@@ -1082,7 +1082,7 @@ config_sspi_auth(const char *pgdata, const char *superuser_name)
 		 */
 		bail("directory name too long");
 	}
-	hba = fopen(fname, "w");
+	hba = pg_fopen(fname, "w");
 	if (hba == NULL)
 	{
 		bail("could not open file \"%s\" for writing: %m", fname);
@@ -1096,7 +1096,7 @@ config_sspi_auth(const char *pgdata, const char *superuser_name)
 	CW(fclose(hba) == 0);
 
 	snprintf(fname, sizeof(fname), "%s/pg_ident.conf", pgdata);
-	ident = fopen(fname, "w");
+	ident = pg_fopen(fname, "w");
 	if (ident == NULL)
 	{
 		bail("could not open file \"%s\" for writing: %m", fname);
@@ -1277,7 +1277,7 @@ static long
 file_size(const char *file)
 {
 	long		r;
-	FILE	   *f = fopen(file, "r");
+	FILE	   *f = pg_fopen(file, "r");
 
 	if (!f)
 	{
@@ -1298,7 +1298,7 @@ file_line_count(const char *file)
 {
 	int			c;
 	int			l = 0;
-	FILE	   *f = fopen(file, "r");
+	FILE	   *f = pg_fopen(file, "r");
 
 	if (!f)
 	{
@@ -1317,7 +1317,7 @@ file_line_count(const char *file)
 bool
 file_exists(const char *file)
 {
-	FILE	   *f = fopen(file, "r");
+	FILE	   *f = pg_fopen(file, "r");
 
 	if (!f)
 		return false;
@@ -1533,7 +1533,7 @@ results_differ(const char *testname, const char *resultsfile, const char *defaul
 	 * append to the diffs summary file.
 	 */
 
-	difffile = fopen(difffilename, "a");
+	difffile = pg_fopen(difffilename, "a");
 	if (!difffile)
 		bail("could not open file \"%s\" for writing: %m", difffilename);
 	startpos = ftell(difffile);
@@ -1557,7 +1557,7 @@ results_differ(const char *testname, const char *resultsfile, const char *defaul
 	 * appends to it, because on Windows the file lock prevents diff from
 	 * writing.
 	 */
-	difffile = fopen(difffilename, "r");
+	difffile = pg_fopen(difffilename, "r");
 	if (!difffile)
 		bail("could not open file \"%s\" for reading: %m", difffilename);
 	else
@@ -1734,7 +1734,7 @@ run_schedule(const char *schedule, test_start_function startfunc,
 	memset(expectfiles, 0, sizeof(expectfiles));
 	memset(tags, 0, sizeof(tags));
 
-	scf = fopen(schedule, "r");
+	scf = pg_fopen(schedule, "r");
 	if (!scf)
 		bail("could not open file \"%s\" for reading: %m", schedule);
 
@@ -1998,14 +1998,14 @@ open_result_files(void)
 	/* create the log file (copy of running status output) */
 	snprintf(file, sizeof(file), "%s/regression.out", outputdir);
 	logfilename = pg_strdup(file);
-	logfile = fopen(logfilename, "w");
+	logfile = pg_fopen(logfilename, "w");
 	if (!logfile)
 		bail("could not open file \"%s\" for writing: %m", logfilename);
 
 	/* create the diffs file as empty */
 	snprintf(file, sizeof(file), "%s/regression.diffs", outputdir);
 	difffilename = pg_strdup(file);
-	difffile = fopen(difffilename, "w");
+	difffile = pg_fopen(difffilename, "w");
 	if (!difffile)
 		bail("could not open file \"%s\" for writing: %m", difffilename);
 
@@ -2470,7 +2470,7 @@ regression_main(int argc, char *argv[],
 		 * actually needed by the prepared_xacts regression test.)
 		 */
 		snprintf(buf, sizeof(buf), "%s/data/postgresql.conf", temp_instance);
-		pg_conf = fopen(buf, "a");
+		pg_conf = pg_fopen(buf, "a");
 		if (pg_conf == NULL)
 			bail("could not open \"%s\" for adding extra config: %m", buf);
 
@@ -2489,7 +2489,7 @@ regression_main(int argc, char *argv[],
 			FILE	   *extra_conf;
 			char		line_buf[1024];
 
-			extra_conf = fopen(temp_config, "r");
+			extra_conf = pg_fopen(temp_config, "r");
 			if (extra_conf == NULL)
 			{
 				bail("could not open \"%s\" to read extra config: %m",

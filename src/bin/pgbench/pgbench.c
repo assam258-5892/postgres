@@ -6188,7 +6188,7 @@ process_file(const char *filename, int weight)
 	/* Slurp the file contents into "buf" */
 	if (strcmp(filename, "-") == 0)
 		fd = stdin;
-	else if ((fd = fopen(filename, "r")) == NULL)
+	else if ((fd = pg_fopen(filename, "r")) == NULL)
 		pg_fatal("could not open file \"%s\": %m", filename);
 
 	buf = read_file_contents(fd);
@@ -7560,7 +7560,7 @@ threadRun(void *arg)
 		else
 			snprintf(logpath, sizeof(logpath), "%s.%d.%d", prefix, main_pid, thread->tid);
 
-		thread->logfile = fopen(logpath, "w");
+		thread->logfile = pg_fopen(logpath, "w");
 
 		if (thread->logfile == NULL)
 			pg_fatal("could not open logfile \"%s\": %m", logpath);

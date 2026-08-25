@@ -2316,8 +2316,8 @@ DebugFileOpen(void)
 		 *
 		 * Make sure we can write the file, and find out if it's a tty.
 		 */
-		if ((fd = open(OutputFileName, O_CREAT | O_APPEND | O_WRONLY,
-					   0666)) < 0)
+		if ((fd = pg_open(OutputFileName, O_CREAT | O_APPEND | O_WRONLY,
+						  0666)) < 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not open file \"%s\": %m", OutputFileName)));
@@ -2327,7 +2327,7 @@ DebugFileOpen(void)
 		/*
 		 * Redirect our stderr to the debug output file.
 		 */
-		if (!freopen(OutputFileName, "a", stderr))
+		if (!pg_freopen(OutputFileName, "a", stderr))
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not reopen file \"%s\" as stderr: %m",
@@ -2340,7 +2340,7 @@ DebugFileOpen(void)
 		 * before).
 		 */
 		if (istty && IsUnderPostmaster)
-			if (!freopen(OutputFileName, "a", stdout))
+			if (!pg_freopen(OutputFileName, "a", stdout))
 				ereport(FATAL,
 						(errcode_for_file_access(),
 						 errmsg("could not reopen file \"%s\" as stdout: %m",

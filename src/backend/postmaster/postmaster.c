@@ -1306,7 +1306,7 @@ PostmasterMain(int argc, char *argv[])
 	 */
 	if (external_pid_file)
 	{
-		FILE	   *fpidfile = fopen(external_pid_file, "w");
+		FILE	   *fpidfile = pg_fopen(external_pid_file, "w");
 
 		if (fpidfile)
 		{
@@ -4148,7 +4148,7 @@ CreateOptsFile(int argc, char *argv[], char *fullprogname)
 
 #define OPTS_FILE	"postmaster.opts"
 
-	if ((fp = fopen(OPTS_FILE, "w")) == NULL)
+	if ((fp = pg_fopen(OPTS_FILE, "w")) == NULL)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),

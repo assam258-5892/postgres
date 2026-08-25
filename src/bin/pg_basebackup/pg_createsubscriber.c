@@ -1443,7 +1443,7 @@ setup_recovery(const struct LogicalRepInfo *dbinfo, const char *datadir, const c
 		/* Write the recovery parameters to INCLUDED_CONF_FILE */
 		snprintf(conf_filename, MAXPGPATH, "%s/%s", datadir,
 				 INCLUDED_CONF_FILE);
-		fd = fopen(conf_filename, "w");
+		fd = pg_fopen(conf_filename, "w");
 		if (fd == NULL)
 			pg_fatal("could not open file \"%s\": %m", conf_filename);
 
@@ -2460,7 +2460,7 @@ main(int argc, char **argv)
 	{
 		char		cwd[MAXPGPATH];
 
-		if (!getcwd(cwd, MAXPGPATH))
+		if (!pg_getcwd(cwd, MAXPGPATH))
 			pg_fatal("could not determine current directory");
 		opt.socket_dir = pg_strdup(cwd);
 		canonicalize_path(opt.socket_dir);
@@ -2504,7 +2504,7 @@ main(int argc, char **argv)
 		make_output_dirs(opt.log_dir);
 		internal_log_file = psprintf("%s/%s", logdir, INTERNAL_LOG_FILE_NAME);
 
-		internal_log_file_fp = fopen(internal_log_file, "a");
+		internal_log_file_fp = pg_fopen(internal_log_file, "a");
 		if (!internal_log_file_fp)
 			pg_fatal("could not open log file \"%s\": %m", internal_log_file);
 

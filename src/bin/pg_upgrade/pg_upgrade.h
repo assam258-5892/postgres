@@ -409,8 +409,8 @@ void		check_file_clone(void);
 void		check_copy_file_range(void);
 void		check_hard_link(transferMode transfer_mode);
 
-/* fopen_priv() is no longer different from fopen() */
-#define fopen_priv(path, mode)	fopen(path, mode)
+/* fopen_priv() is no longer different from pg_fopen() */
+#define fopen_priv(path, mode)	pg_fopen(path, mode)
 
 /* function.c */
 

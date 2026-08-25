@@ -290,7 +290,7 @@ parseCommandLine(int argc, char *argv[])
 		strlcpy(new_cluster_pgdata, new_cluster.pgdata, MAXPGPATH);
 		canonicalize_path(new_cluster_pgdata);
 
-		if (!getcwd(cwd, MAXPGPATH))
+		if (!pg_getcwd(cwd, MAXPGPATH))
 			pg_fatal("could not determine current directory");
 		canonicalize_path(cwd);
 		if (path_is_prefix_of_path(new_cluster_pgdata, cwd))
@@ -396,7 +396,7 @@ check_required_directory(char **dirpath, const char *envVarName, bool useCwd,
 		{
 			char		cwd[MAXPGPATH];
 
-			if (!getcwd(cwd, MAXPGPATH))
+			if (!pg_getcwd(cwd, MAXPGPATH))
 				pg_fatal("could not determine current directory");
 			*dirpath = pg_strdup(cwd);
 		}
@@ -441,13 +441,13 @@ adjust_data_dir(ClusterInfo *cluster)
 
 	/* If there is no postgresql.conf, it can't be a config-only dir */
 	snprintf(filename, sizeof(filename), "%s/postgresql.conf", cluster->pgconfig);
-	if ((fp = fopen(filename, "r")) == NULL)
+	if ((fp = pg_fopen(filename, "r")) == NULL)
 		return;
 	fclose(fp);
 
 	/* If PG_VERSION exists, it can't be a config-only dir */
 	snprintf(filename, sizeof(filename), "%s/PG_VERSION", cluster->pgconfig);
-	if ((fp = fopen(filename, "r")) != NULL)
+	if ((fp = pg_fopen(filename, "r")) != NULL)
 	{
 		fclose(fp);
 		return;
@@ -515,7 +515,7 @@ get_sock_dir(ClusterInfo *cluster)
 
 		snprintf(filename, sizeof(filename), "%s/postmaster.pid",
 				 cluster->pgdata);
-		if ((fp = fopen(filename, "r")) == NULL)
+		if ((fp = pg_fopen(filename, "r")) == NULL)
 			pg_fatal("could not open file \"%s\": %m", filename);
 
 		for (lineno = 1;

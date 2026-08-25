@@ -42,7 +42,7 @@ pgfnames(const char *path)
 	int			numnames = 0;
 	int			fnsize = 200;	/* enough for many small dbs */
 
-	dir = opendir(path);
+	dir = pg_opendir(path);
 	if (dir == NULL)
 	{
 		pg_log_warning("could not open directory \"%s\": %m", path);

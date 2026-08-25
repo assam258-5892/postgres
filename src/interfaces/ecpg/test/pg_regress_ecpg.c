@@ -37,13 +37,13 @@ ecpg_filter_source(const char *sourcefile, const char *outfile)
 			   *t;
 	StringInfoData linebuf;
 
-	s = fopen(sourcefile, "r");
+	s = pg_fopen(sourcefile, "r");
 	if (!s)
 	{
 		fprintf(stderr, "Could not open file %s for reading\n", sourcefile);
 		exit(2);
 	}
-	t = fopen(outfile, "w");
+	t = pg_fopen(outfile, "w");
 	if (!t)
 	{
 		fprintf(stderr, "Could not open file %s for writing\n", outfile);
@@ -96,13 +96,13 @@ ecpg_filter_stderr(const char *resultfile, const char *tmpfile)
 			   *t;
 	StringInfoData linebuf;
 
-	s = fopen(resultfile, "r");
+	s = pg_fopen(resultfile, "r");
 	if (!s)
 	{
 		fprintf(stderr, "Could not open file %s for reading\n", resultfile);
 		exit(2);
 	}
-	t = fopen(tmpfile, "w");
+	t = pg_fopen(tmpfile, "w");
 	if (!t)
 	{
 		fprintf(stderr, "Could not open file %s for writing\n", tmpfile);

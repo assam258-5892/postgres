@@ -146,7 +146,7 @@ InitArchiveFmt_Custom(ArchiveHandle *AH)
 	{
 		if (AH->fSpec && strcmp(AH->fSpec, "") != 0)
 		{
-			AH->FH = fopen(AH->fSpec, PG_BINARY_W);
+			AH->FH = pg_fopen(AH->fSpec, PG_BINARY_W);
 			if (!AH->FH)
 				pg_fatal("could not open output file \"%s\": %m", AH->fSpec);
 		}
@@ -163,7 +163,7 @@ InitArchiveFmt_Custom(ArchiveHandle *AH)
 	{
 		if (AH->fSpec && strcmp(AH->fSpec, "") != 0)
 		{
-			AH->FH = fopen(AH->fSpec, PG_BINARY_R);
+			AH->FH = pg_fopen(AH->fSpec, PG_BINARY_R);
 			if (!AH->FH)
 				pg_fatal("could not open input file \"%s\": %m", AH->fSpec);
 		}
@@ -815,7 +815,7 @@ _ReopenArchive(ArchiveHandle *AH)
 		pg_fatal("could not close archive file: %m");
 #endif
 
-	AH->FH = fopen(AH->fSpec, PG_BINARY_R);
+	AH->FH = pg_fopen(AH->fSpec, PG_BINARY_R);
 	if (!AH->FH)
 		pg_fatal("could not open input file \"%s\": %m", AH->fSpec);
 

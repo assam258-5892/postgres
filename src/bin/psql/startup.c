@@ -347,7 +347,7 @@ main(int argc, char *argv[])
 
 	if (options.logfilename)
 	{
-		pset.logfile = fopen(options.logfilename, "a");
+		pset.logfile = pg_fopen(options.logfilename, "a");
 		if (!pset.logfile)
 			pg_fatal("could not open log file \"%s\": %m",
 					 options.logfilename);

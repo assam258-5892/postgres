@@ -284,7 +284,14 @@ pg_realpath(const char *fname)
 {
 	char	   *path;
 
-#ifndef WIN32
+#if defined(__darwin__)
+	/* realpath() opens inside libc; retry EINTR as pg_getcwd() does */
+	do
+	{
+		errno = 0;
+		path = realpath(fname, NULL);
+	} while (path == NULL && errno == EINTR);
+#elif !defined(WIN32)
 	path = realpath(fname, NULL);
 #else							/* WIN32 */
 

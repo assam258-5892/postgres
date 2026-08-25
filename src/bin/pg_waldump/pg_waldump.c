@@ -107,7 +107,7 @@ print_rmgr_list(void)
 static bool
 verify_directory(const char *directory)
 {
-	DIR		   *dir = opendir(directory);
+	DIR		   *dir = pg_opendir(directory);
 
 	if (dir == NULL)
 		return false;
@@ -188,7 +188,7 @@ open_file_in_directory(const char *directory, const char *fname)
 	Assert(directory != NULL);
 
 	snprintf(fpath, MAXPGPATH, "%s/%s", directory, fname);
-	fd = open(fpath, O_RDONLY | PG_BINARY, 0);
+	fd = pg_open(fpath, O_RDONLY | PG_BINARY, 0);
 
 	if (fd < 0 && errno != ENOENT)
 		pg_fatal("could not open file \"%s\": %m", fname);
@@ -216,7 +216,7 @@ search_directory(const char *directory, const char *fname, int *WalSegSz)
 	 * we find any file whose name is a valid WAL file name then try to open
 	 * it.  If we cannot open it, bail out.
 	 */
-	else if ((xldir = opendir(directory)) != NULL)
+	else if ((xldir = pg_opendir(directory)) != NULL)
 	{
 		struct dirent *xlde;
 
@@ -644,7 +644,7 @@ XLogRecordSaveFPWs(XLogReaderState *record, const char *savepath)
 				 LSN_FORMAT_ARGS(record->ReadRecPtr),
 				 rnode.spcOid, rnode.dbOid, rnode.relNumber, blk, forkname);
 
-		file = fopen(filename, PG_BINARY_W);
+		file = pg_fopen(filename, PG_BINARY_W);
 		if (!file)
 			pg_fatal("could not open file \"%s\": %m", filename);
 
