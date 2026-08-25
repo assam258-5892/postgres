@@ -541,7 +541,7 @@ check_backup_label_files(int n_backups, char **backup_dirs)
 		/* Open the backup_label file. */
 		snprintf(pathbuf, MAXPGPATH, "%s/backup_label", backup_dirs[i]);
 		pg_log_debug("reading \"%s\"", pathbuf);
-		if ((fd = open(pathbuf, O_RDONLY, 0)) < 0)
+		if ((fd = pg_open(pathbuf, O_RDONLY, 0)) < 0)
 			pg_fatal("could not open file \"%s\": %m", pathbuf);
 
 		/*
