@@ -569,7 +569,7 @@ _readExtensibleNode(ReadNodeContext *ctx)
 }
 
 static RPRPattern *
-_readRPRPattern(void)
+_readRPRPattern(ReadNodeContext *ctx)
 {
 	READ_LOCALS(RPRPattern);
 
@@ -578,17 +578,17 @@ _readRPRPattern(void)
 	READ_INT_FIELD(numElements);
 
 	/* Read varNames array */
-	token = pg_strtok(&length); /* skip :varNames */
-	token = pg_strtok(&length); /* get '(' or '<>' */
+	token = pg_strtok(ctx, &length);	/* skip :varNames */
+	token = pg_strtok(ctx, &length);	/* get '(' or '<>' */
 	if (local_node->numVars > 0 && token[0] == '(')
 	{
 		local_node->varNames = palloc_array(char *, local_node->numVars);
 		for (int i = 0; i < local_node->numVars; i++)
 		{
-			token = pg_strtok(&length);
+			token = pg_strtok(ctx, &length);
 			local_node->varNames[i] = debackslash(token, length);
 		}
-		token = pg_strtok(&length); /* skip ')' */
+		token = pg_strtok(ctx, &length);	/* skip ')' */
 	}
 	else
 	{
@@ -596,8 +596,8 @@ _readRPRPattern(void)
 	}
 
 	/* Read elements array */
-	token = pg_strtok(&length); /* skip :elements */
-	token = pg_strtok(&length); /* get '(' */
+	token = pg_strtok(ctx, &length);	/* skip :elements */
+	token = pg_strtok(ctx, &length);	/* get '(' */
 	/* out always emits the array (makeRPRPattern guarantees numElements >= 2) */
 	Assert(local_node->numElements > 0 && token[0] == '(');
 	local_node->elements = palloc0_array(RPRPatternElement, local_node->numElements);
@@ -613,21 +613,21 @@ _readRPRPattern(void)
 					jump;
 
 		/* Parse "(varId depth flags min max next jump)" */
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		varId = atoi(token);
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		depth = atoi(token);
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		flags = atoi(token);
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		min = atoi(token);
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		max = atoi(token);
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		next = atoi(token);
-		token = pg_strtok(&length);
+		token = pg_strtok(ctx, &length);
 		jump = atoi(token);
-		token = pg_strtok(&length); /* skip ')' */
+		token = pg_strtok(ctx, &length);	/* skip ')' */
 
 		elem->varId = (RPRVarId) varId;
 		elem->flags = (RPRElemFlags) flags;
@@ -639,7 +639,7 @@ _readRPRPattern(void)
 
 		/* Read next element's '(' or end */
 		if (i < local_node->numElements - 1)
-			token = pg_strtok(&length); /* get '(' */
+			token = pg_strtok(ctx, &length);	/* get '(' */
 	}
 
 	READ_BOOL_FIELD(isAbsorbable);
