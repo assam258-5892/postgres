@@ -2890,6 +2890,32 @@ eval_const_expressions_mutator(Node *node,
 
 				return (Node *) newexpr;
 			}
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *expr = (RPRNavExpr *) node;
+				RPRNavExpr *newexpr = makeNode(RPRNavExpr);
+
+				memcpy(newexpr, expr, sizeof(RPRNavExpr));
+
+				/*
+				 * Folding the argument is safe because the column reference
+				 * the parser requires of it survives the pull-ups; see
+				 * pullup_replace_vars_callback().
+				 */
+				newexpr->arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->arg,
+												   context);
+
+				newexpr->offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->offset_arg,
+												   context);
+
+				newexpr->compound_offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) expr->compound_offset_arg,
+												   context);
+
+				return (Node *) newexpr;
+			}
 		case T_FuncExpr:
 			{
 				FuncExpr   *expr = (FuncExpr *) node;

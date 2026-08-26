@@ -2067,6 +2067,29 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val / 0) > 0);
 ERROR:  division by zero
+-- A constant subexpression of the argument is folded away, so the pattern
+-- does not recompute it per row.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(val + 2 * 3) > 0);
+ id | cnt 
+----+-----
+  1 |   0
+  2 |   4
+  3 |   0
+  4 |   0
+  5 |   0
+(5 rows)
+
+-- Folding a constant subexpression can raise where the whole argument would
+-- not have: unlike val / 0 above, 1 / 0 does not depend on the row, so it is
+-- reached at plan time even on the row PREV misses on.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val + 1 / 0) > 0);
+ERROR:  division by zero
 -- Here the null reaches the DEFINE predicate itself instead of an IS NULL
 -- An all-NULL target row would have made v IS NULL true and matched the
 -- first row, so this pins the predicate side of the same behaviour.
@@ -2080,9 +2103,10 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTER
   2 |   0
 (2 rows)
 
--- Constant folding can leave a navigation argument with no column reference
--- at all (v folds to 10, so PREV(v IS NULL) becomes PREV(false)), which the
--- planner has to accept rather than re-run the parse-time rejection.
+-- Pulling up the VALUES substitutes 10 for v, which is not what the column
+-- stood for under a navigation: the argument reads the row the navigation
+-- lands on, not this one.  The replacement is wrapped in a PlaceHolderVar
+-- rather than folded through.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
@@ -2092,14 +2116,130 @@ WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE
   1 |   0
 (1 row)
 
--- XXX Folding evaluates the argument while planning, with the current row's
--- value standing in for the target row's, so this divides by zero even though
--- PREV has no row to navigate to.
+-- That wrapping is what keeps this one from raising: the divisor is constant
+-- but the dividend is not folded through, so the division stands until
+-- execution, where PREV has no row to navigate to and never reaches it.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+ id | cnt 
+----+-----
+  1 |   0
+(1 row)
+
+-- A pulled-up subquery and a function RTE that folded to a constant reach a
+-- navigation argument the same way, so both are wrapped as well.
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT 1 AS id, 10 AS v) t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+ id | cnt 
+----+-----
+  1 |   0
+(1 row)
+
+SELECT count(*) OVER w AS cnt
+FROM abs(-10) AS v
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+ cnt 
+-----
+   0
+(1 row)
+
+-- Only the argument is protected.  One level outside the navigation the same
+-- column is replaced and folded as it is anywhere else, and the division
+-- raises at plan time -- as it does for the same WHERE clause over the same
+-- one-row VALUES, with no pattern in sight.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS v / 0 > 0);
 ERROR:  division by zero
+-- A replacement that still depends on the row is left unwrapped, because it
+-- is what the column meant at whichever row the navigation lands on.
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(v) > 0);
+ id | cnt 
+----+-----
+  1 |   0
+  2 |   4
+  3 |   0
+  4 |   0
+  5 |   0
+(5 rows)
+
+-- Nesting: the inner navigation's argument is below the outer one's, so the
+-- column there is wrapped too.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(LAST(v / 0, 1), 2) > 0);
+ id | cnt 
+----+-----
+  1 |   0
+(1 row)
+
+-- eval_const_expressions() must perform a few rewrites on every expression
+-- it is handed -- a CollateExpr becomes a RelabelType, named arguments become
+-- positional, omitted defaults are inserted -- and preprocess_expression()
+-- documents them as mandatory, not as optimizations.  Each of the three below
+-- reaches the executor only if those rewrites reach inside a navigation
+-- argument, and each returns what the same expression one level outside the
+-- navigation returns.
+CREATE TABLE rpr_nav_txt (id int, s text);
+INSERT INTO rpr_nav_txt VALUES (1, 'b'), (2, 'c'), (3, 'a');
+CREATE FUNCTION rpr_nav_named(a int, b int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT $1 * 10 + $2';
+CREATE FUNCTION rpr_nav_dflt(a int, b int DEFAULT 100) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT $2';
+-- COLLATE under a navigation: the executor has no CollateExpr step, so the
+-- RelabelType rewrite has to reach here.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_txt
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(s COLLATE "C") > 'a');
+ id | cnt 
+----+-----
+  1 |   0
+  2 |   2
+  3 |   0
+(3 rows)
+
+-- Named arguments under a navigation: the executor has no NamedArgExpr step.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_named(b => 7, a => val)) > 0);
+ id | cnt 
+----+-----
+  1 |   0
+  2 |   4
+  3 |   0
+  4 |   0
+  5 |   0
+(5 rows)
+
+-- An omitted default under a navigation: without the insertion the call is
+-- initialized with one fewer argument than the callee reads.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_dflt(val)) = 100);
+ id | cnt 
+----+-----
+  1 |   0
+  2 |   4
+  3 |   0
+  4 |   0
+  5 |   0
+(5 rows)
+
+DROP FUNCTION rpr_nav_dflt(int, int);
+DROP FUNCTION rpr_nav_named(int, int);
+DROP TABLE rpr_nav_txt;
 -- PREV function - reference previous row in pattern
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
