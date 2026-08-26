@@ -174,6 +174,8 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 								   windef->frameLocation >= 0 ?
 								   windef->frameLocation : windef->location));
 
+	Assert(wc->frameOptions & FRAMEOPTION_ROWS);
+
 	/* Assign AFTER MATCH SKIP TO flag */
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
 
