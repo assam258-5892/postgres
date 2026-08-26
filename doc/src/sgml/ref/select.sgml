@@ -1014,7 +1014,7 @@ WINDOW <replaceable class="parameter">window_name</replaceable> AS ( <replaceabl
     The <replaceable class="parameter">frame_clause</replaceable> can be one of
 
 <synopsis>
-{ RANGE | ROWS | GROUPS } <replaceable>frame_start</replaceable> [ <replaceable>frame_exclusion</replaceable> ] [ <replaceable>row_pattern_common_syntax</replaceable> ]
+{ RANGE | ROWS | GROUPS } <replaceable>frame_start</replaceable> [ <replaceable>frame_exclusion</replaceable> ]
 { RANGE | ROWS | GROUPS } BETWEEN <replaceable>frame_start</replaceable> AND <replaceable>frame_end</replaceable> [ <replaceable>frame_exclusion</replaceable> ] [ <replaceable>row_pattern_common_syntax</replaceable> ]
 </synopsis>
 
@@ -1210,7 +1210,6 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    <para>
     Note that the maximum number of unique pattern variables
     used in the <literal>PATTERN</literal> clause is 240.
-    If this limit is exceeded, an error will be raised.
     Additionally, the maximum nesting depth of pattern groups
     (parentheses) is 254 levels.  An alternation costs a level of its own,
     so a pattern that nests alternations reaches the limit at about half
@@ -1268,6 +1267,19 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     <xref linkend="syntax-window-functions"/>, and
     <xref linkend="queries-window"/>.
    </para>
+
+   <warning>
+    <para>
+     According to the SQL standard, a column reference in a
+     <literal>DEFINE</literal> clause cannot be qualified by a table name or
+     alias; only row pattern variables may be used as qualifiers there.
+     Column names referenced in <literal>DEFINE</literal> must therefore be
+     unique across the entire <literal>FROM</literal> clause; an ambiguous
+     name is rejected.  The workaround is to rename columns in the
+     <literal>FROM</literal> clause (for example, with a column alias in a
+     subquery).
+    </para>
+   </warning>
   </refsect2>
 
   <refsect2 id="sql-select-list" xreflabel="SELECT List">
