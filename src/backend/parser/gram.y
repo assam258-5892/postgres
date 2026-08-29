@@ -17942,6 +17942,17 @@ row_pattern_quantifier_opt:
 								errmsg("unsupported quantifier \"%s\"", rpr_invalid_quantifier_token($1)),
 								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
 								parser_errposition(@1));
+					/*
+					 * A first token ending in "|" carries the alternation
+					 * operator, so what comes after it has to be a pattern.
+					 * An Op never is one, and naming the pair would describe
+					 * a quantifier the token only half spells.
+					 */
+					if (strchr($1, '|') != NULL)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("alternation operator \"|\" requires a pattern on both sides"),
+								parser_errposition(@2));
 					if (strcmp($1, "?") != 0)
 						ereport(ERROR,
 								errcode(ERRCODE_SYNTAX_ERROR),
