@@ -355,19 +355,36 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		defineClause = lappend(defineClause, teDefine);
 
 		/*
-		 * Pull out Var nodes from the transformed expression and ensure each
-		 * one is present in the targetlist.  This is needed so the planner
-		 * propagates the referenced columns through the plan tree, making
-		 * them available to the WindowAgg's DEFINE evaluation.
+		 * A DEFINE expression lives in wc->defineClause, not in the
+		 * targetlist, so make_window_input_target() never sees it when
+		 * deciding what the WindowAgg's input must carry.  Yet setrefs.c must
+		 * resolve every Var in the DEFINE clause to a column of that input,
+		 * and fails on any column nothing else put there.  Hence what a
+		 * DEFINE expression reads must be planted in the targetlist as
+		 * resjunk entries.
+		 *
+		 * Plant bare Vars, not subexpressions.  A subexpression the target
+		 * list already carries looks like a shortcut, but the two copies are
+		 * preprocessed independently: given DEFINE A AS ROW(v, 1) IS NOT
+		 * NULL, eval_const_expressions() breaks the DEFINE copy into per
+		 * field tests and leaves a bare v behind, with nothing in the input
+		 * to resolve it against.  A bare Var has no such shape to lose.
+		 *
+		 * Whatever is planted has to reach the WindowAgg's input on its own:
+		 * make_window_input_target() derives that input from final_target and
+		 * adds nothing of its own for DEFINE, and
+		 * remove_unused_subquery_outputs() keeps a column alive only for an
+		 * entry that is resjunk or bears a sortgroupref, or that its own
+		 * DEFINE guard matches.  A resjunk entry qualifies.
 		 *
 		 * The walk stops at a subexpression GROUP BY computes and plants
 		 * nothing for it.  parseCheckAggregates() replaces such a
 		 * subexpression with the grouping step's Var on both sides -- here
 		 * and in the target list entry holding the same expression -- so the
 		 * two copies still meet, and that entry bears a sortgroupref, which
-		 * is enough to keep its column alive.  Planting the columns
+		 * the paragraph above says is enough.  Planting the columns
 		 * underneath it instead would offer them to the grouping logic on
-		 * their own, which does not make them available that way and reports
+		 * their own, which does not make them available that way, and reports
 		 * them as ungrouped.  The stop reads groupClause rather than a
 		 * sortgroupref, or the window's own ORDER BY would trip it in a query
 		 * that does no grouping at all.

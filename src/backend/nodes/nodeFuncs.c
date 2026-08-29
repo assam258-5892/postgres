@@ -2847,6 +2847,15 @@ query_tree_walker_impl(Query *query,
 		/*
 		 * But we need to walk the expressions under WindowClause nodes even
 		 * if we're not interested in SortGroupClause nodes.
+		 *
+		 * Note that defineClause (row pattern recognition) is an expression
+		 * tree owned by the window clause itself, not a reference into the
+		 * targetlist the way partitionClause and orderClause are.  Every
+		 * Query-wide walker and rewriter therefore reaches its Vars and must
+		 * be able to treat them as live.  Whoever decides that a window
+		 * clause will not be executed is responsible for emptying
+		 * defineClause at that moment, rather than expecting later scans to
+		 * skip it.
 		 */
 		ListCell   *lc;
 
