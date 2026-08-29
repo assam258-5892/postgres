@@ -574,7 +574,7 @@ define_walker(Node *node, void *context)
 				(void) define_walker((Node *) nav->offset_arg, ctx);
 				if (ctx->has_column_ref)
 					ereport(ERROR,
-							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errcode(ERRCODE_SYNTAX_ERROR),
 							errmsg("row pattern navigation offset must be a run-time constant"),
 							parser_errposition(ctx->pstate, exprLocation((Node *) nav->offset_arg)));
 			}
@@ -584,7 +584,7 @@ define_walker(Node *node, void *context)
 				(void) define_walker((Node *) nav->compound_offset_arg, ctx);
 				if (ctx->has_column_ref)
 					ereport(ERROR,
-							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errcode(ERRCODE_SYNTAX_ERROR),
 							errmsg("row pattern navigation offset must be a run-time constant"),
 							parser_errposition(ctx->pstate, exprLocation((Node *) nav->compound_offset_arg)));
 			}
