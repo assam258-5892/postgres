@@ -577,40 +577,47 @@ _readRPRPattern(ReadNodeContext *ctx)
 	READ_INT_FIELD(maxDepth);
 	READ_INT_FIELD(numElements);
 
-	/* Read varNames array */
+	/*
+	 * Read varNames array.  _outRPRPattern() always writes the list, so every
+	 * token here has one spelling and any other input is malformed. The
+	 * delimiters are checked rather than counted on, because a numVars that
+	 * disagrees with the list would otherwise leave the token stream off by
+	 * one for everything that follows.
+	 */
 	token = pg_strtok(ctx, &length);	/* skip :varNames */
-	token = pg_strtok(ctx, &length);	/* get '(' or '<>' */
-	if (local_node->numVars > 0 && token[0] == '(')
+	token = pg_strtok(ctx, &length);	/* get '(' */
+	if (local_node->numVars <= 0 || token == NULL || token[0] != '(')
+		elog(ERROR, "unexpected varNames in RPRPattern");
+	local_node->varNames = palloc_array(char *, local_node->numVars);
+	for (int i = 0; i < local_node->numVars; i++)
 	{
-		local_node->varNames = palloc_array(char *, local_node->numVars);
-		for (int i = 0; i < local_node->numVars; i++)
-		{
-			token = pg_strtok(ctx, &length);
-			local_node->varNames[i] = debackslash(token, length);
-		}
-		token = pg_strtok(ctx, &length);	/* skip ')' */
+		token = pg_strtok(ctx, &length);
+		if (token == NULL)
+			elog(ERROR, "unexpected end of RPRPattern varNames");
+		local_node->varNames[i] = nullable_string(token, length);
 	}
-	else
-	{
-		local_node->varNames = NULL;
-	}
+	token = pg_strtok(ctx, &length);	/* get ')' */
+	if (token == NULL || token[0] != ')')
+		elog(ERROR, "unterminated varNames in RPRPattern");
 
 	/* Read elements array */
 	token = pg_strtok(ctx, &length);	/* skip :elements */
 	token = pg_strtok(ctx, &length);	/* get '(' */
 	/* out always emits the array (makeRPRPattern guarantees numElements >= 2) */
-	Assert(local_node->numElements > 0 && token[0] == '(');
+	if (local_node->numElements <= 0 || token == NULL || token[0] != '(')
+		elog(ERROR, "unexpected elements in RPRPattern");
+	/* palloc0 also zeroes reserved, which the round trip drops */
 	local_node->elements = palloc0_array(RPRPatternElement, local_node->numElements);
 	for (int i = 0; i < local_node->numElements; i++)
 	{
 		RPRPatternElement *elem = &local_node->elements[i];
 		int			varId,
-					flags,
 					depth,
 					min,
 					max,
 					next,
 					jump;
+		unsigned int flags;		/* written with %u, unlike the others */
 
 		/* Parse "(varId depth flags min max next jump)" */
 		token = pg_strtok(ctx, &length);
@@ -618,7 +625,7 @@ _readRPRPattern(ReadNodeContext *ctx)
 		token = pg_strtok(ctx, &length);
 		depth = atoi(token);
 		token = pg_strtok(ctx, &length);
-		flags = atoi(token);
+		flags = atoui(token);
 		token = pg_strtok(ctx, &length);
 		min = atoi(token);
 		token = pg_strtok(ctx, &length);
@@ -627,7 +634,9 @@ _readRPRPattern(ReadNodeContext *ctx)
 		next = atoi(token);
 		token = pg_strtok(ctx, &length);
 		jump = atoi(token);
-		token = pg_strtok(ctx, &length);	/* skip ')' */
+		token = pg_strtok(ctx, &length);	/* get ')' */
+		if (token == NULL || token[0] != ')')
+			elog(ERROR, "unterminated element in RPRPattern");
 
 		elem->varId = (RPRVarId) varId;
 		elem->flags = (RPRElemFlags) flags;
@@ -639,7 +648,11 @@ _readRPRPattern(ReadNodeContext *ctx)
 
 		/* Read next element's '(' or end */
 		if (i < local_node->numElements - 1)
+		{
 			token = pg_strtok(ctx, &length);	/* get '(' */
+			if (token == NULL || token[0] != '(')
+				elog(ERROR, "unexpected end of RPRPattern elements");
+		}
 	}
 
 	READ_BOOL_FIELD(isAbsorbable);

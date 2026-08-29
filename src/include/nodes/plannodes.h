@@ -1266,6 +1266,12 @@ typedef int16 RPRElemIdx;		/* element array index */
  *
  * Layout optimized for alignment (no padding holes):
  *   varId(1) + depth(1) + flags(1) + reserved(1) + min(4) + max(4) + next(2) + jump(2)
+ *
+ * reserved is padding and is not serialized: the round trip drops it.
+ * _outRPRPattern() writes the other seven fields and _readRPRPattern() zeroes
+ * this one, so that format string is the whole of what crosses.
+ * _copyRPRPattern() memcpy()s the struct and therefore carries all eight.  A
+ * field that takes this byte over has to join the seven first.
  */
 typedef struct RPRPatternElement
 {
