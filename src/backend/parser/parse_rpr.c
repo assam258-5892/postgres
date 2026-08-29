@@ -58,6 +58,7 @@ static void validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 static List *transformDefineClause(ParseState *pstate, WindowDef *windef,
 								   List **targetlist);
 static bool define_walker(Node *node, void *context);
+static bool rpr_frame_is_supported(int frameOptions);
 
 /*
  * transformRPR
@@ -85,92 +86,34 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	if (windef->rpCommonSyntax == NULL)
 		return;
 
-	/* Check Frame options */
-
-	/* Frame type must be "ROW" */
-	if (wc->frameOptions & FRAMEOPTION_GROUPS)
-		ereport(ERROR,
-				errcode(ERRCODE_WINDOWING_ERROR),
-				errmsg("cannot use FRAME option GROUPS with row pattern recognition"),
-				errhint("Use ROWS instead."),
-				parser_errposition(pstate,
-								   windef->frameLocation >= 0 ?
-								   windef->frameLocation : windef->location));
-	if (wc->frameOptions & FRAMEOPTION_RANGE)
-		ereport(ERROR,
-				errcode(ERRCODE_WINDOWING_ERROR),
-				errmsg("cannot use FRAME option RANGE with row pattern recognition"),
-				errhint("Use ROWS instead."),
-				parser_errposition(pstate,
-								   windef->frameLocation >= 0 ?
-								   windef->frameLocation : windef->location));
-
-	/* Frame must start at current row */
-	if ((wc->frameOptions & FRAMEOPTION_START_CURRENT_ROW) == 0)
-	{
-		const char *frameType = "ROWS";
-		const char *startBound = "unknown";
-
-		/* Determine current start bound */
-		if (wc->frameOptions & FRAMEOPTION_START_UNBOUNDED_PRECEDING)
-			startBound = "UNBOUNDED PRECEDING";
-		else if (wc->frameOptions & FRAMEOPTION_START_OFFSET_PRECEDING)
-			startBound = "offset PRECEDING";
-		else if (wc->frameOptions & FRAMEOPTION_START_OFFSET_FOLLOWING)
-			startBound = "offset FOLLOWING";
-
-		/* At least one valid frame start option should be set */
-		Assert((wc->frameOptions & FRAMEOPTION_START_UNBOUNDED_PRECEDING) ||
-			   (wc->frameOptions & FRAMEOPTION_START_OFFSET_PRECEDING) ||
-			   (wc->frameOptions & FRAMEOPTION_START_OFFSET_FOLLOWING));
-
-		ereport(ERROR,
-				errcode(ERRCODE_WINDOWING_ERROR),
-				errmsg("FRAME must start at CURRENT ROW when using row pattern recognition"),
-				errdetail("Current frame starts with %s.", startBound),
-				errhint("Use: %s BETWEEN CURRENT ROW AND ...", frameType),
-				parser_errposition(pstate, windef->frameLocation >= 0 ? windef->frameLocation : windef->location));
-	}
-
-	/* EXCLUDE options are not permitted */
-	if ((wc->frameOptions & FRAMEOPTION_EXCLUSION) != 0)
-	{
-		const char *excludeType = "EXCLUDE";
-
-		/* Determine which EXCLUDE option was used */
-		if (wc->frameOptions & FRAMEOPTION_EXCLUDE_CURRENT_ROW)
-			excludeType = "EXCLUDE CURRENT ROW";
-		else if (wc->frameOptions & FRAMEOPTION_EXCLUDE_GROUP)
-			excludeType = "EXCLUDE GROUP";
-		else if (wc->frameOptions & FRAMEOPTION_EXCLUDE_TIES)
-			excludeType = "EXCLUDE TIES";
-
-		/* At least one valid exclude option should be set */
-		Assert((wc->frameOptions & FRAMEOPTION_EXCLUDE_CURRENT_ROW) ||
-			   (wc->frameOptions & FRAMEOPTION_EXCLUDE_GROUP) ||
-			   (wc->frameOptions & FRAMEOPTION_EXCLUDE_TIES));
-
-		ereport(ERROR,
-				errcode(ERRCODE_WINDOWING_ERROR),
-				errmsg("cannot use EXCLUDE options with row pattern recognition"),
-				errdetail("Frame definition includes %s.", excludeType),
-				errhint("Remove the EXCLUDE clause from the window definition."),
-				parser_errposition(pstate, windef->excludeLocation >= 0 ? windef->excludeLocation : windef->location));
-	}
-
 	/*
-	 * The standard allows only UNBOUNDED FOLLOWING or a positive offset
-	 * FOLLOWING as the frame end.  The equivalent 0 FOLLOWING spelling is
-	 * caught at runtime in calculate_frame_offsets().
+	 * Row pattern recognition matches over one frame shape: ROWS, starting at
+	 * CURRENT ROW, ending at UNBOUNDED FOLLOWING or a positive offset
+	 * FOLLOWING, with no EXCLUDE.  A window that carries no frame clause of
+	 * its own still has a frame, so the report states what the frame has to
+	 * be rather than naming an option the query may never have written.
 	 */
-	if (wc->frameOptions & FRAMEOPTION_END_CURRENT_ROW)
+	if (!rpr_frame_is_supported(wc->frameOptions))
+	{
+		int			location = windef->location;
+
+		/*
+		 * EXCLUDE has a location of its own and the frame type keyword has
+		 * another; either beats the start of the window definition, which is
+		 * all a defaulted frame leaves to point at.
+		 */
+		if ((wc->frameOptions & FRAMEOPTION_EXCLUSION) &&
+			windef->excludeLocation >= 0)
+			location = windef->excludeLocation;
+		else if (windef->frameLocation >= 0)
+			location = windef->frameLocation;
+
 		ereport(ERROR,
 				errcode(ERRCODE_WINDOWING_ERROR),
-				errmsg("cannot use CURRENT ROW as frame end with row pattern recognition"),
-				errhint("Use UNBOUNDED FOLLOWING or a positive offset FOLLOWING."),
-				parser_errposition(pstate,
-								   windef->frameLocation >= 0 ?
-								   windef->frameLocation : windef->location));
+				errmsg("unsupported frame for row pattern recognition"),
+				errdetail("The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause."),
+				parser_errposition(pstate, location));
+	}
 
 	/* Assign AFTER MATCH SKIP TO flag */
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
@@ -180,6 +123,30 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 
 	/* Store PATTERN parse tree for deparsing */
 	wc->rpPattern = windef->rpCommonSyntax->rpPattern;
+}
+
+/*
+ * rpr_frame_is_supported
+ *		Is this the frame shape row pattern recognition matches over?
+ *
+ * ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or the same with a
+ * positive offset FOLLOWING as the end.  The offset's value is not settled
+ * until execution; calculate_frame_offsets() rejects a non-positive one.
+ */
+static bool
+rpr_frame_is_supported(int frameOptions)
+{
+	if ((frameOptions & FRAMEOPTION_ROWS) == 0)
+		return false;
+	if ((frameOptions & FRAMEOPTION_START_CURRENT_ROW) == 0)
+		return false;
+	if ((frameOptions & (FRAMEOPTION_END_UNBOUNDED_FOLLOWING |
+						 FRAMEOPTION_END_OFFSET_FOLLOWING)) == 0)
+		return false;
+	if (frameOptions & FRAMEOPTION_EXCLUSION)
+		return false;
+
+	return true;
 }
 
 /*
