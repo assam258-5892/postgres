@@ -1692,12 +1692,21 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS random() > 0.5)) s
 ORDER BY id;
 
--- ERROR: OFFSET 0 keeps the subquery, so its DEFINE is checked
+-- OFFSET 0 keeps the subquery, but still no OVER references the window, so
+-- the planner withdraws the DEFINE clause of a window it will not run and the
+-- check finds nothing left to reject
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
+
+-- ERROR: a subquery window that does run keeps its DEFINE, so it is checked
+SELECT id, c FROM (
+ SELECT id, count(*) OVER w AS c FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) sub;
 
 -- WHERE false makes the subquery rel dummy, so the planner never plans it
 -- and nothing looks at its DEFINE
