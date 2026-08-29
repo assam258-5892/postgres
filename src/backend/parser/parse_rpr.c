@@ -347,6 +347,13 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		 * field tests and leaves a bare v behind, with nothing in the input
 		 * to resolve it against.  A bare Var has no such shape to lose.
 		 *
+		 * Whatever is planted has to reach the WindowAgg's input on its own:
+		 * make_window_input_target() derives that input from final_target and
+		 * adds nothing of its own for DEFINE, and
+		 * remove_unused_subquery_outputs() keeps a column alive only for an
+		 * entry that is resjunk or bears a sortgroupref, or that its own
+		 * DEFINE guard matches.  A resjunk entry qualifies.
+		 *
 		 * XXX This is why a DEFINE clause cannot repeat a grouping
 		 * expression: the Var planted for it is not a grouping column of its
 		 * own, so grouping reports it as ungrouped.  It goes away with the
