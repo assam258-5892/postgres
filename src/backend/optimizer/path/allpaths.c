@@ -4812,6 +4812,57 @@ recurse_push_qual(Node *setOp, Query *topquery,
  *****************************************************************************/
 
 /*
+ * subquery_output_is_unneeded
+ *		Can remove_unused_subquery_outputs() replace this entry with a null?
+ *
+ * This answers for the reasons that apply to any entry.  The DEFINE-clause
+ * protection is not among them: it only ever holds on to a Var, and it needs
+ * an active window set that is not settled until the window function entries
+ * have been decided.
+ */
+static bool
+subquery_output_is_unneeded(Query *subquery, TargetEntry *tle,
+							Bitmapset *attrs_used)
+{
+	Node	   *texpr = (Node *) tle->expr;
+
+	/*
+	 * If it has a sortgroupref number, it's used in some sort/group clause so
+	 * we'd better not remove it.  Also, don't remove any resjunk columns,
+	 * since their reason for being has nothing to do with anybody reading the
+	 * subquery's output.  (It's likely that resjunk columns in a sub-SELECT
+	 * would always have ressortgroupref set, but even if they don't, it seems
+	 * imprudent to remove them.)
+	 */
+	if (tle->ressortgroupref || tle->resjunk)
+		return false;
+
+	/*
+	 * If it's used by the upper query, we can't remove it.
+	 */
+	if (bms_is_member(tle->resno - FirstLowInvalidHeapAttributeNumber,
+					  attrs_used))
+		return false;
+
+	/*
+	 * If it contains a set-returning function, we can't remove it since that
+	 * could change the number of rows returned by the subquery.
+	 */
+	if (subquery->hasTargetSRFs &&
+		expression_returns_set(texpr))
+		return false;
+
+	/*
+	 * If it contains volatile functions, we daren't remove it for fear that
+	 * the user is expecting their side-effects to happen.
+	 */
+	if (contain_volatile_functions(texpr))
+		return false;
+
+	return true;
+}
+
+/*
  * remove_unused_subquery_outputs
  *		Remove subquery targetlist items we don't need
  *
@@ -4838,6 +4889,8 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 {
 	Bitmapset  *attrs_used;
 	ListCell   *lc;
+	WindowFuncLists *wflists = NULL;
+	bool		has_rpr = false;
 
 	/*
 	 * Just point directly to extra_used_attrs. No need to bms_copy as none of
@@ -4887,6 +4940,48 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		return;
 
 	/*
+	 * If the subquery uses row pattern recognition, work out which of its
+	 * window clauses will still be active once this function is done, so that
+	 * the DEFINE guard below does not hold a column alive for one that will
+	 * not be.  select_active_windows() keeps a window clause only while some
+	 * window function references it, and the loop below is what removes those
+	 * references, so settle the window function entries first and read the
+	 * active set off what they leave.  Reading it from the targetlist as it
+	 * stands now would count a window function this call is about to remove.
+	 */
+	foreach_node(WindowClause, wc, subquery->windowClause)
+	{
+		if (wc->rpPattern != NULL)
+		{
+			has_rpr = true;
+			break;
+		}
+	}
+
+	if (has_rpr)
+	{
+		/*
+		 * A window function entry the upper query does not read is replaced
+		 * with a null Const, exactly as the loop below would replace it.  Its
+		 * window clause keeps whatever references survive that.
+		 */
+		foreach(lc, subquery->targetList)
+		{
+			TargetEntry *tle = (TargetEntry *) lfirst(lc);
+			Node	   *texpr = (Node *) tle->expr;
+
+			if (IsA(texpr, WindowFunc) &&
+				subquery_output_is_unneeded(subquery, tle, attrs_used))
+				tle->expr = (Expr *) makeNullConst(exprType(texpr),
+												   exprTypmod(texpr),
+												   exprCollation(texpr));
+		}
+
+		wflists = find_window_functions((Node *) subquery->targetList,
+										list_length(subquery->windowClause));
+	}
+
+	/*
 	 * Run through the tlist and zap entries we don't need.  It's okay to
 	 * modify the tlist items in-place because set_subquery_pathlist made a
 	 * copy of the subquery.
@@ -4896,37 +4991,7 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		TargetEntry *tle = (TargetEntry *) lfirst(lc);
 		Node	   *texpr = (Node *) tle->expr;
 
-		/*
-		 * If it has a sortgroupref number, it's used in some sort/group
-		 * clause so we'd better not remove it.  Also, don't remove any
-		 * resjunk columns, since their reason for being has nothing to do
-		 * with anybody reading the subquery's output.  (It's likely that
-		 * resjunk columns in a sub-SELECT would always have ressortgroupref
-		 * set, but even if they don't, it seems imprudent to remove them.)
-		 */
-		if (tle->ressortgroupref || tle->resjunk)
-			continue;
-
-		/*
-		 * If it's used by the upper query, we can't remove it.
-		 */
-		if (bms_is_member(tle->resno - FirstLowInvalidHeapAttributeNumber,
-						  attrs_used))
-			continue;
-
-		/*
-		 * If it contains a set-returning function, we can't remove it since
-		 * that could change the number of rows returned by the subquery.
-		 */
-		if (subquery->hasTargetSRFs &&
-			expression_returns_set(texpr))
-			continue;
-
-		/*
-		 * If it contains volatile functions, we daren't remove it for fear
-		 * that the user is expecting their side-effects to happen.
-		 */
-		if (contain_volatile_functions(texpr))
+		if (!subquery_output_is_unneeded(subquery, tle, attrs_used))
 			continue;
 
 		/*
@@ -4934,7 +4999,8 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		 * column in its DEFINE clause, don't remove it.  The DEFINE
 		 * expression needs these columns in the tuplestore slot for pattern
 		 * matching evaluation, even if the outer query doesn't reference
-		 * them.
+		 * them.  This is the only protection: nothing downstream re-adds a
+		 * DEFINE column to the WindowAgg's input target.
 		 */
 		if (IsA(texpr, Var))
 		{
@@ -4943,7 +5009,9 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 
 			foreach_node(WindowClause, wc, subquery->windowClause)
 			{
-				if (wc->defineClause != NIL)
+				if (wc->defineClause != NIL &&
+					wflists != NULL &&
+					wflists->windowFuncs[wc->winref] != NIL)
 				{
 					/*
 					 * flags == 0 is safe: DEFINE rejects aggregates, window
@@ -4954,15 +5022,11 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 
 					foreach_node(Var, dvar, vars)
 					{
-
 						/*
-						 * Match varno as well as varattno: a Var pulled from
-						 * a DEFINE clause can share an attribute number with
-						 * an unrelated output column of a different relation,
-						 * which would otherwise be over-retained.  Checking
-						 * varlevelsup is just paranoia, since outer
-						 * references in DEFINE are rejected during parse
-						 * analysis.
+						 * Match varno too: varattno alone can collide with an
+						 * unrelated column of another relation. varlevelsup
+						 * is paranoia, since DEFINE rejects outer references
+						 * at parse time.
 						 */
 						if (dvar->varno == var->varno &&
 							dvar->varattno == var->varattno &&
@@ -4978,32 +5042,6 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 				}
 			}
 			if (needed_by_define)
-				continue;
-		}
-
-		/*
-		 * If it's a window function referencing a window clause with RPR,
-		 * don't remove it.  Even when the window function result is unused by
-		 * the outer query, the RPR pattern matching (frame reduction via
-		 * DEFINE/PATTERN) must still execute.  Replacing this with NULL would
-		 * leave no active window functions for the WindowClause, causing the
-		 * planner to omit the WindowAgg node entirely.
-		 */
-		if (IsA(texpr, WindowFunc))
-		{
-			bool		is_rpr = false;
-			WindowFunc *wfunc = (WindowFunc *) texpr;
-
-			foreach_node(WindowClause, wc, subquery->windowClause)
-			{
-				if (wc->winref == wfunc->winref && wc->defineClause != NIL)
-				{
-					is_rpr = true;
-					break;
-				}
-			}
-
-			if (is_rpr)
 				continue;
 		}
 
