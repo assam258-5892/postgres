@@ -493,11 +493,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  FRAME must start at CURRENT ROW when using row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
             ^
-DETAIL:  Current frame starts with UNBOUNDED PRECEDING.
-HINT:  Use: ROWS BETWEEN CURRENT ROW AND ...
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- EXCLUDE options
 -- EXCLUDE not permitted
 SELECT COUNT(*) OVER w
@@ -509,11 +508,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use EXCLUDE options with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 6:     EXCLUDE CURRENT ROW
             ^
-DETAIL:  Frame definition includes EXCLUDE CURRENT ROW.
-HINT:  Remove the EXCLUDE clause from the window definition.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- EXCLUDE GROUP not permitted
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -524,11 +522,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use EXCLUDE options with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 6:     EXCLUDE GROUP
             ^
-DETAIL:  Frame definition includes EXCLUDE GROUP.
-HINT:  Remove the EXCLUDE clause from the window definition.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- EXCLUDE TIES not permitted
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -539,11 +536,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use EXCLUDE options with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 6:     EXCLUDE TIES
             ^
-DETAIL:  Frame definition includes EXCLUDE TIES.
-HINT:  Remove the EXCLUDE clause from the window definition.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- range frame is not allowed with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -553,10 +549,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use FRAME option RANGE with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWIN...
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- GROUPS frame is not allowed with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -566,10 +562,24 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use FRAME option GROUPS with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     GROUPS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWI...
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
+-- omitting the frame clause leaves the standard default, RANGE BETWEEN
+-- UNBOUNDED PRECEDING AND CURRENT ROW, which breaks three of the rules at
+-- once.  One report, stating what the frame has to be.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+ERROR:  unsupported frame for row pattern recognition
+LINE 3: WINDOW w AS (
+                    ^
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- ERROR: frame must start at current row when row pattern recognition is used
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -579,11 +589,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  FRAME must start at CURRENT ROW when using row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN 1 PRECEDING AND UNBOUNDED FOLLOWING
             ^
-DETAIL:  Current frame starts with offset PRECEDING.
-HINT:  Use: ROWS BETWEEN CURRENT ROW AND ...
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- ERROR: frame must start at current row with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -593,11 +602,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  FRAME must start at CURRENT ROW when using row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
             ^
-DETAIL:  Current frame starts with offset FOLLOWING.
-HINT:  Use: ROWS BETWEEN CURRENT ROW AND ...
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- ERROR: end before start: CURRENT ROW AND 1 PRECEDING
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -634,10 +642,10 @@ WINDOW w AS (
     DEFINE A AS val > 0
 )
 ORDER BY id;
-ERROR:  cannot use CURRENT ROW as frame end with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN CURRENT ROW AND CURRENT ROW
             ^
-HINT:  Use UNBOUNDED FOLLOWING or a positive offset FOLLOWING.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- Zero offset: CURRENT ROW AND 0 FOLLOWING denotes the same one-row frame
 -- and is likewise rejected (caught at execution time).
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -756,10 +764,10 @@ WINDOW w AS (
     DEFINE A AS val >= 0, B AS val >= 0
 )
 ORDER BY id;
-ERROR:  cannot use FRAME option RANGE with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     RANGE BETWEEN CURRENT ROW AND 10 FOLLOWING
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 -- GROUPS frame with RPR (not permitted)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
@@ -771,10 +779,10 @@ WINDOW w AS (
     DEFINE A AS val >= 0, B AS val >= 0
 )
 ORDER BY id;
-ERROR:  cannot use FRAME option GROUPS with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     GROUPS BETWEEN CURRENT ROW AND 1 FOLLOWING
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 DROP TABLE rpr_frame;
 -- ============================================================
 -- PARTITION BY + FRAME Tests
@@ -818,10 +826,10 @@ WINDOW w AS (
     DEFINE A AS val >= 10, B AS val >= 20
 )
 ORDER BY id;
-ERROR:  cannot use FRAME option RANGE with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 6:     RANGE BETWEEN CURRENT ROW AND 10 FOLLOWING
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause.
 DROP TABLE rpr_partition;
 -- ============================================================
 -- PATTERN Syntax Tests

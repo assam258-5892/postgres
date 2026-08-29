@@ -459,6 +459,17 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
+-- omitting the frame clause leaves the standard default, RANGE BETWEEN
+-- UNBOUNDED PRECEDING AND CURRENT ROW, which breaks three of the rules at
+-- once.  One report, stating what the frame has to be.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+
 -- ERROR: frame must start at current row when row pattern recognition is used
 SELECT COUNT(*) OVER w
 FROM rpr_frame
