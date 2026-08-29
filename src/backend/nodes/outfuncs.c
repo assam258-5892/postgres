@@ -737,23 +737,27 @@ _outRPRPattern(StringInfo str, const RPRPattern *node)
 	WRITE_INT_FIELD(maxDepth);
 	WRITE_INT_FIELD(numElements);
 
-	/* Write varNames array as list of strings */
+	/*
+	 * Write varNames array as list of strings.  makeRPRPattern() guarantees
+	 * the array, so the list has exactly one spelling and the read side has
+	 * no second shape to interpret.
+	 */
 	appendStringInfoString(str, " :varNames");
-	if (node->numVars > 0 && node->varNames != NULL)
+	Assert(node->numVars > 0 && node->varNames != NULL);
+	appendStringInfoString(str, " (");
+	for (int i = 0; i < node->numVars; i++)
 	{
-		appendStringInfoString(str, " (");
-		for (int i = 0; i < node->numVars; i++)
-		{
-			if (i > 0)
-				appendStringInfoChar(str, ' ');
-			outToken(str, node->varNames[i]);
-		}
-		appendStringInfoChar(str, ')');
+		if (i > 0)
+			appendStringInfoChar(str, ' ');
+		outToken(str, node->varNames[i]);
 	}
-	else
-		appendStringInfoString(str, " <>");
+	appendStringInfoChar(str, ')');
 
-	/* Write elements array (makeRPRPattern guarantees numElements >= 2) */
+	/*
+	 * Write elements array (makeRPRPattern guarantees numElements >= 2).
+	 * Seven fields go out; the reserved byte is padding and stays behind --
+	 * see RPRPatternElement in plannodes.h.
+	 */
 	appendStringInfoString(str, " :elements");
 	Assert(node->numElements > 0 && node->elements != NULL);
 	appendStringInfoChar(str, ' ');
