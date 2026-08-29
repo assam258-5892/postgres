@@ -771,7 +771,14 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
 		Datum		result;
 		bool		isnull;
 
-		result = ExecEvalExpr(exprState, winstate->rprContext, &isnull);
+		/*
+		 * Switch into rprContext's per-tuple memory: ExecEvalExpr() does not
+		 * do it for us, and the predicate's scratch has to land in the
+		 * context that rpr_prepare_row() and nfa_reevaluate_dependent_vars()
+		 * reset, not in the caller's longer-lived one.
+		 */
+		result = ExecEvalExprSwitchContext(exprState, winstate->rprContext,
+										   &isnull);
 		varMatched[varId] = (!isnull && DatumGetBool(result)) ?
 			RPR_VAR_TRUE : RPR_VAR_FALSE;
 	}
