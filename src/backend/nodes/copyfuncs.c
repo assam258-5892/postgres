@@ -177,12 +177,16 @@ _copyRPRPattern(const RPRPattern *from)
 	COPY_SCALAR_FIELD(numElements);
 
 	/* Deep copy the varNames array (DEFINE clause is required) */
-	Assert(from->numVars > 0);
+	Assert(from->numVars > 0 && from->varNames != NULL);
 	newnode->varNames = palloc0_array(char *, from->numVars);
 	for (int i = 0; i < from->numVars; i++)
 		newnode->varNames[i] = pstrdup(from->varNames[i]);
 
-	/* Deep copy the elements array (always has at least one element + FIN) */
+	/*
+	 * Deep copy the elements array (always has at least one element + FIN).
+	 * This carries the whole struct, reserved byte included, where out/read
+	 * carry seven fields and zero that byte -- see RPRPatternElement.
+	 */
 	Assert(from->numElements >= 2);
 	newnode->elements = palloc_array(RPRPatternElement, from->numElements);
 	memcpy(newnode->elements, from->elements,
