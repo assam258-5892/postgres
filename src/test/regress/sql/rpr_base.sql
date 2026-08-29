@@ -1182,14 +1182,27 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- The first token is quoted as typed: stripping its "|" would name "*", and
--- "A* ?" is accepted, so the error would describe a pair the grammar takes
+-- A first token ending in "|" is a quantifier plus the alternation operator,
+-- so what follows it has to be a pattern and an Op never is one.  The report
+-- names the alternation rather than the pair: "A* ?" is accepted, so naming
+-- that pair would describe something the grammar takes.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A *| ?)
+    DEFINE A AS val > 0
+);
+
+-- the same for a glued two-character quantifier, where naming the pair would
+-- have to invent "*?" out of "*?|"
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *?| ??)
     DEFINE A AS val > 0
 );
 
