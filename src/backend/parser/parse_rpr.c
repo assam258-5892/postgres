@@ -332,10 +332,26 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		defineClause = lappend(defineClause, teDefine);
 
 		/*
-		 * Pull out Var nodes from the transformed expression and ensure each
-		 * one is present in the targetlist.  This is needed so the planner
-		 * propagates the referenced columns through the plan tree, making
-		 * them available to the WindowAgg's DEFINE evaluation.
+		 * A DEFINE expression lives in wc->defineClause, not in the
+		 * targetlist, so make_window_input_target() never sees it when
+		 * deciding what the WindowAgg's input must carry.  Yet setrefs.c must
+		 * resolve every Var in the DEFINE clause to a column of that input,
+		 * and fails on any column nothing else put there.  Hence what a
+		 * DEFINE expression reads must be planted in the targetlist as
+		 * resjunk entries.
+		 *
+		 * Plant bare Vars, not subexpressions.  A subexpression the target
+		 * list already carries looks like a shortcut, but the two copies are
+		 * preprocessed independently: given DEFINE A AS ROW(v, 1) IS NOT
+		 * NULL, eval_const_expressions() breaks the DEFINE copy into per
+		 * field tests and leaves a bare v behind, with nothing in the input
+		 * to resolve it against.  A bare Var has no such shape to lose.
+		 *
+		 * XXX This is why a DEFINE clause cannot repeat a grouping
+		 * expression: the Var planted for it is not a grouping column of its
+		 * own, so grouping reports it as ungrouped.  It goes away with the
+		 * same work that lets wc->defineClause take part in grouping -- see
+		 * the XXX at the grouping sets check in parseCheckAggregates().
 		 */
 		vars = pull_var_clause(expr, 0);
 		foreach_node(Var, var, vars)

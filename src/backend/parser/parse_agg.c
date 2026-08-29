@@ -1180,6 +1180,52 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 	Assert(pstate->p_hasAggs || qry->groupClause || qry->havingQual || qry->groupingSets);
 
 	/*
+	 * Refuse row pattern recognition over grouping sets.
+	 *
+	 * A DEFINE clause is the only part of a WindowClause holding an
+	 * expression tree of its own: partitionClause and orderClause carry just
+	 * a sortgroupref into the target list, and the frame offsets are checked
+	 * to be Var-free.  substitute_grouped_columns() below therefore never
+	 * reaches wc->defineClause, and its Vars stay plain relation Vars while
+	 * the target list copies of the same columns become Vars of the RTE_GROUP
+	 * RTE.  Once a grouping set can null one of those columns the two copies
+	 * disagree -- in varnullingrels for a plain Var, and in a PlaceHolderVar
+	 * wrapper for a grouping expression -- and setrefs.c fails to match them.
+	 *
+	 * The test is the grouping sets representation rather than the divergence
+	 * itself, so it also refuses GROUP BY () and a single grouping set, which
+	 * cannot null anything.
+	 *
+	 * XXX This is a stopgap and should be deleted once the DEFINE clause
+	 * takes part in grouping.  That needs three things: a third
+	 * substitute_grouped_columns() call over wc->defineClause, a matching
+	 * flatten_group_exprs() over it in subquery_planner(), and the same in
+	 * get_query_def() so that a view over grouped input still deparses.
+	 *
+	 * XXX The standard puts grouped input inside the feature.  ISO/IEC
+	 * 19075-5 6.4 says the row pattern input table "is the result of the
+	 * FROM, WHERE, GROUP BY, and HAVING clauses that precede the WINDOW
+	 * clause", so R020 requires what this rejects.  The restriction has to
+	 * come out again once the combination works; it does not describe a
+	 * boundary of the feature.
+	 */
+	if (qry->groupingSets)
+	{
+		foreach_node(WindowClause, wc, qry->windowClause)
+		{
+			if (wc->rpPattern != NULL)
+			{
+				TargetEntry *te = linitial_node(TargetEntry, wc->defineClause);
+
+				ereport(ERROR,
+						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot use grouping sets with row pattern recognition"),
+						parser_errposition(pstate, exprLocation((Node *) te->expr)));
+			}
+		}
+	}
+
+	/*
 	 * If we have grouping sets, expand them and find the intersection of all
 	 * sets.
 	 */
