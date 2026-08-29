@@ -271,13 +271,12 @@ FROM rpr_integ
 ORDER BY id;
 
 -- ============================================================
--- A5. Unused window removal prevention
+-- A5. Unused output removal around an RPR window
 -- ============================================================
--- Verify that remove_unused_subquery_outputs() does not drop an RPR
--- window function when the outer query does not reference its result.
--- The WindowAgg node performs the pattern match itself; without it,
--- the match would be silently skipped.  The plan must contain a
--- WindowAgg node beneath the outer Aggregate.
+-- the outer query only counts rows and never reads count(*) OVER w, so the
+-- window function is replaced with NULL, the window becomes inactive, and its
+-- WindowAgg is dropped -- leaving a plain Aggregate over the scan.  The row
+-- count (and thus count(*)) is unchanged.
 EXPLAIN (COSTS OFF)
 SELECT count(*) FROM (
     SELECT count(*) OVER w FROM rpr_integ
@@ -295,30 +294,29 @@ SELECT count(*) FROM (
         DEFINE A AS val > PREV(val))
 ) t;
 
--- The DEFINE expression references PREV(val), so the window must be
--- preserved even if the outer query only aggregates over the count.
--- The plan must still contain a WindowAgg with the PATTERN/DEFINE
--- intact.
-EXPLAIN (COSTS OFF)
-SELECT count(*), sum(c) FROM (
-    SELECT count(*) OVER w AS c FROM rpr_integ
+-- sum(cnt) reads the window function's value, so the column cannot be removed.
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT count(*), sum(cnt) FROM (
+    SELECT count(*) OVER w as cnt FROM rpr_integ
     WINDOW w AS (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A+)
         DEFINE A AS val > PREV(val))
 ) t;
 
-SELECT count(*), sum(c) FROM (
-    SELECT count(*) OVER w AS c FROM rpr_integ
+SELECT count(*), sum(cnt) FROM (
+    SELECT count(*) OVER w as cnt FROM rpr_integ
     WINDOW w AS (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A+)
         DEFINE A AS val > PREV(val))
 ) t;
 
--- The DEFINE expression contains no navigation, but the RPR window
--- must still be preserved because the match structure itself affects
--- the count.  The plan must retain the WindowAgg.
+-- Navigation-free DEFINE: DEFINE A AS TRUE matches every row, so PATTERN (A+)
+-- still reduces the frame (to the whole remaining partition) even without a
+-- PREV/NEXT navigation.  sum(c) reads the window value, so the WindowAgg is
+-- retained; this checks that a trivial DEFINE still drives frame reduction
+-- and yields the expected counts.
 EXPLAIN (COSTS OFF)
 SELECT count(*), sum(c) FROM (
     SELECT count(*) OVER w AS c FROM rpr_integ
@@ -336,40 +334,227 @@ SELECT count(*), sum(c) FROM (
         DEFINE A AS TRUE)
 ) t;
 
--- XXX: "val" is non-resjunk in the subquery output and is not
--- referenced by the outer query.  Without a guard,
--- remove_unused_subquery_outputs() would replace it with NULL in
--- the subquery output, and that replacement propagates to the
--- scan's targetlist -- DEFINE would then evaluate with NULL
--- inputs.  The targetlist has no way to distinguish "exposed to
--- the outer query" from "referenced only by DEFINE", so the
--- optimization cannot be applied selectively.  The column guard
--- in allpaths.c blocks this replacement for any column referenced
--- by an RPR DEFINE clause, keeping the WindowAgg with DEFINE
--- active in the plan.
+-- "val" is a non-resjunk subquery output that the outer query never reads, so
+-- remove_unused_subquery_outputs() would replace it with NULL and DEFINE would
+-- then compare NULLs.  The guard in allpaths.c keeps it.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT count(*) FROM (
+    SELECT val, count(*) OVER w AS c FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val))
+) t WHERE c > 0;
+
+SELECT count(*) FROM (
+    SELECT val, count(*) OVER w AS c FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val))
+) t WHERE c > 0;
+
+-- The same column has to survive at the top level, where
+-- remove_unused_subquery_outputs() never runs at all: "val" is referenced only
+-- by DEFINE, so the parser's resjunk targetlist entry is the only thing
+-- carrying it into the WindowAgg's input.  The trailing "val" on the
+-- WindowAgg's Output line is the assertion.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_integ
+WINDOW w AS (ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE B AS val > PREV(val));
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_integ
+WINDOW w AS (ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE B AS val > PREV(val));
+
+-- The same retention has to survive join removal: nulling "uv" would leave
+-- rpr_integ_u referenced by nothing, the LEFT JOIN would be dropped, and the
+-- DEFINE Var would then point at a relation no longer in the plan.
+CREATE TABLE rpr_integ_u (id INT PRIMARY KEY, uval INT);
+INSERT INTO rpr_integ_u SELECT i, i * 10 FROM generate_series(1, 5) i;
+
 EXPLAIN (COSTS OFF)
-SELECT count(*) FROM (
-    SELECT val, count(*) OVER w FROM rpr_integ
-    WINDOW w AS (ORDER BY id
+SELECT id, c FROM (
+    SELECT t.id AS id, u.uval AS uv, count(*) OVER w AS c
+    FROM rpr_integ t LEFT JOIN rpr_integ_u u ON t.id = u.id
+    WINDOW w AS (ORDER BY t.id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
-        DEFINE B AS val > PREV(val))
-) t;
+        DEFINE B AS uval > PREV(uval))
+) s ORDER BY id;
 
-SELECT count(*) FROM (
-    SELECT val, count(*) OVER w FROM rpr_integ
-    WINDOW w AS (ORDER BY id
+SELECT id, c FROM (
+    SELECT t.id AS id, u.uval AS uv, count(*) OVER w AS c
+    FROM rpr_integ t LEFT JOIN rpr_integ_u u ON t.id = u.id
+    WINDOW w AS (ORDER BY t.id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
-        DEFINE B AS val > PREV(val))
+        DEFINE B AS uval > PREV(uval))
+) s ORDER BY id;
+
+-- A flattened subquery output that an outer join makes nullable reaches the
+-- DEFINE clause as a PlaceHolderVar rather than a Var.  The parser's targetlist
+-- entry is rewritten the same way, so the expression still reaches the
+-- WindowAgg's input: the trailing "(COALESCE(rpr_integ_u.uval, 0))" is the
+-- assertion.  coalesce() is deliberate and must not be simplified away: a
+-- strict expression such as "uval + 1" goes to NULL on its own when the join
+-- finds no match, so pullup does not wrap it and the case degenerates into an
+-- ordinary Var.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT t.id, count(*) OVER w AS c
+FROM rpr_integ t
+     LEFT JOIN (SELECT id AS uid, coalesce(uval, 0) AS uv1 FROM rpr_integ_u) s
+     ON t.id = s.uid
+WINDOW w AS (ORDER BY t.id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE B AS uv1 > PREV(uv1));
+
+SELECT t.id, count(*) OVER w AS c
+FROM rpr_integ t
+     LEFT JOIN (SELECT id AS uid, coalesce(uval, 0) AS uv1 FROM rpr_integ_u) s
+     ON t.id = s.uid
+WINDOW w AS (ORDER BY t.id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE B AS uv1 > PREV(uv1));
+
+-- The same shape with the window dead: nothing reads count(*) OVER w, so its
+-- entry goes, w goes with it, and "uv" is no longer held by a DEFINE clause
+-- that will run.  That was rpr_integ_u's last reference, so join removal takes
+-- the LEFT JOIN too and the scan is left alone.  Retaining "uv" here on the
+-- strength of a window that will not run would keep the join alive for nothing.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id FROM (
+    SELECT t.id AS id, u.uval AS uv, count(*) OVER w AS c
+    FROM rpr_integ t LEFT JOIN rpr_integ_u u ON t.id = u.id
+    WINDOW w AS (ORDER BY t.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS uval > PREV(uval))
+) s;
+
+SELECT id FROM (
+    SELECT t.id AS id, u.uval AS uv, count(*) OVER w AS c
+    FROM rpr_integ t LEFT JOIN rpr_integ_u u ON t.id = u.id
+    WINDOW w AS (ORDER BY t.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS uval > PREV(uval))
+) s ORDER BY id;
+
+-- A live window and a dead RPR window in one subquery.  Emptying the dead
+-- one's DEFINE clause must not disturb winref, which is a position in
+-- windowClause, nor the live window's result.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id, c1 FROM (
+    SELECT t.id AS id, u.uval AS uv,
+           count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+    FROM rpr_integ t LEFT JOIN rpr_integ_u u ON t.id = u.id
+    WINDOW w1 AS (ORDER BY t.id),
+           w2 AS (ORDER BY t.id
+               ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS uval > PREV(uval))
+) s;
+
+SELECT id, c1 FROM (
+    SELECT t.id AS id, u.uval AS uv,
+           count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
+    FROM rpr_integ t LEFT JOIN rpr_integ_u u ON t.id = u.id
+    WINDOW w1 AS (ORDER BY t.id),
+           w2 AS (ORDER BY t.id
+               ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS uval > PREV(uval))
+) s ORDER BY id;
+
+DROP TABLE rpr_integ_u;
+
+-- w2 is declared and no window function references it, so select_active_windows()
+-- drops it when the subquery is planned.  Its DEFINE must not keep "val" alive
+-- for a window that never runs: the subquery output for val becomes a null Const.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT c FROM (
+    SELECT count(*) OVER w1 AS c, val
+    FROM rpr_integ
+    WINDOW w1 AS (ORDER BY id),
+           w2 AS (ORDER BY id
+               ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS val > PREV(val))
 ) t;
 
--- The same guard must also cover a whole-row Var.  Writing the bare
--- relation name (rpr_integ) in DEFINE resolves to a whole-row Var, whose
--- attribute number is 0.  remove_unused_subquery_outputs() matches the
--- guard on attribute number, so the whole-row Var is retained as a single
--- entry while the unused scalar "val" output is still replaced with NULL;
--- DEFINE evaluates against the intact row, and the match is unchanged.
+-- Here w2 does have a window function, but the outer query does not read it, so
+-- this call replaces that entry with a null Const and w2 goes inactive as well.
+-- Which windows are active therefore has to be read after that substitution:
+-- read before it, w2 still looks active and "val" is retained for a window that
+-- will not run.  Both null Consts on the WindowAgg's Output line are the
+-- assertion.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT c FROM (
+    SELECT count(*) OVER w1 AS c, count(*) OVER w2 AS unread, val
+    FROM rpr_integ
+    WINDOW w1 AS (ORDER BY id),
+           w2 AS (ORDER BY id
+               ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS val > PREV(val))
+) t;
+
+CREATE TABLE rpr_integ_two (id int, v1 int, v2 int);
+INSERT INTO rpr_integ_two SELECT i, i * 10, i * 100 FROM generate_series(1, 5) i;
+
+-- Whether a window is active is decided per window clause, not for row pattern
+-- recognition as a whole: w3's function goes, and the column only w3's DEFINE
+-- names goes with it, while w2 keeps its own.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT c2 FROM (
+    SELECT count(*) OVER w2 AS c2, count(*) OVER w3 AS c3, v1, v2
+    FROM rpr_integ_two
+    WINDOW w2 AS (ORDER BY id
+              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A B+)
+              DEFINE B AS v1 > PREV(v1)),
+           w3 AS (ORDER BY id
+              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A B+)
+              DEFINE B AS v2 > PREV(v2))
+) t;
+
+-- A window function entry can be kept for a reason other than the upper query
+-- reading it -- here the subquery's own ORDER BY -- and then its window stays
+-- active and its DEFINE column is retained.  The pass that settles the window
+-- function entries therefore has to apply every condition the loop after it
+-- applies, not just the one about the upper query.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT c FROM (
+    SELECT count(*) OVER w1 AS c, count(*) OVER w2 AS ord, v1
+    FROM rpr_integ_two
+    WINDOW w1 AS (ORDER BY id),
+           w2 AS (ORDER BY id
+              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A B+)
+              DEFINE B AS v1 > PREV(v1))
+    ORDER BY 2
+) t;
+
+DROP TABLE rpr_integ_two;
+
+-- Whole-row Var in DEFINE.  Writing the bare relation name (rpr_integ) in
+-- DEFINE resolves to a whole-row Var (attribute number 0).  The parser's junk
+-- targetlist entry carries it into the WindowAgg's input like any other
+-- DEFINE column, so the pattern match sees the full row regardless of what
+-- the subquery projects.  The unused scalar output "val" is therefore free to
+-- be replaced with NULL (nothing reads it), while c is kept because sum(c)
+-- reads it; the match result is unchanged.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ
@@ -385,6 +570,34 @@ SELECT sum(c) FROM (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS rpr_integ IS NOT NULL)
+) t;
+
+-- The walk that decides which windows are still live runs on a targetlist
+-- subquery_planner() has not preprocessed yet, so a SubLink is still a SubLink
+-- there.  OFFSET 0 keeps the subquery unflattened, which is what puts
+-- remove_unused_subquery_outputs() on the path at all.
+SELECT count(*) FROM (
+    SELECT id, (SELECT 1) AS s, count(*) OVER w AS c
+    FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val))
+    OFFSET 0
+) t;
+
+-- A window function may also sit in a sub-select's test expression, where it
+-- belongs to this query level rather than the sub-select's.  The walk reads it
+-- there; a window function written inside the sub-select itself would count
+-- against that query's own window clauses and must not be read here.
+SELECT count(*) FROM (
+    SELECT id, (count(*) OVER w) IN (SELECT 1) AS m
+    FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val))
+    OFFSET 0
 ) t;
 
 -- ============================================================
