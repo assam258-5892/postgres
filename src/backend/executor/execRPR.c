@@ -250,9 +250,8 @@ nfa_state_exit_to(WindowAggState *winstate, RPRNFAState *state, int depth,
 	state->isAbsorbable = state->isAbsorbable &&
 		RPRElemIsAbsorbableBranch(targetElem);
 
-	if (RPRElemIsEnd(targetElem) &&
-		state->counts[targetElem->depth] < RPR_COUNT_INF)
-		state->counts[targetElem->depth]++;
+	if (RPRElemIsEnd(targetElem))
+		RPRCountIncrement(state->counts[targetElem->depth]);
 
 	return targetElem;
 }
@@ -884,11 +883,10 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 		 * Increment count, saturating at RPR_COUNT_INF to avoid int32
 		 * overflow; a saturated count then compares as "unbounded".
 		 */
-		if (count < RPR_COUNT_INF)
-			count++;
+		RPRCountIncrement(count);
 
 		/* Max constraint should not be exceeded */
-		Assert(elem->max == RPR_QUANTITY_INF || count <= elem->max);
+		Assert(RPRElemWithinMax(elem, count));
 
 		state->counts[depth] = count;
 
@@ -919,10 +917,8 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 			int32		endCount = state->counts[endDepth];
 
 			/* Increment group count */
-			if (endCount < RPR_COUNT_INF)
-				endCount++;
-			Assert(endElem->max == RPR_QUANTITY_INF ||
-				   endCount <= endElem->max);
+			RPRCountIncrement(endCount);
+			Assert(RPRElemWithinMax(endElem, endCount));
 
 			state->elemIdx = elem->next;
 			state->counts[endDepth] = endCount;
@@ -961,10 +957,8 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 				state->counts[endDepth] = 0;
 
 				/* Increment outer group count */
-				if (outerCount < RPR_COUNT_INF)
-					outerCount++;
-				Assert(outerEnd->max == RPR_QUANTITY_INF ||
-					   outerCount <= outerEnd->max);
+				RPRCountIncrement(outerCount);
+				Assert(RPRElemWithinMax(outerEnd, outerCount));
 
 				state->elemIdx = endElem->next;
 				state->counts[outerDepth] = outerCount;
@@ -1018,9 +1012,8 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 			 * both read.
 			 */
 			landElem = &winstate->rpPattern->elements[skipState->elemIdx];
-			if (RPRElemIsEnd(landElem) &&
-				skipState->counts[landElem->depth] < RPR_COUNT_INF)
-				skipState->counts[landElem->depth]++;
+			if (RPRElemIsEnd(landElem))
+				RPRCountIncrement(skipState->counts[landElem->depth]);
 		}
 
 		if (skipState != NULL && RPRElemIsReluctant(targetElem))
@@ -1146,7 +1139,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	Assert(state->counts[elem->depth] == 0);
 
 	/* Optional group: create skip path (but don't route yet) */
-	if (elem->min == 0)
+	if (RPRElemCanSkip(elem))
 	{
 		RPRPatternElement *landElem;
 
@@ -1158,9 +1151,8 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 		 * still counts as an iteration of that END's group.
 		 */
 		landElem = &elements[elem->jump];
-		if (RPRElemIsEnd(landElem) &&
-			skipState->counts[landElem->depth] < RPR_COUNT_INF)
-			skipState->counts[landElem->depth]++;
+		if (RPRElemIsEnd(landElem))
+			RPRCountIncrement(skipState->counts[landElem->depth]);
 	}
 
 	if (skipState != NULL && RPRElemIsReluctant(elem))
@@ -1224,7 +1216,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 	int			depth = elem->depth;
 	int32		count = state->counts[depth];
 
-	if (count < elem->min)
+	if (!RPRElemCanExit(elem, count))
 	{
 		RPRPatternElement *jumpElem;
 		RPRNFAState *ffState = NULL;
@@ -1307,7 +1299,7 @@ nfa_advance_end(WindowAggState *winstate, RPRNFAContext *ctx,
 								  currentPos);
 		}
 	}
-	else if (elem->max != RPR_QUANTITY_INF && count >= elem->max)
+	else if (!RPRElemCanLoop(elem, count))
 	{
 		/* Must exit: reached max iterations. */
 		RPRPatternElement *nextElem;
@@ -1389,17 +1381,14 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 {
 	int			depth = elem->depth;
 	int32		count = state->counts[depth];
-	bool		canLoop = (elem->max == RPR_QUANTITY_INF || count < elem->max);
-	bool		canExit = (count >= elem->min);
 
-	/* min <= max, so !canExit (count < min) implies canLoop (count < max) */
-	Assert(canLoop || canExit);
+	Assert(RPRElemCanLoop(elem, count) || RPRElemCanExit(elem, count));
 
 	/* elem->next must be a valid index for any reachable VAR */
 	Assert(elem->next >= 0 &&
 		   elem->next < winstate->rpPattern->numElements);
 
-	if (canLoop && canExit)
+	if (RPRElemCanLoop(elem, count) && RPRElemCanExit(elem, count))
 	{
 		/*
 		 * Both loop and exit possible. Greedy: loop first (prefer longer
@@ -1450,14 +1439,26 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 							  currentPos);
 		}
 	}
-	else if (canLoop)
+	else if (!RPRElemCanExit(elem, count))
 	{
-		/* Loop only: keep state as-is */
+		/*
+		 * Below the minimum, so exiting is illegal and matching this VAR
+		 * again on the next row is the only legal continuation.  This row's
+		 * match already incremented counts[depth] in the match phase, and the
+		 * advance phase only decides where the state goes next, so staying
+		 * parked at the same VAR is expressed by appending the state
+		 * unchanged to the new generation.  Dropping it instead would strand
+		 * every quantifier below its minimum: (A B){2} would lose its state
+		 * after the first A B match and never complete.
+		 *
+		 * No clone is needed.  With a single continuation, ownership of the
+		 * original simply transfers to the list.
+		 */
 		nfa_append_state_unique(winstate, ctx, state);
 	}
 	else
 	{
-		/* Exit only: advance to next element (canExit necessarily true) */
+		/* Exit only: advance to next element */
 		RPRPatternElement *nextElem;
 
 		nextElem = nfa_state_exit_to(winstate, state, depth, elem->next);
@@ -1500,7 +1501,7 @@ nfa_advance_state(WindowAggState *winstate, RPRNFAContext *ctx,
 
 		Assert(RPRElemIsEnd(hitElem) && RPRElemCanEmptyLoop(hitElem));
 
-		if (state->counts[hitElem->depth] >= hitElem->min)
+		if (RPRElemCanExit(hitElem, state->counts[hitElem->depth]))
 		{
 			RPRPatternElement *nextElem;
 

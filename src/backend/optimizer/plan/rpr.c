@@ -1846,7 +1846,7 @@ isUnboundedStart(RPRPattern *pattern, RPRElemIdx idx)
 	RPRPatternElement *e;
 
 	/* Case 1: Simple unbounded VAR at start (greedy only) */
-	if (RPRElemIsVar(elem) && elem->max == RPR_QUANTITY_INF &&
+	if (RPRElemIsVar(elem) && RPRElemIsUnbounded(elem) &&
 		!RPRElemIsReluctant(elem))
 	{
 		/* Set both flags on first element */
@@ -1874,7 +1874,7 @@ isUnboundedStart(RPRPattern *pattern, RPRElemIdx idx)
 
 	/* END must be unbounded greedy */
 	if (e->depth == startDepth - 1 &&
-		RPRElemIsEnd(e) && e->max == RPR_QUANTITY_INF &&
+		RPRElemIsEnd(e) && RPRElemIsUnbounded(e) &&
 		!RPRElemIsReluctant(e))
 	{
 		Assert(e->jump == idx); /* END points back to first child */
