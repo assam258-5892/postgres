@@ -1492,10 +1492,10 @@ JsonTablePath
 JsonTablePathScan
 JsonTablePathSpec
 JsonTablePlan
+JsonTablePlanJoinType
 JsonTablePlanRowSource
 JsonTablePlanSpec
 JsonTablePlanState
-JsonTablePlanJoinType
 JsonTablePlanType
 JsonTableSiblingJoin
 JsonTokenType
@@ -2309,8 +2309,8 @@ PgStatShared_CustomVarEntry
 PgStatShared_Database
 PgStatShared_Function
 PgStatShared_HashEntry
-PgStatShared_Index
 PgStatShared_IO
+PgStatShared_Index
 PgStatShared_Lock
 PgStatShared_Relation
 PgStatShared_ReplSlot
