@@ -6166,10 +6166,26 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	 */
 	if (query->hasGroupRTE)
 	{
+		ListCell   *lc;
+
 		query->targetList = (List *)
 			flatten_group_exprs(NULL, query, (Node *) query->targetList);
 		query->havingQual =
 			flatten_group_exprs(NULL, query, query->havingQual);
+
+		/*
+		 * A row pattern DEFINE clause carries GROUP Vars of its own; expand
+		 * them, or the deparsed text would name the grouping step rather than
+		 * the expression the user wrote, and the view would not re-parse.
+		 */
+		foreach(lc, query->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, lc);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(NULL, query, (Node *) wc->defineClause);
+		}
 	}
 
 	/*

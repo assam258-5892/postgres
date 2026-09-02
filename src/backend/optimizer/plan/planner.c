@@ -1256,6 +1256,23 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 			flatten_group_exprs(root, root->parse, (Node *) parse->targetList);
 		parse->havingQual =
 			flatten_group_exprs(root, root->parse, parse->havingQual);
+
+		/*
+		 * A row pattern DEFINE clause holds an expression tree of its own, so
+		 * parseCheckAggregates() put GROUP Vars into it as well.  Expand them
+		 * here too, and with the root, so that the varnullingrels a grouping
+		 * set attached survive onto the replacement -- setrefs.c matches the
+		 * DEFINE copy against the target list copy and insists they agree.
+		 */
+		foreach(l, parse->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, l);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(root, root->parse,
+										(Node *) wc->defineClause);
+		}
 	}
 
 	/* Constant-folding might have removed all set-returning functions */
