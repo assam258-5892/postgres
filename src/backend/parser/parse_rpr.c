@@ -29,10 +29,8 @@
 #include "optimizer/optimizer.h"
 #include "optimizer/rpr.h"
 #include "parser/parse_coerce.h"
-#include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_rpr.h"
-#include "parser/parse_target.h"
 
 /* DEFINE clause walker context -- see define_walker for usage. */
 typedef enum
@@ -413,12 +411,6 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		ctx.inner_kind = 0;
 		(void) define_walker((Node *) te->expr, &ctx);
 	}
-
-	/* mark column origins */
-	markTargetListOrigins(pstate, defineClause);
-
-	/* mark all nodes in the DEFINE clause tree with collation information */
-	assign_expr_collations(pstate, (Node *) defineClause);
 
 	return defineClause;
 }
