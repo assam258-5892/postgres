@@ -2766,7 +2766,8 @@ transformSortClause(ParseState *pstate,
 List *
 transformWindowDefinitions(ParseState *pstate,
 						   List *windowdefs,
-						   List **targetlist)
+						   List **targetlist,
+						   List *groupClause)
 {
 	List	   *result = NIL;
 	Index		winref = 0;
@@ -2962,7 +2963,7 @@ transformWindowDefinitions(ParseState *pstate,
 											 windef->endOffset);
 
 		/* Process Row Pattern Recognition related clauses */
-		transformRPR(pstate, wc, windef, targetlist);
+		transformRPR(pstate, wc, windef, targetlist, groupClause);
 
 		wc->winref = winref;
 
