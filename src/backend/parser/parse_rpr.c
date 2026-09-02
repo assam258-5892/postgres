@@ -52,11 +52,20 @@ typedef struct
 	RPRNavKind	inner_kind;		/* kind of first nested nav in current arg */
 } DefineWalkCtx;
 
+/* Target list planting walker context -- see define_plant_walker. */
+typedef struct
+{
+	ParseState *pstate;
+	List	  **targetlist;
+	List	   *groupExprs;		/* expressions GROUP BY computes */
+} DefinePlantCtx;
+
 /* Forward declarations */
 static void validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 									   List **varNames);
 static List *transformDefineClause(ParseState *pstate, WindowDef *windef,
-								   List **targetlist);
+								   List **targetlist, List *groupClause);
+static bool define_plant_walker(Node *node, void *context);
 static bool define_walker(Node *node, void *context);
 static bool rpr_frame_is_supported(int frameOptions);
 
@@ -75,7 +84,7 @@ static bool rpr_frame_is_supported(int frameOptions);
  */
 void
 transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
-			 List **targetlist)
+			 List **targetlist, List *groupClause)
 {
 	/* Window definition must exist when called */
 	Assert(windef != NULL);
@@ -119,7 +128,8 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
 
 	/* Transform DEFINE clause into list of TargetEntry's */
-	wc->defineClause = transformDefineClause(pstate, windef, targetlist);
+	wc->defineClause = transformDefineClause(pstate, windef, targetlist,
+											 groupClause);
 
 	/* Store PATTERN parse tree for deparsing */
 	wc->rpPattern = windef->rpCommonSyntax->rpPattern;
@@ -238,10 +248,23 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
  */
 static List *
 transformDefineClause(ParseState *pstate, WindowDef *windef,
-					  List **targetlist)
+					  List **targetlist, List *groupClause)
 {
 	List	   *defineClause = NIL;
 	List	   *patternVarNames = NIL;
+	List	   *groupExprs = NIL;
+
+	/*
+	 * Collect what GROUP BY computes, so that the planting below can stop at
+	 * one.  Taken before any planting, since the entries planted are not
+	 * grouping columns and carry no sortgroupref.
+	 */
+	foreach_node(SortGroupClause, sgc, groupClause)
+	{
+		TargetEntry *tle = get_sortgroupclause_tle(sgc, *targetlist);
+
+		groupExprs = lappend(groupExprs, tle->expr);
+	}
 
 	/*
 	 * The grammar builds an RPCommonSyntax only for a window specification
@@ -307,7 +330,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 	{
 		TargetEntry *teDefine;
 		Node	   *expr;
-		List	   *vars;
+		DefinePlantCtx ctx;
 
 		/*
 		 * Transform the DEFINE expression and coerce it to boolean.  We must
@@ -336,32 +359,23 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 		 * one is present in the targetlist.  This is needed so the planner
 		 * propagates the referenced columns through the plan tree, making
 		 * them available to the WindowAgg's DEFINE evaluation.
+		 *
+		 * The walk stops at a subexpression GROUP BY computes and plants
+		 * nothing for it.  parseCheckAggregates() replaces such a
+		 * subexpression with the grouping step's Var on both sides -- here
+		 * and in the target list entry holding the same expression -- so the
+		 * two copies still meet, and that entry bears a sortgroupref, which
+		 * is enough to keep its column alive.  Planting the columns
+		 * underneath it instead would offer them to the grouping logic on
+		 * their own, which does not make them available that way and reports
+		 * them as ungrouped.  The stop reads groupClause rather than a
+		 * sortgroupref, or the window's own ORDER BY would trip it in a query
+		 * that does no grouping at all.
 		 */
-		vars = pull_var_clause(expr, 0);
-		foreach_node(Var, var, vars)
-		{
-			bool		found = false;
-
-			foreach_node(TargetEntry, tle, *targetlist)
-			{
-				if (equal(tle->expr, var))
-				{
-					found = true;
-					break;
-				}
-			}
-			if (!found)
-			{
-				TargetEntry *newtle;
-
-				newtle = makeTargetEntry((Expr *) copyObject(var),
-										 (AttrNumber) pstate->p_next_resno++,
-										 NULL,
-										 true);
-				*targetlist = lappend(*targetlist, newtle);
-			}
-		}
-		list_free(vars);
+		ctx.pstate = pstate;
+		ctx.targetlist = targetlist;
+		ctx.groupExprs = groupExprs;
+		(void) define_plant_walker(expr, &ctx);
 	}
 	pstate->p_rpr_pattern_vars = NIL;
 
@@ -388,6 +402,51 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 	assign_expr_collations(pstate, (Node *) defineClause);
 
 	return defineClause;
+}
+
+/*
+ * define_plant_walker
+ *		Plant in the target list what a DEFINE expression reads.
+ *
+ * Vars are planted one at a time as resjunk entries, except under a
+ * subexpression GROUP BY computes, where the walk stops and plants nothing --
+ * see the planting comment in transformDefineClause() for why.
+ */
+static bool
+define_plant_walker(Node *node, void *context)
+{
+	DefinePlantCtx *ctx = (DefinePlantCtx *) context;
+
+	if (node == NULL)
+		return false;
+
+	/* A subexpression GROUP BY computes needs nothing planted for it. */
+	foreach_ptr(Node, gexpr, ctx->groupExprs)
+	{
+		if (equal(node, gexpr))
+			return false;
+	}
+
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
+
+		foreach_node(TargetEntry, tle, *ctx->targetlist)
+		{
+			if (equal(tle->expr, var))
+				return false;
+		}
+
+		*ctx->targetlist =
+			lappend(*ctx->targetlist,
+					makeTargetEntry((Expr *) copyObject(var),
+									(AttrNumber) ctx->pstate->p_next_resno++,
+									NULL,
+									true));
+		return false;
+	}
+
+	return expression_tree_walker(node, define_plant_walker, ctx);
 }
 
 /*
