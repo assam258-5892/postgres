@@ -439,6 +439,18 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
+-- Both rules broken at once.  The frame shape is settled first, so the
+-- report names the shape; the EXCLUDE clause may not survive the rewrite.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    EXCLUDE TIES
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+
 -- range frame is not allowed with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
