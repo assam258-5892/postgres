@@ -84,41 +84,41 @@ void
 transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 			 List **targetlist, List *groupClause)
 {
-	/* Window definition must exist when called */
-	Assert(windef != NULL);
-
-	/*
-	 * Row Pattern Common Syntax clause exists?
-	 */
+	/* Nothing to do unless the window carries a row pattern */
 	if (windef->rpCommonSyntax == NULL)
 		return;
 
-	/*
-	 * Row pattern recognition matches over one frame shape: ROWS, starting at
-	 * CURRENT ROW, ending at UNBOUNDED FOLLOWING or a positive offset
-	 * FOLLOWING, with no EXCLUDE.  A window that carries no frame clause of
-	 * its own still has a frame, so the report states what the frame has to
-	 * be rather than naming an option the query may never have written.
-	 */
 	if (!rpr_frame_is_supported(wc->frameOptions))
 	{
-		int			location = windef->location;
-
 		/*
-		 * EXCLUDE has a location of its own and the frame type keyword has
-		 * another; either beats the start of the window definition, which is
-		 * all a defaulted frame leaves to point at.
+		 * The frame type keyword beats the start of the window definition,
+		 * which is all a defaulted frame leaves to point at.
 		 */
-		if ((wc->frameOptions & FRAMEOPTION_EXCLUSION) &&
-			windef->excludeLocation >= 0)
-			location = windef->excludeLocation;
-		else if (windef->frameLocation >= 0)
-			location = windef->frameLocation;
+		int			location = windef->frameLocation >= 0 ?
+			windef->frameLocation : windef->location;
 
 		ereport(ERROR,
 				errcode(ERRCODE_WINDOWING_ERROR),
 				errmsg("unsupported frame for row pattern recognition"),
-				errdetail("The frame must be ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or ROWS BETWEEN CURRENT ROW AND at least 1 FOLLOWING, with no EXCLUDE clause."),
+		/*- translator: both %s are SQL window frame specifications */
+				errdetail("The frame must be \"%s\" or \"%s\".",
+						  "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING",
+						  "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING"),
+				parser_errposition(pstate, location));
+	}
+
+	/*
+	 * EXCLUDE is not part of the frame shape, so it is reported on its own,
+	 * and from its own location.
+	 */
+	if (wc->frameOptions & FRAMEOPTION_EXCLUSION)
+	{
+		int			location = windef->excludeLocation >= 0 ?
+			windef->excludeLocation : windef->location;
+
+		ereport(ERROR,
+				errcode(ERRCODE_WINDOWING_ERROR),
+				errmsg("cannot use EXCLUDE with row pattern recognition"),
 				parser_errposition(pstate, location));
 	}
 
@@ -139,9 +139,12 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
  * rpr_frame_is_supported
  *		Is this the frame shape row pattern recognition matches over?
  *
- * ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING, or the same with a
- * positive offset FOLLOWING as the end.  The offset's value is not settled
- * until execution; calculate_frame_offsets() rejects a non-positive one.
+ * Only ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING and ROWS BETWEEN
+ * CURRENT ROW AND offset FOLLOWING are supported.  EXCLUDE is rejected by
+ * the caller, since it is not part of the shape.
+ *
+ * The offset's value is not settled until execution;
+ * calculate_frame_offsets() rejects a non-positive one there.
  */
 static bool
 rpr_frame_is_supported(int frameOptions)
@@ -152,8 +155,6 @@ rpr_frame_is_supported(int frameOptions)
 		return false;
 	if ((frameOptions & (FRAMEOPTION_END_UNBOUNDED_FOLLOWING |
 						 FRAMEOPTION_END_OFFSET_FOLLOWING)) == 0)
-		return false;
-	if (frameOptions & FRAMEOPTION_EXCLUSION)
 		return false;
 
 	return true;
