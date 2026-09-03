@@ -53,15 +53,15 @@ static bool rprBodyHasUniformLength(List *children);
 static bool rprChildrenMatchAt(List *children, int start, List *content);
 static List *rprGroupContent(RPRPatternNode *group);
 static bool rprTryAddIteration(RPRPatternNode *group);
-static pg_nodiscard List *flattenSeqChildren(List *children);
-static pg_nodiscard List *mergeConsecutiveVars(List *children);
-static pg_nodiscard List *mergeConsecutiveGroups(List *children);
-static pg_nodiscard List *mergeConsecutiveAlts(List *children);
-static pg_nodiscard List *mergeGroupPrefixSuffix(List *children);
+pg_nodiscard static List *flattenSeqChildren(List *children);
+pg_nodiscard static List *mergeConsecutiveVars(List *children);
+pg_nodiscard static List *mergeConsecutiveGroups(List *children);
+pg_nodiscard static List *mergeConsecutiveAlts(List *children);
+pg_nodiscard static List *mergeGroupPrefixSuffix(List *children);
 static RPRPatternNode *optimizeSeqPattern(RPRPatternNode *pattern);
 
-static pg_nodiscard List *flattenAltChildren(List *children);
-static pg_nodiscard List *removeDuplicateAlternatives(List *children);
+pg_nodiscard static List *flattenAltChildren(List *children);
+pg_nodiscard static List *removeDuplicateAlternatives(List *children);
 static RPRPatternNode *optimizeAltPattern(RPRPatternNode *pattern);
 
 static RPRPatternNode *tryMultiplyQuantifiers(RPRPatternNode *pattern);
