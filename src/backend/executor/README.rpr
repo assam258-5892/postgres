@@ -10,18 +10,56 @@
   manual can be alternatives for them.
 
   This README's scope is the entire process from PATTERN/DEFINE clause
-  parsing to NFA runtime execution.
+  parsing to NFA runtime execution, together with the contracts the
+  feature places on the rest of the planner (Chapter XIII) and on the
+  two printers that display it (Chapter XIV).
 
-  Related code:
-    - src/backend/parser/parse_rpr.c          (parser phase)
-    - src/backend/optimizer/plan/rpr.c        (optimizer phase)
-    - src/backend/executor/nodeWindowAgg.c    (executor phase, window agg)
-    - src/backend/executor/execRPR.c          (executor phase, NFA engine)
-    - src/include/executor/execRPR.h          (NFA public API)
-    - src/include/nodes/plannodes.h           (plan node definitions)
-    - src/include/nodes/execnodes.h           (execution state definitions)
-    - src/include/optimizer/rpr.h             (types and constants)
-    - src/backend/optimizer/plan/createplan.c (match_start dependency metadata)
+  Related code, by the phase each file serves.  A file appears once,
+  under the phase where its row pattern work belongs:
+
+    Parser
+      - src/backend/parser/gram.y                  (grammar and keywords)
+      - src/backend/parser/parse_rpr.c             (PATTERN/DEFINE analysis)
+      - src/include/parser/parse_rpr.h             (parser entry points)
+      - src/backend/parser/parse_func.c            (navigation name binding)
+      - src/backend/parser/parse_expr.c            (DEFINE column restrictions)
+      - src/backend/parser/parse_cte.c             (WITH RECURSIVE rejection)
+      - src/backend/parser/parse_agg.c             (grouping participation)
+
+    Planner
+      - src/backend/optimizer/plan/rpr.c           (rewrites and compilation)
+      - src/include/optimizer/rpr.h                (types and constants)
+      - src/backend/optimizer/plan/createplan.c    (match_start dependencies)
+      - src/backend/optimizer/plan/planner.c       (window clause preprocessing)
+      - src/backend/optimizer/plan/setrefs.c       (DEFINE Vars to OUTER_VAR)
+      - src/backend/optimizer/plan/subselect.c     (DEFINE Params in param sets)
+      - src/backend/optimizer/path/allpaths.c      (keeping DEFINE columns)
+      - src/backend/optimizer/path/costsize.c      (DEFINE evaluation cost)
+      - src/backend/optimizer/prep/prepjointree.c  (PlaceHolderVar wrapping)
+      - src/backend/rewrite/rewriteManip.c         (marking navigation args)
+
+    Executor
+      - src/backend/executor/nodeWindowAgg.c       (reduced frame and nav trim)
+      - src/backend/executor/execRPR.c             (NFA engine)
+      - src/include/executor/execRPR.h             (NFA public API)
+      - src/backend/executor/execExpr.c            (navigation opcode compile)
+      - src/backend/executor/execExprInterp.c      (navigation opcode eval)
+      - src/backend/jit/llvm/llvmjit_expr.c        (JIT path for those opcodes)
+
+    Node support
+      - src/include/nodes/parsenodes.h             (parse node definitions)
+      - src/include/nodes/primnodes.h              (RPRNavExpr)
+      - src/include/nodes/plannodes.h              (plan node definitions)
+      - src/include/nodes/execnodes.h              (execution state definitions)
+      - src/backend/nodes/nodeFuncs.c              (expression tree walking)
+      - src/backend/nodes/copyfuncs.c              (RPRPattern copy support)
+      - src/backend/nodes/outfuncs.c               (RPRPattern out support)
+      - src/backend/nodes/readfuncs.c              (RPRPattern read support)
+      - src/backend/nodes/queryjumblefuncs.c       (DEFINE clause jumble)
+
+    Output
+      - src/backend/utils/adt/ruleutils.c          (deparse for pg_get_viewdef)
+      - src/backend/commands/explain.c             (EXPLAIN output)
 
 ============================================================================
 
@@ -95,6 +133,17 @@ PERMUTE is not supported (the parser raises an error).  Its syntax is in the
 grammar so that the standard spelling is diagnosed rather than read as a
 pattern variable followed by a group; write the alternations out instead.
 
+RPR is also rejected outright inside a recursive WITH.  Per ISO/IEC 9075-2
+7.17 Syntax Rule 3)e)f) every <with list element> of a WITH RECURSIVE clause
+is potentially recursive and shall not contain a <row pattern common
+syntax>, and ISO/IEC 19075-5 6.17.5 restates the prohibition for CREATE
+RECURSIVE VIEW.  transformWithClause() (parse_cte.c) therefore walks each
+CTE with contain_rpr_walker() and reports "cannot use row pattern
+recognition in a recursive query" at the first WindowDef carrying
+PATTERN/DEFINE.  The walk runs on the raw parse tree, before the CTEs are
+analyzed, and it covers CREATE RECURSIVE VIEW as well, since
+makeRecursiveViewSelect() rewrites that into WITH RECURSIVE.
+
 Chapter II  Overall Processing Pipeline
 ============================================================================
 
@@ -143,6 +192,16 @@ following:
 
   (3) DEFINE clause transformation (transformDefineClause)
 
+  The two frame diagnostics need somewhere to point, and a defaulted frame
+  leaves only the start of the window definition.  WindowDef therefore
+  carries frameLocation and excludeLocation, which the frame productions in
+  gram.y set to the ROWS/RANGE/GROUPS keyword and to the EXCLUDE keyword;
+  transformRPR() falls back to the window's own location when either is -1.
+  A frame or exclusion production added later has to set them too, or its
+  errors lose their cursor position.  Note that the EXCLUDE check reads the
+  FRAMEOPTION_EXCLUSION bits, not excludeLocation: EXCLUDE NO OTHERS sets
+  no bit and is accepted, since it excludes nothing.
+
 III-2. PATTERN parse tree
 
 The parser transforms the PATTERN clause into an RPRPatternNode tree.
@@ -163,6 +222,14 @@ All nodes have min/max fields to express quantifiers:
 
 If the reluctant field is true, the quantifier is reluctant (non-greedy).
 
+The braced forms are range-checked in the grammar itself.  Every bound must
+be below RPR_QUANTITY_INF (parsenodes.h), which is also the sentinel the
+unbounded spellings store in max.  {n} and {,m} require a bound of at least
+1, as does the upper bound of {n,m}; the lower bound of {n,m} and the bound
+of {n,} may be 0; and {n,m} requires n <= m.  So A{0}, A{,0} and A{0,0} are
+rejected, while A{0,} is another way to write A*.  That cap on the lower
+bound is the only one the grammar imposes, which IX-6 revisits as a cost.
+
 Example: PATTERN ((A+ B) | C*)
 
   ALT
@@ -175,27 +242,186 @@ Example: PATTERN ((A+ B) | C*)
 Parentheses always produce a GROUP node; a GROUP(1, 1) like the one above is
 unwrapped later, by Phase 1 (h).
 
+The lexer counts '|' as both a self character and an operator character, so
+a quantifier written hard against an alternation arrives as a single Op
+token rather than as two: "A*|B" yields Op "*|", not '*' then '|'.  Every
+reluctant spelling glues the same way ("*?|", "+?|", "??|"), as does the Op
+after a braced quantifier, as in "A{2,3}?|B".
+
+row_pattern_quantifier_opt therefore accepts each glued spelling, takes the
+quantifier it half spells, and sets RPRPatternNode.trailing_alt on the term
+to record that an alternation operator came with it.  The flag stays on the
+term while the sequence keeps growing; splitRPRTrailingAlt() then splits the
+finished sequence at the flagged term into ALT(left, right), where the right
+branch is the whole remaining sequence.  That is what keeps '|' the
+lowest-precedence operator of the pattern language: "A*|B C" parses as
+"A* | (B C)", identical to the spaced form.  A flagged term with nothing to
+its right is a dangling '|' and is rejected.
+
+trailing_alt is transient.  splitRPRTrailingAlt() clears it on every path,
+the error paths included, so a finalized tree never carries it and it
+reaches neither the plan nor the query id.
+
 III-3. DEFINE Clause Transformation
 
 transformDefineClause() first validates the PATTERN variable count and
 collects the names, then rejects any DEFINE variable that PATTERN does not
 use.  After that it processes each DEFINE variable as follows:
 
-  (1) Checks for duplicate variable names
+  (1) Checks for duplicate variable names -- this one in a pass of its
+      own over the whole list, before any expression is transformed
   (2) Transforms the expression via transformExpr() and coerces it to
       Boolean (coerce_to_boolean) right away, so that the steps below see
       the final expression form
   (3) Wraps in a TargetEntry with the variable name set in resname
-  (4) Extracts Var nodes via pull_var_clause() and ensures each is
-      present in the query targetlist, so the planner propagates the
-      referenced columns through the plan tree
+  (4) Ensures each bare Var the expression reads is present in the
+      query targetlist, planting any that is missing as a resjunk
+      entry (define_plant_walker), so that setrefs.c can resolve it
+      against the WindowAgg's input.  The walk stops at a subexpression
+      GROUP BY computes and plants nothing for it.
+
+      Two properties of a planted entry are load-bearing.  Each is a bare
+      Var, never a whole subexpression the target list already carries:
+      the DEFINE copy and the target list copy are preprocessed
+      independently, so eval_const_expressions() can dissolve the DEFINE
+      copy of a subexpression and leave a bare Var behind with nothing in
+      the input to resolve it against, whereas a bare Var has no shape to
+      lose.  And each is marked resjunk, which is one of the properties
+      remove_unused_subquery_outputs() keeps a column alive for (XIII-2);
+      make_window_input_target() adds nothing of its own for a DEFINE
+      clause.
 
 After all variables are processed:
-  (5) Validates navigation nesting and offsets (define_walker), marks
-      column origins and assigns collations
+  (5) Validates navigation nesting and offsets (define_walker)
+
+Step (5) is where the shape every later phase assumes gets established.
+define_walker() requires the argument of each navigation to contain at least
+one column reference, and requires each offset to be a run-time constant: an
+offset may contain neither a column reference nor another navigation.  The
+Var-free rule is what lets the executor settle an offset once per scan
+(VI-5) rather than once per row -- the offset expression is evaluated with no
+current row installed and the result pinned for the whole scan, which is
+sound only because no column can appear there.  A Param is still allowed, and
+is the case RPR_NAV_OFFSET_NEEDS_EVAL exists for.  An omitted offset stays
+NULL on the node and the kind's default is supplied at execution: 1 for
+PREV/NEXT, 0 for FIRST/LAST, and 1 for a compound outer offset.
 
 Variables that are used in PATTERN but not defined in DEFINE are implicitly
 evaluated as TRUE (matching all rows).
+
+III-4. Column References in a DEFINE Condition
+
+A name written in a DEFINE condition must be unqualified: ISO/IEC 19075-5
+6.5 reserves the qualifier slot for a row pattern variable, so nothing else
+may occupy it.  transformColumnRef() (parse_expr.c) enforces this under
+EXPR_KIND_RPR_DEFINE, rejecting a reference that resolves to an outer
+query's column, a two-part name qualified by a FROM-clause range variable,
+and every other qualified name -- including one that p_post_columnref_hook
+resolves, such as a SQL function's parameter or a PL/pgSQL variable spelled
+with its routine name or block label.  Unqualified, those remain readable;
+it is the spelling that is refused, not the value.
+
+A pattern variable qualifier such as A.price is the one case decided before
+name resolution, by matching the qualifier against the PATTERN variable
+names that transformDefineClause() installs in the parse state for the
+duration of the DEFINE transformation and clears afterwards.  It has to be
+caught there because a pattern variable names no range table entry, so
+ordinary resolution would report a missing FROM-clause entry instead; it is
+reported as not yet implemented.  Deciding on the qualifier alone also means
+a pattern variable takes that name in the qualifier slot from anything else
+that could answer to it -- a FROM-clause alias, or the containing routine,
+whose own parameters become unreachable by their qualified spelling when a
+pattern variable is named after it.  Nothing is lost that way, since a
+qualified name is rejected in DEFINE whoever it names; what changes is which
+of the two rules reports it.  The remaining qualified forms are
+diagnosed only after the reference has resolved, so that a misspelled column
+still gets the ordinary "Perhaps you meant" hint rather than being blamed on
+its qualifier.
+
+All of these rules see only the names the ref hooks leave to the query
+parser, so none of them is the last word on what a DEFINE clause accepts.
+A procedural language that answers a name first keeps it, and PL/pgSQL's
+p_pre_columnref_hook answers whenever the function was written with
+"#variable_conflict use_variable".  In such a function fn.threshold and
+rec.field resolve to the PL/pgSQL datum and return before the qualified-name
+rule runs, and a PL/pgSQL variable sharing a name with a pattern variable
+takes A.price before the reservation above is reached.  The identical text
+in a function using the default resolution is rejected by both.
+
+This is not an oversight in the rules.  use_variable redirects name
+resolution wholesale -- it takes names a table column would otherwise own
+too, which is why the default is to raise an ambiguity error instead -- and
+a clause of one statement is not the place to carve an exception out of a
+function-wide pragma.
+
+A whole-row reference is rejected the same way, and expression list
+expansion (parse_target.c) deliberately does not expand "something.*" under
+EXPR_KIND_RPR_DEFINE: expanding binds by RTE rather than by name, so
+ROW(t.*) would slip past both checks instead of reaching them.
+
+Parentheses turn a qualified name into field selection on a value, and that
+form stays available: "(x).f" and ROW((x).*) reach a composite parameter or
+record variable without occupying the qualifier slot.  They are not a way
+around the rules above -- a parenthesized range variable is still a
+whole-row reference and is still rejected -- which is why the A_Indirection
+arm of transformExpressionList() needs no DEFINE test of its own.
+
+III-5. Navigation Name Resolution
+
+Inside a DEFINE clause the names PREV, NEXT, FIRST and LAST denote row
+pattern navigation rather than functions.  ParseFuncOrColumn()
+(parse_func.c) recognizes them before any catalog lookup, and only for an
+unqualified call written in function syntax while the expression kind is
+EXPR_KIND_RPR_DEFINE; column syntax and CALL are excluded.  Once the name
+matches there is no fallback to function resolution, so an ordinary function
+of one of these names is reachable only through a schema-qualified call.
+That is also why the deparser has to force-qualify such a function name
+(XIV-6).
+
+Skipping the lookup does not skip the shared checks.  The recognized name is
+carried through the wrong-kind-of-routine and decoration checks as if it
+were an ordinary function, so DISTINCT, WITHIN GROUP, ORDER BY, FILTER, OVER
+and RESPECT/IGNORE NULLS keep their usual messages, and only then is the
+RPRNavExpr built.  What that path lets through for a plain function --
+VARIADIC, named arguments, and any argument count other than one or two --
+is rejected with dedicated errors.  Anything added to the shared path has to
+stay safe to run on a name that will never reach the catalog.
+
+III-6. What a DEFINE Expression May Not Contain
+
+A DEFINE expression may not contain a subquery, an aggregate, a window
+function or a GROUPING expression.
+
+The subquery rejection is deliberate over-rejection.  The standard permits a
+subquery in a DEFINE expression provided it neither performs row pattern
+recognition itself nor references a row pattern variable of the outer query;
+the blanket rejection subsumes both conditions by making the subquery
+unreachable until those two walks are implemented.  The other three fall out
+of the EXPR_KIND_RPR_DEFINE arms in parse_agg.c and are reported the generic
+way ("aggregate functions are not allowed in DEFINE", and so on).
+
+Later phases lean on all four being impossible: parse analysis skips
+grouping-expression finalization for a DEFINE clause, and the planner walks
+one with a plain Var pull (XIII-2), neither of which would be correct if a
+DEFINE expression could contain a sublink or an aggregate.  Volatility is
+the one restriction not tested here; it is checked in the planner (XIII-5).
+
+III-7. Query Jumbling
+
+A DEFINE clause is a list of TargetEntry whose resname carries the variable
+being defined, and TargetEntry.resname is query_jumble_ignore everywhere
+else in the tree.  Left at that, "DEFINE A AS p > 50, B AS p < 50" and
+"DEFINE B AS p > 50, A AS p < 50" would jumble alike and share one
+pg_stat_statements entry, though they are different queries.
+WindowClause.defineClause is therefore declared custom_query_jumble and
+handled by hand in queryjumblefuncs.c: the custom function first jumbles the
+list exactly as the generated code would and then appends each entry's
+resname.  A window with no DEFINE clause has an empty list, so the second
+step contributes nothing and its query id is unchanged.
+
+The other RPR node fields follow the usual rule.  RPRNavExpr.navno is
+query_jumble_ignore because the planner assigns it (VI-5), and
+RPRPatternNode.trailing_alt never survives parsing (III-2).
 
 Chapter IV  Compilation Phase
 ============================================================================
@@ -214,6 +440,31 @@ IV-2. The 6 Phases of buildRPRPattern()
   Phase 5: Finalization (finalizeRPRPattern)
   Phase 6: Absorbability analysis (computeAbsorbability)
 
+IV-2a. Compilation Limits
+
+Phase 2 is also where a pattern too large for the element array is
+rejected.  scanRPRPattern() raises two errors, both
+ERRCODE_PROGRAM_LIMIT_EXCEEDED:
+
+  "pattern nesting too deep"
+    A group or alternation nested RPR_DEPTH_MAX levels or deeper.  The
+    test is made on entry to each node, before its children raise the
+    counter, so the one-byte RPRDepth can never wrap.  maxDepth is the
+    deepest depth plus one (it is the length of a state's counts[]), so
+    the deepest nesting a pattern may carry is RPR_DEPTH_MAX - 1.
+
+  "pattern too complex"
+    More than RPR_ELEMIDX_MAX elements, the FIN marker included.  next
+    and jump are RPRElemIdx (int16), so an element past that bound
+    could not be referenced at all.
+
+The number of distinct pattern variables is bounded as well, to
+RPR_VARID_MAX + 1, but that bound belongs to the parser ("too many row
+pattern variables"); buildRPRPattern() collects the names into a
+fixed-size stack array and only asserts it.  None of the three limits
+depends on the input rows -- a pattern that compiles once compiles
+every time.
+
 IV-3. Phase 1: Parse Tree Optimization
 
 After copying the parser-generated parse tree, the following optimizations are
@@ -225,6 +476,18 @@ past a choice point inside the body, which leftmost-choice-first (7.2) makes
 observable, so they are gated on the body consuming a fixed number of rows.
 Alternatives of equal length count as fixed: they pick different variables,
 never different rows.
+
+RPR_QUANTITY_INF is a sentinel meaning unbounded, not a count, and the
+rewrites keep it one.  A min is always finite and a max is at least 1,
+so the sentinel can appear only as a max; Phase 4 asserts that on every
+element it writes.  A rewrite that computes a new bound therefore
+declines rather than store a finite result that reached the sentinel:
+(b), (c) and (g) leave the nodes unmerged when a sum or product
+overflows int32 or lands on RPR_QUANTITY_INF, and (e) leaves the group
+alone when one more iteration would.  Declining is always safe, since
+the unrewritten form matches the same rows in the same order, which is
+what lets these passes treat overflow as a fallback rather than as an
+error.
 
   (a) SEQ flattening: Unwrap nested SEQ nodes
       SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
@@ -264,13 +527,15 @@ never different rows.
       A{2,6} takes four)
 
   (h) Single-child unwrap
-      SEQ(A) -> A,  (A){1,1} -> A
+      SEQ(A) -> A,  ALT(A) -> A,  (A){1,1} -> A
+      A group whose only child is an unquantified variable hands its own
+      quantifier to that child instead:  (A)+? -> A+?
 
   (i) Reluctance normalization: a fixed count leaves reluctance nothing
       to decide, so it is cleared wherever min == max
       A{2}? -> A{2},  (A B){2}? -> (A B){2}
-      This runs before and after each node's own rewrites.  (b) and (g)
-      decline a reluctant node outright, and (c), (d), (e) and (f) compare
+      This runs before and after each node's own rewrites.  (b), (c), (e)
+      and (g) decline a reluctant node outright, and (c) to (f) compare
       nodes with rprPatternEqual(), which treats a reluctant node as unequal
       to its greedy twin.  Without the normalization (A{2}?){3} would stay
       nested where (A{2}){3} collapses to A{6}, and (A{2}? | A{2}) would
@@ -283,6 +548,15 @@ IV-4. Phase 4: NFA Element Array Generation
 
 Transforms the optimized parse tree into a flat array of RPRPatternElement.
 This is the core data structure used for NFA simulation at runtime.
+
+Phases 2 and 4 walk the same tree and must agree on its size: Phase 3
+allocates exactly what Phase 2 counted, and Phase 4 fills the array
+with no bound test of its own.  The count is one element per VAR, a
+BEGIN and an END for each GROUP whose quantifier is not {1,1}, an ALT
+plus one SEP per branch for each alternation, and one FIN for the whole
+pattern; a SEQ contributes nothing.  A new element kind therefore has
+to be added to scanRPRPattern() and fillRPRPattern() together, and so
+does any change to the depth an element is given.
 
 RPRPatternElement struct (16 bytes):
 
@@ -462,16 +736,16 @@ At runtime (nfa_advance), the flag controls Depth-First Search
 (DFS) exploration order:
 
   VAR with quantifier:  (a VAR has no jump; looping stays on the element)
-    Greedy:    primary path = stay (loop), clone = next (exit)
-    Reluctant: primary path = next (exit), clone = stay (loop)
+    Greedy:    primary path = stay (loop), second path = next (exit)
+    Reluctant: primary path = next (exit), second path = stay (loop)
 
   END element:
-    Greedy:    primary path = jump (loop-back), clone = next (exit)
-    Reluctant: primary path = next (exit), clone = jump (loop-back)
+    Greedy:    primary path = jump (loop-back), second path = next (exit)
+    Reluctant: primary path = next (exit), second path = jump (loop-back)
 
   BEGIN with min=0:
-    Greedy:    primary path = next (enter group), clone = jump (skip)
-    Reluctant: primary path = jump (skip), clone = next (enter group)
+    Greedy:    primary path = next (enter group), second path = jump (skip)
+    Reluctant: primary path = jump (skip), second path = next (enter group)
 
 The absorption optimization requires greedy quantifiers. Reluctant
 quantifiers are excluded from absorbability analysis (see IV-5).
@@ -545,7 +819,8 @@ Structural conditions (isUnboundedStart + computeAbsorbabilityRecursive):
 
   Case 3: GROUP+ whose body starts with VAR+ (e.g., (A+ B)+)
           -> Recurses from BEGIN into the body, applying Case 1.
-            ABSORBABLE | ABSORBABLE_BRANCH set on A.
+            ABSORBABLE | ABSORBABLE_BRANCH set on A, and
+            ABSORBABLE_BRANCH on the enclosing BEGIN.
             B and END get no flags -> absorption stops once past A.
 
 A reluctant group disqualifies its whole subtree.  computeAbsorbability-
@@ -561,6 +836,34 @@ flagged region, absorption is permanently disabled for that state.
 Through this mechanism, the runtime guarantees monotonicity:
 "a context that started earlier always subsumes a context that
 started later."
+
+IV-6. Plan Serialization of RPRPattern
+
+RPRPattern carries two variable-length arrays, so the generated node support
+cannot handle it: plannodes.h marks it pg_node_attr(custom_copy_equal,
+custom_read_write, no_equal, no_query_jumble) and the three routines are
+written by hand -- _copyRPRPattern() in copyfuncs.c, _outRPRPattern() in
+outfuncs.c and _readRPRPattern() in readfuncs.c.  equal() and query jumbling
+are suppressed rather than written: RPRPattern is a plan/exec-only node that
+no parse-level comparison reaches and that no Query can reach.
+
+Copy and the text round trip do not carry the same thing.  _copyRPRPattern()
+memcpy()s the elements array and therefore carries all eight fields of
+RPRPatternElement, the reserved padding byte of IV-4 included.
+_outRPRPattern() writes seven fields per element as
+"(varId depth flags min max next jump)" and _readRPRPattern() palloc0()s the
+array, which zeroes reserved, so the round trip drops that byte.  A field
+that takes the reserved byte over has to join those seven at the same time,
+or it will survive copyObject() and vanish through
+nodeToString()/stringToNode() -- the path a plan takes to a parallel worker.
+
+The read side does not leave the token stream to the counts alone.
+makeRPRPattern() guarantees numVars > 0 and numElements >= 2, so out always
+emits both arrays in exactly one shape; _readRPRPattern() drives its loops
+from numVars and numElements, but also checks the '(' and ')' delimiters of
+the varNames list and of every element, because a count that disagreed with
+the list would leave the token stream off by one for everything that follows
+it in the plan.
 
 Chapter V  NFA Runtime Data Structures
 ============================================================================
@@ -602,6 +905,18 @@ Definition of two states being "equal":
   nfa_states_equal() compares counts[0..elem->depth] using memcmp.
   Only counts at or below the depth of the current element are meaningful.
 
+Counts saturate rather than wrap.  Every increment goes through
+RPRCountIncrement(), which stops at RPR_COUNT_INF; that value is
+RPR_QUANTITY_INF (PG_INT32_MAX), so a saturated count compares as
+unbounded in RPRElemCanLoop() and RPRElemWithinMax() exactly as an
+unbounded max does.  Two consequences follow: a saturated count no
+longer distinguishes the states that reached it, so nfa_states_equal()
+may collapse them, and the count-dominance test of VIII-3 reads two
+saturated counts as dominating each other.  Both are harmless -- past
+RPR_COUNT_INF iterations a quantifier can neither run out nor be
+exceeded -- but a bare count++ added anywhere in the engine would
+overflow int32 instead of settling there.
+
 V-2. RPRNFAContext -- Matching Context
 
 A single context represents "a matching attempt started from a specific
@@ -615,6 +930,8 @@ start row."
                         (-1 if incomplete)
   lastProcessedRow      Last row processed
   matchedState          State that reached FIN (for greedy fallback)
+  matchUpdated          Whether the advance now running already recorded
+                        a match (at most one per advance)
   hasAbsorbableState    Whether this context can absorb other contexts
   allStatesAbsorbable   Whether this context can be absorbed
   next, prev            Doubly-linked list
@@ -665,10 +982,14 @@ Chapter VI  NFA Execution: 3-Phase Model
 
 VI-1. Entry Point and Overall Flow
 
-When the window function processes each row, row_is_in_reduced_frame()
-is called. This function determines whether the current row belongs to
-a matched frame, and if necessary, calls update_reduced_frame() to
-drive the NFA.
+ExecWindowAgg() drives the match once for every row of the scan by
+calling ensure_reduced_frame(), so the match tracks the row scan rather
+than frame access.  That function is idempotent: it calls
+update_frameheadpos() and update_reduced_frame() only when
+get_reduced_frame_status() reports the row as RF_NOT_DETERMINED.
+row_is_in_reduced_frame(), which the frame access paths call to classify
+a row, goes through ensure_reduced_frame() first and then reads the
+recorded result.
 
 Flow of update_reduced_frame():
 
@@ -702,6 +1023,27 @@ Pseudocode of the row processing loop:
 Key point: Processing a single row may require processing multiple rows
 ahead. Due to the nature of window functions, determining the frame for
 row N requires looking at rows beyond N.
+
+Partition end: when rpr_prepare_row() reports no row at the scan
+position, ExecRPRFinalizeAllContexts() stops every context that is still
+running.  It calls nfa_match() with a NULL varMatched, which fails every
+VAR, then nfa_advance() to drain the epsilon transitions that failure
+leaves behind.  The point is uniformity: every context comes out with
+states == NULL, so the cleanup that follows classifies them all by one
+rule.  Genuine FIN reaches have all been recorded in flight, so only
+three shapes survive to this call: pure pursuit (matchedState == NULL),
+which the forced mismatch turns into a failure; an empty-match candidate
+whose VAR states are still chasing a longer match (matchedState != NULL,
+matchEndRow < matchStartRow); and a recorded match whose states are
+still looping for a longer one.
+
+ExecRPRCleanupDeadContexts() then frees every context left with no
+states, with two exceptions.  The context the caller passes as
+excludeCtx is never freed: the caller still owns it and reads its result
+from it.  A context holding a recorded match is left to the SKIP logic,
+and the test for that is matchedState, not matchEndRow -- an empty match
+ends one row before matchStartRow (VI-2), so a row-length test would
+take it for a failure and count it as pruned or mismatched.
 
 VI-2. Context Creation: ExecRPRStartContext()
 
@@ -756,6 +1098,18 @@ result folds to RPR_VAR_FALSE (non-True is not mapped).  The caller
 position for the whole row (restored after the loop) because the deferred
 navigation opcodes read currentpos.
 
+DEFINE evaluation runs in rprContext, a third ExprContext that
+ExecInitWindowAgg() creates only for a window carrying a DEFINE clause.
+It has to stay distinct from tmpcontext and from the output context
+ps_ExprContext: nfa_eval_var_match() resets it before every predicate
+evaluation, and a shared context would free the input or output tuple's
+memory underneath its owner.  A predicate leaves nothing behind that
+outlives it -- the verdict is a by-value bool cached in nfaVarMatched --
+so no caller has to arrange the reset on its behalf.
+ExecAssignExprContext() overwrites ps_ExprContext on each call, so the
+DEFINE context is built between the two standard ones and the last call
+is the one that establishes the output context.
+
 To support row navigation operators (PREV, NEXT, FIRST, LAST),
 a 1-slot model is used: only ecxt_outertuple is set to the current
 row.  Navigation is handled by EEOP_RPR_NAV_SET/RESTORE opcodes
@@ -765,6 +1119,15 @@ emitted during DEFINE expression compilation:
   (evaluate):  argument expression reads from swapped slot
   NAV_RESTORE: restore original ecxt_outertuple
 
+Between SET and the argument the compiler plants an EEOP_JUMP_IF_NULL
+step whose target is the RESTORE step, so a navigation to a row that
+does not exist skips the argument expression entirely instead of
+evaluating it against the wrong row.  That makes the SET step's resnull
+a contract rather than a by-product: it has to be written on every path
+-- true when the target row is out of range, a definitive false when the
+row exists -- because resnull may still carry a stale value from an
+earlier evaluation of the same expression.
+
 Compound navigation (PREV(FIRST()), NEXT(FIRST()), PREV(LAST()),
 NEXT(LAST())) is flattened by the parser into a single RPRNavExpr
 with a compound kind (RPR_NAV_PREV_FIRST, etc.).  The executor
@@ -773,12 +1136,82 @@ point (match_start + N or currentpos - N) with match-range validation,
 then the outer adjustment (+/- M) with partition-range validation.
 If either step is out of range, the result is NULL.
 
+The offsets are optional in the source text, and the default differs by
+kind: PREV and NEXT default to 1, FIRST and LAST to 0, and every compound
+kind defaults to inner 0 with outer 1, so PREV(FIRST(x)) reads the row
+before the match start.  RPRNavExpr leaves a missing offset as a NULL
+offset_arg or compound_offset_arg rather than materializing a Const;
+resolve_nav_offsets() supplies the kind's default once per scan (VI-5),
+and RPRNavKind (primnodes.h) is what records which default applies.
+
+When the computed target is the current row -- LAST(expr), PREV(expr, 0)
+and NEXT(expr, 0) all resolve there -- ExecEvalRPRNavSet() skips the
+tuplestore fetch and the swap altogether and just reports the row as
+present.  It records nav_saved_outertuple first all the same, so that
+EEOP_RPR_NAV_RESTORE stays a harmless no-op: RESTORE recognizes the
+elision by finding ecxt_outertuple unchanged and returns immediately,
+which is correct because the argument read the current row's slot rather
+than nav_slot.
+
 nav_slot caches the last fetched position (nav_slot_pos) to avoid
 redundant tuplestore lookups when multiple navigation calls target
 the same row.
 
+That single slot is also why a navigation result cannot simply be left
+where the argument produced it.  A pass-by-reference result points into
+nav_slot's tuple memory, and the next navigation in the same expression
+frees that tuple when it re-fetches the slot for another position.
+EEOP_RPR_NAV_RESTORE therefore copies a non-null pass-by-ref result into
+ecxt_per_tuple_memory, which survives until the next ResetExprContext,
+before it returns.  Rather than look the type up on every evaluation,
+ExecInitExprRec() reads the type length and by-value flag once from the
+RPRNavExpr's resulttype and stores them in the shared RPRNavState as it
+emits the RESTORE step; every compilation of the same navigation writes
+the same pair, so repeating it is harmless.
+
 The nfaVarMatched entries are filled lazily during Phase 1 (Match) as
 variables are consumed.
+
+VI-3a. Slot Swap Consumers: Interpreter and JIT
+
+The swap happens in the middle of an already-compiled expression, so
+everything that expression cached about the outer tuple goes stale at
+that point and has to be refreshed:
+
+  - Deformed columns.  The expression's FETCHSOME step ran once, against
+    the original slot, so ExecEvalRPRNavSet() calls slot_getallattrs()
+    on the target slot before installing it.  A narrower deform there
+    would leave the argument reading unset tts_values entries.
+
+  - The caller's cached slot pointer.  ExecEvalRPRNavSet() and
+    ExecEvalRPRNavRestore() update econtext->ecxt_outertuple only, so
+    every caller must reload its own copy afterwards.  The interpreter
+    (execExprInterp.c) reassigns its local outerslot in both opcode
+    arms.
+
+  - The JIT's entry-block loads.  llvm_compile_expr() (llvmjit_expr.c)
+    normally loads tts_values and tts_isnull once in the entry block and
+    reuses them for every EEOP_OUTER_VAR.  For an RPR window it first
+    scans the steps for EEOP_RPR_NAV_SET or EEOP_RPR_NAV_RESTORE, and
+    when it finds one, each EEOP_OUTER_VAR reloads the slot pointer from
+    econtext instead of using the cached entry-block values.
+
+The SET step reaches the tuplestore through ExecRPRNavGetSlot()
+(nodeWindowAgg.h), the one executor entry point expression evaluation uses:
+it bounds-checks the position against the partition and returns NULL for a
+row outside it, which is what that step reports as a null result.  RESTORE
+fetches nothing.  It puts back the slot SET swapped out, and copies a
+pass-by-reference result into per-tuple memory so that a later fetch of
+nav_slot cannot pull the tuple out from under it.
+
+Both evaluators run out of line, reached through build_EvalXFunc(),
+which is why ExecEvalRPRNavSet and ExecEvalRPRNavRestore appear in
+referenced_functions in llvmjit_types.c.
+
+DEFINE expressions are otherwise ordinary ExprStates, so a row pattern
+window is JIT-compiled like any other; the RPR-specific part of
+expression compilation is ExecInitExprRec()'s T_RPRNavExpr arm
+(execExpr.c).
 
 VI-4. Per-Context Invalidation (match_start_dependent variables)
 
@@ -791,7 +1224,7 @@ matchStartRow before matching, so lazy evaluation uses the correct
 FIRST/LAST base position.
 
 When processing a context whose matchStartRow differs,
-nfa_reevaluate_dependent_vars() resets only the dependent variables to
+nfa_invalidate_dependent_vars() resets only the dependent variables to
 RPR_VAR_UNEVALUATED so they are re-evaluated lazily against this context's
 matchStartRow, installs nav_match_start to that value, and invalidates the
 nav_slot cache.  match_start-independent variables keep their cached value
@@ -799,9 +1232,7 @@ across contexts (they do not read nav_match_start).
 
 nav_match_start is left installed and NOT restored: FIRST/LAST read it at
 evaluation time, which happens later during nfa_match(); the next
-context's invalidation or the next row's setup overwrites it.  The
-function also resets rprContext so one context's DEFINE scratch does not
-accumulate across every context of a row.
+context's invalidation or the next row's setup overwrites it.
 
 Summary of evaluation strategy by navigation content (a variable is
 evaluated once per row and cached, except dependent ones which are
@@ -839,18 +1270,43 @@ the executor computes two offsets at init (see build_define_offsets):
 The actual mark is set to: min(lookback_mark, lookahead_mark).
 This ensures all rows reachable by any navigation function are retained.
 
+The mark advance_nav_mark() moves belongs to nav_winobj, a WindowObject
+that exists only for RPR navigation, with its own tuplestore read and
+mark pointer pair allocated in prepare_tuplestore() and reset in
+begin_partition().  Holding it apart from agg_winobj and from the
+per-window-function objects is what lets the DEFINE clause's lookups
+trim the tuplestore without moving anyone else's fetches.  The mark only
+ever advances, and every RPR window gets a nav_winobj whether or not its
+DEFINE navigates at all.
+
+Each RPRNavExpr carries a navno, its index into that list of offsets.
+The parser leaves it -1; compute_define_metadata()
+(optimizer/plan/createplan.c) numbers the navigations in walk order
+while it classifies match_start dependency, and build_define_offsets()
+fills rprNavOffsets by walking the same expressions in the same order,
+so entry i is the navigation with navno i.  The offsets live in
+executor state rather than on the RPRNavExpr, the plan tree being
+read-only, so the expression compiler looks the entry up by navno when
+it emits the EEOP_RPR_NAV_SET/RESTORE pair.  The two walks have to stay
+in step: execExpr.c raises "RPRNavExpr navno %d out of range" instead
+of indexing past the list, and rejects an entry that does not point
+back at the same RPRNavExpr.
+
 When offsets contain non-constant expressions (Param), the executor sets
 navMaxOffsetKind/navFirstOffsetKind to RPR_NAV_OFFSET_NEEDS_EVAL.  A constant
 offset is resolved at init, as is a bind parameter the planner folded to a
 Const for a custom plan; under a generic plan that parameter stays a Param and
 resolves per scan, as a PARAM_EXEC offset does.  Either way every navigation is
 settled again per scan by resolve_nav_offsets(), which is where a null or
-negative offset is rejected.  On overflow, the kind is set to
-RPR_NAV_OFFSET_RETAIN_ALL, disabling trim for that dimension.  An offset that
-resolves negative is rejected at execution, so that navigation can never run and
-is left out of both reaches; it behaves exactly as if it were not in the DEFINE.
-Each dimension is reported only when some navigation feeds it (hasMaxNav,
-hasFirstNav), so an empty one prints nothing rather than a reach of zero.
+negative offset is rejected.  On a backward-reach overflow, navMaxOffsetKind is
+set to RPR_NAV_OFFSET_RETAIN_ALL, disabling trim for that dimension.  The
+forward reach has no such sentinel: an overflowing FIRST reach clamps to
+PG_INT64_MAX, which bounds nothing and which EXPLAIN prints as "infinite".  An
+offset that resolves negative is rejected at execution, so that navigation can
+never run and is left out of both reaches; it behaves exactly as if it were not
+in the DEFINE.  Each dimension is reported only when some navigation feeds it
+(hasMaxNav, hasFirstNav), so an empty one prints nothing rather than a reach of
+zero.
 
 VI-6. ExecRPRProcessRow(): 3-Phase Processing
 
@@ -969,7 +1425,7 @@ on a non-absorbable branch, which an absorbing context cannot reproduce.
 Absorption therefore excludes any context holding a recorded match (see
 nfa_update_absorption_flags()).  This costs no efficiency: SKIP PAST LAST
 ROW still prunes such redundant contexts once the covering match is
-recorded (nfa_add_matched_state()).
+recorded (nfa_prune_skipped_contexts(), called from ExecRPRProcessRow()).
 
 VIII-3. Absorption Conditions
 
@@ -1029,11 +1485,15 @@ Runtime conditions (evaluated per context pair):
 
 Cover condition (nfa_states_covered) -- "count-dominance":
 
-  A state with the same elemIdx exists in the earlier context,
-  and the count at that depth is greater than or equal -- then it is
-  covered.  The earlier context's per-depth iteration count thus
-  dominates the later one's; this is the count-dominance comparison
-  referenced in VIII-3(c).
+  Every state of the later context must sit on an element carrying
+  RPR_ELEM_ABSORBABLE, the comparison point; a state anywhere else
+  makes the two contexts incomparable and nothing is covered.  Such a
+  state is covered when the earlier context holds an absorbable state
+  with the same elemIdx whose count at that element's depth is greater
+  than or equal -- a same-elemIdx state that has already left the
+  absorbable region does not cover.  The earlier context's iteration
+  count thus dominates the later one's; this is the count-dominance
+  comparison referenced in VIII-3(c).
 
 VIII-4. Dual-Flag Design
 
@@ -1228,8 +1688,11 @@ IX-4. Per-Element advance Behavior
   has the highest preferment, so the rest are inferior paths.
   This is the core mechanism that guarantees preferment.
 
-  In SKIP PAST LAST ROW mode, upon reaching FIN, subsequent contexts
-  that started within the match range are immediately pruned.
+  In SKIP PAST LAST ROW mode the later contexts that started within the
+  match range become unreachable, but reaching FIN does not free them:
+  it only sets matchUpdated.  ExecRPRProcessRow() reads that flag once
+  nfa_advance() has finished with the context and calls
+  nfa_prune_skipped_contexts() there.
 
 IX-5. State Deduplication: nfa_append_state_unique()
 
@@ -1253,7 +1716,9 @@ Example: PATTERN ((A? B?)+)
 
   A? and B? both have min=0, so the body can pass through without
   matching.  If the group repeats: BEGIN -> A? skip -> B? skip -> END ->
-  BEGIN -> ...
+  A? skip -> ...  The loop-back re-enters the body directly, since
+  END.jump is the group's first child; BEGIN is visited only on initial
+  group entry.
 
 To prevent this:
 
@@ -1333,6 +1798,22 @@ not been evaluated yet (RF_NOT_DETERMINED).
 A row's status against the current match result can be obtained by
 calling get_reduced_frame_status().
 
+The frame accessors in nodeWindowAgg.c -- WinGetSlotInFrame() and
+ignorenulls_getfuncarginframe(), the latter serving IGNORE NULLS --
+clip every seek to the reduced frame.  Each asks
+row_is_in_reduced_frame() about frameheadpos and takes the length it
+returns as the frame's extent: a WINDOW_SEEK_HEAD relpos at or past
+that length is out of frame, as is a WINDOW_SEEK_TAIL relpos whose
+backward distance reaches it, the tail case landing on
+frameheadpos + relpos + length - 1.  That arithmetic assumes the
+reduced frame is one contiguous run beginning at frameheadpos, which
+holds only because RPR rejects EXCLUDE (III-1) and pins the frame start
+at CURRENT ROW; relaxing either restriction means revisiting both
+accessors.  The same guarantee is why a WINDOW_SEEK_TAIL access under
+RPR marks frameheadpos rather than the accessed row: the frame start
+never moves backwards, so the mark can never end up ahead of a row a
+later fetch still needs.
+
 X-2. AFTER MATCH SKIP
 
 Determines the starting point for the next match attempt after a successful
@@ -1345,6 +1826,24 @@ match:
   SKIP PAST LAST ROW:
     New match attempt begins from the row after the match end row.
     Only non-overlapping matches are possible.
+
+The clause is optional and its absence is not neutral: the grammar
+supplies SKIP PAST LAST ROW, so that is what an RPR window gets by
+default, and with it the absorption prerequisite of VIII-3(a).
+
+RPSkipTo has a third value, ST_NONE, which the RPR productions never
+produce.  It is what a window with no row pattern common syntax leaves in
+WindowClause.rpSkipTo, so ST_NONE means "not an RPR window", never "an
+RPR window that did not say".
+
+The result slot of X-1 holds one match at a time, so SKIP TO NEXT ROW
+needs it cleared before each row: ExecWindowAgg() calls
+clear_reduced_frame() at the top of every row when rpSkipTo is
+ST_NEXT_ROW.  Without that, a row inside the previous match would
+answer RF_SKIPPED and be reported as an interior row instead of
+starting a match of its own.  SKIP PAST LAST ROW keeps the slot across
+rows, which is exactly what makes the interior rows of its match report
+as skipped.
 
 X-3. INITIAL vs SEEK
 
@@ -1367,6 +1866,13 @@ X-4. Bounded Frame Handling
   offset (n >= 1) FOLLOWING; a CURRENT ROW end or a zero offset is
   rejected, since it would reduce the frame to the single current row.
 
+  The zero-offset rejection is repeated at execution, in
+  calculate_frame_offsets(), the same place the ordinary frame bounds
+  are computed.  A literal is caught by the parser, but an offset that
+  is not constant until the scan -- a bind parameter, say -- reaches
+  that check instead, and it raises "frame ending offset must be
+  positive with row pattern recognition".
+
   When the frame is bounded (e.g., ROWS BETWEEN CURRENT ROW AND 5
   FOLLOWING), ExecRPRProcessRow derives the upper bound itself from
   winstate->frameOptions and winstate->endOffsetValue, using a
@@ -1380,6 +1886,18 @@ X-4. Bounded Frame Handling
   Note that bounded frames also disable context absorption at the
   planner level (see VIII-3(b)), since the frame boundary breaks the
   monotonicity assumption required for correct absorption.
+
+X-5. Window Aggregates over the Reduced Frame
+
+  RPR switches off the moving-aggregate path.  eval_windowaggregates()
+  marks every plain aggregate for restart on every row when
+  rpr_is_defined(), because one row's reduced frame need not overlap the
+  next row's at all, and overlap is the assumption an inverse transition
+  function rests on.  The aggregation loop then reads the reduced frame
+  itself to find where to stop: it stops when currentpos is determined
+  but aggregatedupto is not, when row_is_in_reduced_frame() reports an
+  unmatched row, or when the base row of the aggregation turns out to be
+  an interior (RF_SKIPPED) row of a match.
 
 Chapter XI  Worked Example: Full Execution Trace
 ============================================================================
@@ -1451,7 +1969,7 @@ RPR_VAR_UNEVALUATED.
     Phase 3 (Advance): skipped (no states)
 
   C0.states is empty, so the loop terminates.
-  matchEndRow < matchStartRow -> unmatched.
+  matchedState is NULL -> unmatched.
 
 --- Row 1 (price=110) ---
 
@@ -1530,7 +2048,8 @@ RPR_VAR_UNEVALUATED.
       Early termination: no remaining states, so completed immediately.
     C1.states = [] (empty after reaching FIN)
 
-  C1.states is empty and matchEndRow=3 >= matchStartRow=1 -> match succeeds.
+  C1.states is empty and matchedState is set -> match succeeds,
+  spanning matchStartRow=1 through matchEndRow=3.
 
   rpr_match_start = 1, rpr_match_length = 3
 
@@ -1654,7 +2173,7 @@ XII-5. Execution Optimization Summary
   (4) Cycle Detection and Fast-Forward (IX-6, IX-4(c))
 
     When a nullable group body (e.g., A?) repeats empty matches,
-    the END -> BEGIN loop-back can continue indefinitely.
+    the END -> first-child loop-back can continue indefinitely.
 
     Two mechanisms resolve this:
     - A visited bitmap (nfaVisitedEnds) marks a nullable END whose body
@@ -1710,6 +2229,298 @@ XII-5. Execution Optimization Summary
     level, achieving O(n^2) -> O(n) time complexity. Without this,
     performance degrades sharply on long partitions.
 
+Chapter XIII  Planner Integration
+============================================================================
+
+The compilation of Chapter IV is only part of what the planner does with a
+row pattern window.  The rest is spread over the code that handles window
+clauses in general, and it exists because DEFINE is the one window clause
+field that carries an expression tree of its own.  This chapter collects
+those contracts.  Each is a rule that a change elsewhere in the planner can
+break without any RPR-specific code being touched.
+
+XIII-1. Ownership of the DEFINE Expression Tree
+
+defineClause is the one field in which a window clause owns an expression
+tree.  partitionClause and orderClause hold only SortGroupClause references
+into the query targetlist, and a frame offset may not contain Vars, so for
+every other window clause field a Query-wide scan sees the expressions
+through the targetlist.  The DEFINE expressions are reached only through the
+window clause itself.
+
+query_tree_walker() and query_tree_mutator() (nodeFuncs.c) therefore descend
+into wc->defineClause in both branches, the QTW_EXAMINE_SORTGROUP one and
+the plain one, and expression_tree_walker() descends into it from
+T_WindowClause.  Every Query-wide rewriter thus reaches the Vars a DEFINE
+clause holds, and cannot tell a dead window's Vars from a live one's.  Join
+removal, for instance, deletes a relid from the whole parse tree once
+nothing needs the relation, which requires that no ordinary Var of it be
+left anywhere.
+
+Whoever decides that a window clause will not be executed is therefore
+responsible for emptying defineClause at that moment, rather than expecting
+later scans of the tree to skip it.  remove_unused_subquery_outputs()
+(allpaths.c) does this for a subquery window that no window function
+references.  Only defineClause is cleared, never the WindowClause itself:
+winref is a one-based index into windowClause, so the list must keep its
+length and its order.  rpPattern stays as well.  It holds no Vars, an
+undefined pattern variable simply matches TRUE, and leaving it is what keeps
+optimize_window_clauses() from mistaking an emptied RPR clause for a
+duplicate of a plain window.
+
+XIII-2. Keeping a DEFINE-only Column Alive
+
+A column that nothing reads except a DEFINE expression still has to survive
+subquery pruning.  remove_unused_subquery_outputs() pulls the Vars out of
+every still-live DEFINE clause and refuses to replace a targetlist entry
+that one of them names, matching on varno, varattno and varlevelsup.  That
+guard stands alone: nothing downstream re-adds a DEFINE column to the
+WindowAgg's input target, so a column dropped there is one the pattern match
+can no longer read.
+
+The order within that function matters.  The window function targetlist
+entries are settled first and the surviving set of active windows is read
+off them; only then is it decided which DEFINE clauses to withdraw.  A
+clause withdrawn before that would take its columns with it.
+
+XIII-3. A DEFINE Clause That Takes Part in Grouping
+
+A DEFINE expression may reference a GROUP BY column, so parseCheckAggregates()
+puts GROUP Vars into defineClause the same way it puts them into the
+targetlist, and subquery_planner() expands them again with
+flatten_group_exprs().  It passes the same root it passes for the targetlist,
+so that the varnullingrels a grouping set attached survive onto the
+replacement.
+
+Expanding them separately is not an option.  set_upper_references() later
+matches the DEFINE copy of an expression against the targetlist copy and
+insists the two agree; a mismatch is not a wrong answer at runtime but a
+"variable not found in subplan target list" failure at plan time.
+
+This is also why the parser's Var planting (III-3) stops at a subexpression
+GROUP BY computes.  The grouping step already produces a Var for it, and
+planting underneath would offer the columns below it to the grouping logic,
+which would then reject them as ungrouped.
+
+XIII-4. Navigation Arguments and Subquery Pull-up
+
+A navigation's argument is evaluated at the row the navigation lands on, not
+at the row being tested (VI-3).  When subquery pull-up substitutes a
+subquery output expression into a DEFINE clause, a replacement that does not
+depend on the row -- a constant, or anything built only from values outside
+the subquery -- must not simply be folded into that argument, or PREV(x)
+would collapse to a value that no longer varies with the row it is read at.
+
+replace_rte_variables_mutator() (rewriteManip.c) therefore handles RPRNavExpr
+itself instead of leaving it to the generic mutator: it sets in_rpr_nav_arg
+while it walks arg and restores the previous value before walking offset_arg
+and compound_offset_arg, which are ordinary expressions read at the current
+row.  pullup_replace_vars_callback() (prepjointree.c) adds that flag to the
+conditions that make a replacement a wrapping candidate, beside
+varnullingrels and the caller's own wrap option.  A replacement that is
+itself a simple Var still escapes the wrapper, which costs nothing since a
+Var already varies with the row; anything else -- the row-independent
+expression that would otherwise be folded into the argument -- comes back
+wrapped in a PlaceHolderVar.
+
+XIII-5. Where Volatility Is Rejected
+
+A DEFINE expression may not contain a volatile function, but volatility is
+not tested during parse analysis.  The check runs in the planner, where the
+DEFINE clause is passed through preprocess_expression(), and raises "DEFINE
+clause cannot contain volatile functions".  A subquery the planner discards
+before that point is therefore never checked, which is the same rule that
+lets a volatile expression fold away.
+
+The restriction exists because the NFA evaluates a DEFINE at most once per
+row and caches the result (VI-3), re-evaluating only the match_start
+dependent variables of VI-4.  The number of evaluations is not something a
+query can rely on.
+
+XIII-6. Optimizations an RPR Window Is Excluded From
+
+Two prosupport-driven optimizations skip a window clause whose defineClause
+is not empty.
+
+find_window_run_conditions() (allpaths.c) declines to push a run condition
+down.  A run condition stops evaluating a monotonic window function once the
+qual can no longer be satisfied; but with a DEFINE clause the partition is
+divided into reduced frames, and each one has to be evaluated to the end of
+the partition, so an early stop would cut a later reduced frame short.
+
+optimize_window_clauses() (planner.c) does not offer the clause to the
+window functions' support functions at all.  A support function is free to
+propose any frameOptions it likes, and RPR requires the frame shape of
+Chapter I; skipping the clause outright is what keeps one from replacing the
+frame with a shape RPR cannot run.  The duplicate-clause check that follows
+a successful rewrite still compares rpSkipTo, defineClause and rpPattern.
+
+XIII-7. Var Fixup and Costing
+
+The DEFINE expressions cross the plan-node interface inside the WindowAgg,
+so set_upper_references() (setrefs.c) rewrites their Vars to OUTER_VAR
+alongside the node's targetlist and qual.  That is what lets the NFA
+evaluate a DEFINE against the outer tuple slot (VI-3).  The generic plan
+walk does not reach a window clause's own expressions, so the fixup is
+spelled out for defineClause by hand.
+
+SS_finalize_plan() has the same blind spot and the same fix.  A DEFINE
+expression may carry a Param -- a navigation offset settled per scan is the
+case that matters (VI-5) -- and the parameter sets a plan node advertises are
+collected by walking its expressions.  The T_WindowAgg arm therefore runs
+finalize_primnode() over defineClause beside startOffset and endOffset, so
+that a DEFINE Param reaches extParam and allParam.  A parameter missing from
+those sets is one that does not force a rescan when it changes.
+
+Costing sees an RPR window only through the WindowClause.  When rpPattern is
+set, cost_windowagg() (costsize.c) charges each DEFINE expression's per-tuple
+cost once per input tuple, once for every DEFINE variable, on top of the
+window functions' own costs.  That is an upper bound, since the lazy
+evaluation of VI-3 skips a variable no active state tests at that row, but it
+keeps an expensive DEFINE visible to the choice of plan below the WindowAgg.
+
+Chapter XIV  Deparse and EXPLAIN Output
+============================================================================
+
+An RPR window is printed back by two independent printers, and they produce
+different text on purpose.  Both must round-trip: what pg_get_viewdef()
+prints has to re-parse into the same query, and what EXPLAIN prints has to
+describe the pattern the executor will actually run.
+
+XIV-1. Two Printers, Two Spellings
+
+pg_get_viewdef() and friends (get_rule_windowspec(), get_rule_pattern() in
+ruleutils.c) walk the parse tree the parser built, so a stored view shows
+the PATTERN as the user wrote it.  The clause is emitted in full, each part
+on its own line: AFTER MATCH SKIP, then INITIAL, then PATTERN, then DEFINE.
+INITIAL is printed unconditionally, since SEEK is not implemented and the
+window clause records no flag that would distinguish the two.
+
+EXPLAIN (show_window_def(), deparse_rpr_pattern() in explain.c) walks the
+compiled element array instead, so it shows the pattern after the Phase 1
+rewrites of IV-3: PATTERN (A A) is stored as written but explains as "a{2}".
+EXPLAIN also parenthesizes every group and every alternation for
+self-consistency, so a top-level A | B explains as "(a | b)" where
+pg_get_viewdef() prints it bare.  Only the pattern is shown; the DEFINE
+clause and the skip mode do not appear in EXPLAIN output.
+
+XIV-2. Reading the Compiled Array
+
+Two markers may follow a quantifier in EXPLAIN's output, and they report the
+flags of IV-5: "#" on an element carrying RPR_ELEM_ABSORBABLE, the
+comparison point, and "~" on one carrying only RPR_ELEM_ABSORBABLE_BRANCH,
+the region.  So "a+#" is an absorbable A+, "(a~ b~){2,}#" an absorbable
+(A B){2,}, and a pattern that prints no marker at all was found
+unabsorbable.  Neither character can occur in an unquoted variable name, and
+a name containing one is double-quoted, so a marker is never read as part of
+a name.
+
+The printer leans on two compile-time invariants.  A {1,1} group never
+reaches the array (IV-3 (h)), so every surviving BEGIN/END pair carries a
+non-trivial quantifier, which is read from the END element.  A fixed count
+is normalized to greedy (IV-3 (i)), so a trailing "?" in EXPLAIN's output is
+always reluctance and never {0,1}.
+
+It also relies on two properties of the SEP chain of IV-4.  A nested
+alternation's last SEP has its next redirected past the enclosing
+alternation, exactly as a branch tail does, so next is not a way to find
+where an alternation ends.  The last SEP is however always emitted as the
+alternation's final element, so the index of the last SEP plus one is this
+alternation's own post-ALT element.  That is how rpr_alt_scope_end()
+(explain.c) bounds an alternation and walks its branch boundaries, and a
+change to the SEP chain has to keep both properties.
+
+XIV-3. Pattern Variable Quoting
+
+A pattern variable is printed by quote_pattern_variable() (ruleutils.c),
+which is quote_identifier() plus one extra case: the name permute is quoted
+even though PERMUTE is an unreserved keyword.  A bare permute followed by
+'(' inside a PATTERN would be re-read as the PERMUTE syntax the parser
+rejects, so the deparsed text would no longer re-parse.  The DEFINE clause
+has no such hazard, because a name there is always followed by AS;
+get_rule_define() therefore uses plain quote_identifier(), and one variable
+can legitimately print bare in DEFINE and quoted in PATTERN.
+
+quote_pattern_variable() is exported from ruleutils.h precisely so that
+EXPLAIN's own printer can call it.  Both printers must spell a variable the
+same way, so a new printer calls it rather than quote_identifier().
+
+XIV-4. Reluctance On A Fixed Count
+
+The parse-tree printer emits nothing at all for a {1,1} node, so a reluctant
+{1,1} would print as a bare '?', which re-parses as the {0,1} quantifier.
+It therefore emits an explicit {1} first, and A{1}? deparses as a{1}?.
+
+EXPLAIN's printer has no such case and instead asserts min != max on a
+reluctant element, because IV-3 (i) has already cleared reluctance wherever
+min == max.  The parse tree ruleutils.c reads has not been through that
+pass: buildRPRPattern() runs Phase 1 on a copy of the pattern and never
+writes back to the WindowClause.  That is why only one of the two printers
+needs the guard.
+
+XIV-5. Pinning the Column Names a DEFINE Clause References
+
+Inside DEFINE a column reference has no qualifier available, because the
+qualifier slot names a pattern variable.  get_rule_define() prints with
+varprefix off for that reason, so every column it prints has to resolve,
+unqualified, to the same column when the text is read back.
+
+set_define_names() (ruleutils.c, called after the USING names are set and
+before column aliases are assigned) walks every window's defineClause and
+hands each Var to pin_define_colname(), which registers the printed name the
+way a USING merged column is registered and stores it in the owning RTE's
+colnames entry.  No other RTE may then be given that name, so a same-named
+column elsewhere in the query is uniquified and its RTE gets a column alias
+list.  Without the pin, another relation of the query acquiring such a column
+would make an existing view's DEFINE clause ambiguous on re-parse.
+
+pin_define_colname() has to resolve the Var the way the printer will resolve
+it -- through varnosyn/varattnosyn when the Var reads a join column and no
+plan is set -- or the name it reserves is not the name that reaches the
+output.  Outer-level Vars and whole-row or system attributes have no name to
+pin and are skipped.
+
+XIV-6. Navigation Names Shadow User Functions
+
+Within a DEFINE clause the parser binds an unqualified prev, next, first or
+last to a navigation operation before any catalog lookup (III-5), so an
+unqualified call to a user function of one of those names would change
+meaning across a deparse and re-parse.  get_rule_define() sets inRPRDefine in
+the deparse context for the duration of the clause, and generate_function_name()
+force-qualifies exactly those four names while it is set, the same treatment
+cube and rollup get inside GROUP BY.  Only the exact lower-case spellings are
+at risk: a mixed-case function name deparses quoted and cannot match the
+parser's downcased comparison.
+
+inRPRDefine is part of the deparse context, so every routine that builds one
+initializes it, and get_rule_define() saves and restores it around the clause
+the way it does varprefix.
+
+XIV-7. DEFINE Vars Under a GROUP RTE
+
+When a query groups, the rewriter replaces grouped expressions with Vars of a
+GROUP RTE, and the deparser expands those back with flatten_group_exprs()
+before printing.  The targetlist and havingQual expansion does not reach a
+window's DEFINE clause, yet that clause carries GROUP Vars of its own
+whenever it references a subexpression the grouping step computes (XIII-3).
+get_query_def() therefore runs flatten_group_exprs() over each window's
+defineClause as well.  Without it the deparsed DEFINE would name the grouping
+step's output rather than the expression the user wrote, and the view would
+not re-parse.
+
+XIV-8. Navigation Trim in EXPLAIN
+
+The two navigation reaches of VI-5 are printed as Nav Mark Lookback and Nav
+Mark Lookahead, read straight out of the WindowAggState.  They appear for a
+plain EXPLAIN as well, because executor init runs and that is where a
+constant offset is settled.  Each dimension prints its kind rather than
+merely a number: "runtime" for RPR_NAV_OFFSET_NEEDS_EVAL, since the value is
+only known per scan, "retain all" for RPR_NAV_OFFSET_RETAIN_ALL, and the
+offset itself for RPR_NAV_OFFSET_FIXED.  Only the backward dimension can
+reach the retain-all state; a forward reach that overflows clamps to
+PG_INT64_MAX, which prints as "infinite", and EXPLAIN asserts that the
+lookahead is never retain-all.
+
 Appendix A. Data Structure Relationship Diagram
 ============================================================================
 
@@ -1730,6 +2541,7 @@ Appendix A. Data Structure Relationship Diagram
   WindowAgg (plan node)
     |--- rpSkipTo: RPSkipTo
     |--- defineClause: List<TargetEntry>
+    |--- defineMatchStartDependent: Bitmapset* (see VI-4)
     +--- rpPattern: RPRPattern*
          |--- numVars: int
          |--- varNames: char**
@@ -1766,7 +2578,7 @@ Appendix A. Data Structure Relationship Diagram
     |       |   +--- isAbsorbable
     |       |--- matchStartRow, matchEndRow
     |       |--- lastProcessedRow
-    |       |--- matchedState (cloned on FIN arrival)
+    |       |--- matchedState (the FIN-arriving state, moved here)
     |       |--- hasAbsorbableState
     |       +--- allStatesAbsorbable
     |--- nfaContextFree (recycling pool)
