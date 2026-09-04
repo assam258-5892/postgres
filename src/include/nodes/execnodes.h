@@ -2617,7 +2617,15 @@ typedef struct RPRNFAContext
 	int64		matchEndRow;	/* last row of the match; below matchStartRow
 								 * for an empty one, -1 before any */
 	int64		lastProcessedRow;	/* last row processed (for fail depth) */
-	RPRNFAState *matchedState;	/* this context's match candidate, or NULL */
+
+	/*
+	 * The state that reached FIN, or NULL.  Its being non-NULL is what
+	 * records a match; matchEndRow cannot, because an empty match ends below
+	 * matchStartRow and would read as a failure.  The state itself is never
+	 * read.
+	 */
+	RPRNFAState *matchedState;
+
 	bool		matchUpdated;	/* matchedState was set or replaced during the
 								 * advance now running */
 
