@@ -4852,9 +4852,6 @@ rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched)
 	ExprContext *econtext = winstate->rprContext;
 	TupleTableSlot *slot;
 
-	/* Release the previous row's DEFINE evaluation memory */
-	ResetExprContext(econtext);
-
 	/* Fetch current row into temp_slot_1 */
 	slot = winstate->temp_slot_1;
 	if (!window_gettupleslot(winobj, pos, slot))

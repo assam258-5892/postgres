@@ -105,7 +105,7 @@ static void nfa_advance_state(WindowAggState *winstate, RPRNFAContext *ctx,
 static void nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx,
 						int64 currentPos);
 
-static void nfa_reevaluate_dependent_vars(WindowAggState *winstate,
+static void nfa_invalidate_dependent_vars(WindowAggState *winstate,
 										  RPRNFAContext *ctx,
 										  int64 currentPos);
 
@@ -764,8 +764,8 @@ nfa_prune_skipped_contexts(WindowAggState *winstate, RPRNFAContext *ctx)
  * mismatch at a frame boundary and at partition-end finalization.
  *
  * The caller must have set up the current row (ecxt_outertuple, currentpos,
- * nav_match_start, nav_slot cache) via rpr_prepare_row() /
- * nfa_reevaluate_dependent_vars() before consumption.
+ * nav_match_start) and invalidated the nav slot cache, via rpr_prepare_row()
+ * or nfa_invalidate_dependent_vars(), before consumption.
  *
  * Per ISO/IEC 19075-5 Feature R020, pattern variables not listed in DEFINE
  * are implicitly TRUE -- they match every row.  This is checked via
@@ -795,11 +795,14 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
 		bool		isnull;
 
 		/*
-		 * Switch into rprContext's per-tuple memory: ExecEvalExpr() does not
-		 * do it for us, and the predicate's scratch has to land in the
-		 * context that rpr_prepare_row() and nfa_reevaluate_dependent_vars()
-		 * reset, not in the caller's longer-lived one.
+		 * Free the previous predicate evaluation's storage.  A DEFINE
+		 * predicate leaves nothing behind but the RPRVarMatch stored below --
+		 * the navigation steps stabilize pass-by-ref results in this same
+		 * context, and those are consumed before the predicate returns -- so
+		 * resetting here is always safe and no caller has to arrange it.
 		 */
+		ResetExprContext(winstate->rprContext);
+
 		result = ExecEvalExprSwitchContext(exprState, winstate->rprContext,
 										   &isnull);
 		varMatched[varId] = (!isnull && DatumGetBool(result)) ?
@@ -1648,14 +1651,14 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
 }
 
 /*
- * nfa_reevaluate_dependent_vars
+ * nfa_invalidate_dependent_vars
  *		Invalidate match_start-dependent DEFINE variables for a context whose
  *		matchStartRow differs from the shared evaluation's nav_match_start.
  *
  * Only variables in defineMatchStartDependent are affected: they are reset to
  * RPR_VAR_UNEVALUATED so nfa_match() re-evaluates them lazily against this
- * context's matchStartRow.  match_start-independent variables keep their
- * cached value across contexts, since they do not read nav_match_start.
+ * context's matchStartRow.  The remaining variables keep their cached value
+ * across contexts, since they do not read nav_match_start.
  *
  * nav_match_start is installed for this context and left in place: FIRST/LAST
  * read it at evaluation time, which happens later during nfa_match(), so it
@@ -1663,23 +1666,17 @@ nfa_advance(WindowAggState *winstate, RPRNFAContext *ctx, int64 currentPos)
  * row's shared setup in advance_reduced_frame_nfa, overwrites it.
  */
 static void
-nfa_reevaluate_dependent_vars(WindowAggState *winstate, RPRNFAContext *ctx,
+nfa_invalidate_dependent_vars(WindowAggState *winstate, RPRNFAContext *ctx,
 							  int64 currentPos)
 {
 	int			varIdx = -1;
 
+	if (bms_is_empty(winstate->defineMatchStartDependent) ||
+		ctx->matchStartRow == winstate->nav_match_start)
+		return;
+
 	/* Caller keeps winstate->currentpos at the scan position for lazy eval. */
 	Assert(winstate->currentpos == currentPos);
-
-	/*
-	 * Release the previous context's DEFINE evaluation memory.  Match-start-
-	 * dependent variables are re-evaluated once per context (they are reset
-	 * to UNEVALUATED below), so without this reset their per-tuple scratch
-	 * would accumulate across every context of a row -- bounded only by the
-	 * per-row reset in rpr_prepare_row.  rprContext is the dedicated DEFINE
-	 * context, so this frees neither the input nor the output tuple memory.
-	 */
-	ResetExprContext(winstate->rprContext);
 
 	/* Install this context's match_start for FIRST/LAST and keep it in place. */
 	winstate->nav_match_start = ctx->matchStartRow;
@@ -1838,7 +1835,6 @@ void
 ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos)
 {
 	RPRVarMatch *varMatched = winstate->nfaVarMatched;
-	bool		hasDependent = !bms_is_empty(winstate->defineMatchStartDependent);
 	int64		frameOffset = -1;	/* -1 = frame runs to the partition end */
 
 	/*
@@ -1908,8 +1904,8 @@ ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos)
 		Assert(ctx != winstate->nfaContext ||
 			   ctx->matchStartRow == winstate->nav_match_start);
 
-		if (hasDependent && ctx->matchStartRow != winstate->nav_match_start)
-			nfa_reevaluate_dependent_vars(winstate, ctx, currentPos);
+		nfa_invalidate_dependent_vars(winstate, ctx, currentPos);
+
 		nfa_match(winstate, ctx, varMatched, currentPos);
 		ctx->lastProcessedRow = currentPos;
 	}
