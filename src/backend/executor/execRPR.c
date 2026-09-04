@@ -282,6 +282,22 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
 	 * groups.  Per the count-clear policy such a slot is zeroed when its
 	 * owning element exits (see nfa_advance_var and the inline fast path in
 	 * nfa_match), so it must not participate in equivalence judgment.
+	 *
+	 * XXX the comparison is finer than the future it stands for.  Where max
+	 * is RPR_QUANTITY_INF, RPRElemCanLoop() holds at every count and
+	 * RPRElemCanExit() at every count at or above min, so two states that
+	 * differ only above min behave identically from here on.  Counts saturate
+	 * at RPR_COUNT_INF, which is only the int32 guard, so this memcmp keeps
+	 * such states apart and neither in-context discard folds them back: dedup
+	 * calls them different, and the FIN early termination in nfa_advance()
+	 * never fires while the pattern cannot complete.  A branching unbounded
+	 * pattern that never reaches FIN then holds Theta(n^2) states at peak and
+	 * creates Theta(n^3) of them, each re-tested by the linear scan in
+	 * nfa_append_state_unique(): (A{2,} B)+ C with C never true takes 30 ms
+	 * over 80 rows, 37 s over 320, and does not finish over 640. Clamping the
+	 * increment to min where max is unbounded would fold them into the memcmp
+	 * already here, but every counts[] consumer, nfa_states_covered()
+	 * included, has to be shown that the clamp preserves it.
 	 */
 	elem = &pattern->elements[s1->elemIdx];
 	compareDepth = elem->depth + 1;
