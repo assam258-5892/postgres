@@ -1695,6 +1695,13 @@ typedef struct GroupingSet
  * TargetEntry). TargetEntry.resname represents row pattern definition
  * variable name. "rpPattern" represents the PATTERN clause as a parse tree
  * (RPRPatternNode).
+ * Parse analysis sets rpSkipTo, defineClause and rpPattern from one grammar
+ * production, or none of them.  The planner does not keep them so:
+ * remove_unused_subquery_outputs() empties defineClause alone, on a clause no
+ * surviving WindowFunc references.  Test rpPattern, never defineClause, for
+ * "is this a row pattern window".  An empty defineClause beside a non-null
+ * rpPattern means the clause will not run; a non-empty one does not mean it
+ * will.
  *
  */
 typedef struct WindowClause
@@ -1723,8 +1730,8 @@ typedef struct WindowClause
 	Index		winref;			/* ID referenced by window functions */
 	/* did we copy orderClause from refname? */
 	bool		copiedOrder pg_node_attr(query_jumble_ignore);
-	/* Row Pattern AFTER MATCH SKIP clause */
-	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
+	/* AFTER MATCH SKIP type; ST_NONE if this is not a row pattern window */
+	RPSkipTo	rpSkipTo;
 	/* Row Pattern DEFINE clause (list of TargetEntry) */
 	List	   *defineClause pg_node_attr(custom_query_jumble);
 	/* Row Pattern PATTERN parse tree */
