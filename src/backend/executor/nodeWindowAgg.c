@@ -1297,6 +1297,21 @@ prepare_tuplestore(WindowAggState *winstate)
 		 * resolve_nav_offsets() runs before the first begin_partition(), so
 		 * the kind here is FIXED or RETAIN_ALL even for a parameterized
 		 * offset; RETAIN_ALL disables trim.
+		 *
+		 * XXX one read pointer serves two fetches that sit far apart.
+		 * rpr_prepare_row() fetches the frontier row the NFA is advancing
+		 * over, and ExecRPRNavGetSlot() fetches near matchStartRow for the
+		 * FIRST family; both go through window_gettupleslot(), which seeks
+		 * relative to seekpos, so the two drag the one pointer across the
+		 * whole match on every row.  In memory that is a pointer move, but
+		 * once the tuplestore spills tuplestore_skiptuples() is
+		 * tuple-at-a-time tape I/O and the cost turns quasi-quadratic:
+		 * PATTERN (S A+) DEFINE A AS v >= FIRST(v) under work_mem 64kB takes
+		 * 0.84 s at 2,000 rows, 5.4 s at 4,000 and 24.3 s at 8,000, against
+		 * 2.6 ms for those same 8,000 rows in memory.  The answers are
+		 * identical either way.  Separating them needs a second WindowObject
+		 * carrying its own read pointer for match-start navigation, which
+		 * stays inside this file.
 		 */
 		winstate->nav_winobj->markptr =
 			tuplestore_alloc_read_pointer(winstate->buffer, 0);
