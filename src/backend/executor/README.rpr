@@ -917,6 +917,14 @@ RPR_COUNT_INF iterations a quantifier can neither run out nor be
 exceeded -- but a bare count++ added anywhere in the engine would
 overflow int32 instead of settling there.
 
+That is the far end.  Below it the same comparison is finer than the
+future it stands for: where max is RPR_QUANTITY_INF, no decision in the
+engine reads a count above min, so states differing only there behave
+alike from that point on and this memcmp still keeps them apart.  A
+branching unbounded pattern that never reaches FIN pays for it, and the
+XXX at nfa_states_equal() carries the cost and what a clamp would have
+to preserve.
+
 V-2. RPRNFAContext -- Matching Context
 
 A single context represents "a matching attempt started from a specific
@@ -1278,6 +1286,13 @@ per-window-function objects is what lets the DEFINE clause's lookups
 trim the tuplestore without moving anyone else's fetches.  The mark only
 ever advances, and every RPR window gets a nav_winobj whether or not its
 DEFINE navigates at all.
+
+Apart from everyone else, but not from itself: the pair is one pair, and
+both rpr_prepare_row() and ExecRPRNavGetSlot() reach the tuplestore
+through it.  The frontier row and the navigation target are not the same
+row, so the two drag the single seekpos back and forth.  In memory that
+costs a pointer move; spilled it costs a re-read, and the XXX at
+prepare_tuplestore() carries the measurement.
 
 Each RPRNavExpr carries a navno, its index into that list of offsets.
 The parser leaves it -1; compute_define_metadata()
