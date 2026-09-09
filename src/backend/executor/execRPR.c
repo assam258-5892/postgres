@@ -1501,8 +1501,14 @@ nfa_advance_state(WindowAggState *winstate, RPRNFAContext *ctx,
 
 	Assert(state->elemIdx >= 0 && state->elemIdx < pattern->numElements);
 
-	/* Protect against stack overflow for deeply complex patterns */
+	/*
+	 * Protect against stack overflow for deeply complex patterns, and bound
+	 * how long the expansion runs uninterrupted: every cycle in this DFS
+	 * passes back through here, so one check per entry bounds the interval by
+	 * the recursion depth.
+	 */
 	check_stack_depth();
+	CHECK_FOR_INTERRUPTS();
 
 	/*
 	 * Cycle detection.  Only a nullable END is marked, so a set bit means the
