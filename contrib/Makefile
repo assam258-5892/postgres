@@ -39,6 +39,7 @@ SUBDIRS = \
 		pg_surgery	\
 		pg_trgm		\
 		pgrowlocks	\
+		pgsentinel	\
 		pgstattuple	\
 		pg_visibility	\
 		pg_walinspect	\

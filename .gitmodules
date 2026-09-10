@@ -1,0 +1,4 @@
+[submodule "contrib/pgsentinel"]
+	path = contrib/pgsentinel
+	url = https://github.com/experdb/pgsentinel.git
+	branch = REL_1_4_2
