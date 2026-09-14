@@ -800,14 +800,8 @@ _jumbleWindowClause_defineClause(JumbleState *jstate,
 	_jumbleNode(jstate, (Node *) defineClause);
 
 	/* Then add the variable names, which TargetEntry.resname hides. */
-	foreach_node(TargetEntry, tle, defineClause)
-	{
-		if (tle->resname)
-			AppendJumble(jstate, (const unsigned char *) tle->resname,
-						 strlen(tle->resname) + 1);
-		else
-			AppendJumbleNull(jstate);
-	}
+	foreach_node(TargetEntry, expr, defineClause)
+		JUMBLE_STRING(resname);
 }
 
 /*

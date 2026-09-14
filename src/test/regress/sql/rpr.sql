@@ -604,6 +604,16 @@ WINDOW w AS (
     DEFINE A AS PREV(price, random()::int) > 0
 );
 
+-- Non-constant offset: volatile function as compound outer offset
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS PREV(LAST(price, 1), random()::int) > 0
+);
+
 -- Non-constant offset: subquery as offset
 SELECT price FROM stock
 WINDOW w AS (
@@ -1743,6 +1753,28 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS NEXT(LAST(val), 9223372036854775807) IS NULL
+);
+
+-- Inner offset overflows int64.  The cases above all overflow while applying
+-- the outer offset; these two overflow while computing the inner position,
+-- before any outer offset is applied.  A is false at the first row, so no
+-- match starts there and match_start is at least 1 wherever B is evaluated;
+-- match_start + INT64_MAX then overflows.  With match_start 0 the sum still
+-- fits and the clamp below it answers instead.
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS val > 10, B AS FIRST(val, 9223372036854775807) IS NULL
+);
+
+-- The same overflow reached through a compound navigation, where it happens
+-- before the outer offset is applied
+SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS val > 10, B AS NEXT(FIRST(val, 9223372036854775807), 1) IS NULL
 );
 
 -- Compound: default offsets on both sides

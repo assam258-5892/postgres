@@ -3249,12 +3249,9 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 						ExplainPropertyInteger("Nav Mark Lookahead", NULL,
 											   planstate->navFirstOffset, es);
 					break;
-				default:
+				case RPR_NAV_OFFSET_RETAIN_ALL:
 					/* a forward reach is unbounded, never retain all */
-					Assert(planstate->navFirstOffsetKind ==
-						   RPR_NAV_OFFSET_NEEDS_EVAL ||
-						   planstate->navFirstOffsetKind ==
-						   RPR_NAV_OFFSET_FIXED);
+					Assert(false);
 					break;
 			}
 		}
