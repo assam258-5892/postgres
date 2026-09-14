@@ -960,11 +960,30 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (stock.*) IS NOT NULL
 );
+-- The form decides before the qualifier is looked up, so a misspelled table
+-- name is reported as the whole-row reference it is written as, not as a
+-- missing FROM-clause entry:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS (stok.*) IS NOT NULL
+);
+-- and the same through a row constructor:
+SELECT price FROM stock
+WINDOW w AS (
+    PARTITION BY company
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    INITIAL
+    PATTERN (A)
+    DEFINE A AS ROW(stok.*) IS NOT NULL
+);
 
 -- A row constructor reaches the same references through
--- transformExpressionList(), which expanded the star by RTE before either
--- check could see it.  The first four below were accepted and returned rows;
--- the fifth was rejected, but as a missing FROM-clause entry.
+-- transformExpressionList(), whose star expansion binds them by RTE into
+-- individual column Vars, past every check.  DEFINE skips it.
 -- ROW(schema.table.*):
 SELECT price FROM stock
 WINDOW w AS (
@@ -1034,9 +1053,8 @@ WINDOW w AS (
 );
 -- Each rejection above classifies the reference only after it resolves, so a
 -- misspelled column keeps the diagnosis and the suggestion it gets anywhere
--- else.  Only the two-part form changed: its gate used to fire on the
--- qualifier alone and report a range variable problem before the rest of the
--- name was looked at.  The three-part gate already ran after resolution.
+-- else.  Firing on the qualifier alone would report a range variable problem
+-- before the rest of the name was looked at.
 SELECT price FROM stock
 WINDOW w AS (
     PARTITION BY company
@@ -1082,8 +1100,8 @@ WINDOW w AS (
 DROP FUNCTION rpr_tag(rpr_stock);
 
 -- A JOIN USING alias has no whole-row Var of its own, so the same retry
--- expands it to a row constructor instead.  That arm is only reachable inside
--- DEFINE now that the retry is no longer rejected on sight.
+-- expands it to a row constructor instead.  The retry carries no star, so
+-- DEFINE lets it through to that arm.
 CREATE TEMP TABLE rpr_j_l (x int, y int);
 CREATE TEMP TABLE rpr_j_r (x int, z int);
 SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
