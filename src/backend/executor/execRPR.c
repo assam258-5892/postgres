@@ -875,12 +875,11 @@ nfa_match(WindowAggState *winstate, RPRNFAContext *ctx, RPRVarMatch *varMatched,
 
 		nextState = state->next;
 
-		/* Non-VAR elements: keep as-is for advance phase */
-		if (!RPRElemIsVar(elem))
-		{
-			prevPtr = &state->next;
-			continue;
-		}
+		/*
+		 * The advance phase parks only VAR states, and a fresh context is
+		 * advanced before its first match.
+		 */
+		Assert(RPRElemIsVar(elem));
 
 		if (!nfa_eval_var_match(winstate, elem, varMatched))
 		{
