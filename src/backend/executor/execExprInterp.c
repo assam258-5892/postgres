@@ -6077,9 +6077,8 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 			break;
 		case RPR_NAV_LAST:
 			/* LAST: offset backward from currentpos, clamped to match_start */
-			if (pg_sub_s64_overflow(winstate->currentpos, offset, &target_pos))
-				target_pos = -1;
-			else if (target_pos < winstate->nav_match_start)
+			target_pos = winstate->currentpos - offset;
+			if (target_pos < winstate->nav_match_start)
 				target_pos = -1;	/* before match_start */
 			break;
 
@@ -6123,11 +6122,7 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 				int64		inner_pos;
 
 				/* Inner: currentpos - offset */
-				if (pg_sub_s64_overflow(winstate->currentpos, offset, &inner_pos))
-				{
-					target_pos = -1;
-					break;
-				}
+				inner_pos = winstate->currentpos - offset;
 				if (inner_pos < winstate->nav_match_start)
 				{
 					target_pos = -1;

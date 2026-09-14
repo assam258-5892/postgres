@@ -439,6 +439,67 @@ WINDOW w AS (
 (3 rows)
 
 DROP TABLE rpr_lazy;
+-- A navigation result carrying a collation.  Both forms make the parser ask
+-- for the collation of the navigation node itself rather than of its argument.
+CREATE TABLE rpr_navcoll (id INT, s TEXT);
+INSERT INTO rpr_navcoll VALUES (1, 'a'), (2, 'B'), (3, 'c');
+-- COLLATE applied to the navigation result
+SELECT id, s, count(*) OVER w AS cnt
+FROM rpr_navcoll
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(s) COLLATE "C" < s
+);
+ id | s | cnt 
+----+---+-----
+  1 | a |   0
+  2 | B |   0
+  3 | c |   1
+(3 rows)
+
+-- Simple CASE over the navigation result: the placeholder takes its collation
+-- from the tested expression
+SELECT id, s, count(*) OVER w AS cnt
+FROM rpr_navcoll
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS CASE PREV(s) WHEN 'a' THEN true ELSE false END
+);
+ id | s | cnt 
+----+---+-----
+  1 | a |   0
+  2 | B |   1
+  3 | c |   0
+(3 rows)
+
+DROP TABLE rpr_navcoll;
+-- A system column in a DEFINE expression.  It reaches the expression as a
+-- scan system attribute rather than an outer Var, and navigation still
+-- applies to it: PREV(ctid) is the previous row of the match, not this row.
+CREATE TABLE rpr_navsys (i INT);
+INSERT INTO rpr_navsys SELECT generate_series(1, 5);
+SELECT i, count(*) OVER w AS cnt
+FROM rpr_navsys
+WINDOW w AS (
+    ORDER BY i
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS PREV(ctid) IS DISTINCT FROM ctid
+);
+ i | cnt 
+---+-----
+ 1 |   5
+ 2 |   0
+ 3 |   0
+ 4 |   0
+ 5 |   0
+(5 rows)
+
+DROP TABLE rpr_navsys;
 -- ============================================================
 -- FRAME Options Tests
 -- ============================================================
@@ -5159,6 +5220,22 @@ WINDOW w AS (
 ERROR:  aggregate functions are not allowed in DEFINE
 LINE 7:     DEFINE A AS COUNT(*) > 0
                         ^
+-- ERROR: grouping operation in DEFINE is not supported.  This shares the
+-- EXPR_KIND_RPR_DEFINE arm with the aggregate case above, but takes the
+-- GroupingFunc half of it.  parseCheckAggregates() relies on this rejection
+-- to leave DEFINE out of finalize_grouping_exprs().
+SELECT COUNT(*) OVER w
+FROM rpr_err
+GROUP BY id
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS GROUPING(id) = 0
+);
+ERROR:  grouping operations are not allowed in DEFINE
+LINE 8:     DEFINE A AS GROUPING(id) = 0
+                        ^
 -- ERROR: set-returning function in DEFINE is not supported
 SELECT FROM rpr_err
 WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A+) DEFINE A AS 1 > generate_series(1 ,2));
@@ -7288,6 +7365,82 @@ WINDOW w AS (
   5 | {A,C} |           5 |         5
   6 | {A}   |             |          
 (6 rows)
+
+-- Measuring a group body for absorbability.  The optimizer only measures a
+-- body an unbounded quantifier wraps, so each pattern below puts the shape
+-- under test inside one.  None of the three can match real rows; the point is
+-- that the measurement reports "not a fixed length" instead of overflowing.
+-- A nested group whose repetition count is a range has no fixed length
+SELECT id, val, COUNT(*) OVER w AS cnt
+FROM rpr_plan
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((A B){1,2} C)+ D)
+    DEFINE A AS val <= 30, B AS val > 30, C AS val > 0, D AS val > 0
+);
+ id | val | cnt 
+----+-----+-----
+  1 |  10 |   0
+  2 |  20 |   0
+  3 |  30 |   4
+  4 |  40 |   0
+  5 |  50 |   0
+  6 |  60 |   0
+  7 |  70 |   0
+  8 |  80 |   0
+  9 |  90 |   0
+ 10 | 100 |   0
+(10 rows)
+
+-- A fixed repetition whose body length times its count reaches the ceiling
+SELECT id, val, COUNT(*) OVER w AS cnt
+FROM rpr_plan
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((A B C){1000000000})+ D)
+    DEFINE A AS val <= 30, B AS val > 30, C AS val > 0, D AS val > 0
+);
+ id | val | cnt 
+----+-----+-----
+  1 |  10 |   0
+  2 |  20 |   0
+  3 |  30 |   0
+  4 |  40 |   0
+  5 |  50 |   0
+  6 |  60 |   0
+  7 |  70 |   0
+  8 |  80 |   0
+  9 |  90 |   0
+ 10 | 100 |   0
+(10 rows)
+
+-- A body whose members sum past the ceiling
+SELECT id, val, COUNT(*) OVER w AS cnt
+FROM rpr_plan
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A{2000000000} B{2000000000})+ C)
+    DEFINE A AS val <= 30, B AS val > 30, C AS val > 0
+);
+ id | val | cnt 
+----+-----+-----
+  1 |  10 |   0
+  2 |  20 |   0
+  3 |  30 |   0
+  4 |  40 |   0
+  5 |  50 |   0
+  6 |  60 |   0
+  7 |  70 |   0
+  8 |  80 |   0
+  9 |  90 |   0
+ 10 | 100 |   0
+(10 rows)
 
 -- ALT Both Branches Absorbable: A+ C | B+
 -- A+ C never completes (C absent) so its A+ run keeps expanding and dominates;

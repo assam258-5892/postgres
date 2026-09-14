@@ -201,6 +201,8 @@ rprNodeRowCount(RPRPatternNode *node)
 				return -1;
 			return len;
 	}
+
+	pg_unreachable();
 	return -1;
 }
 
