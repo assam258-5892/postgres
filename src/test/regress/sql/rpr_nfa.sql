@@ -912,8 +912,7 @@ WINDOW gg  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATT
        rr  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A??)+?)    DEFINE A AS isa),
        rr2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A??){2,}?) DEFINE A AS isa),
        ca  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A??)        DEFINE A AS isa),
-       cs  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?)        DEFINE A AS isa)
-ORDER BY id;
+       cs  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?)        DEFINE A AS isa);
 
 -- Doubly-nested reluctant nullable group: (((A??){2,}?){2,}?).  Reluctant
 -- quantifiers disable optimizer flattening, so both levels survive and the
@@ -927,8 +926,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (((A??){2,}?){2,}?)
     DEFINE A AS isa
-)
-ORDER BY id;
+);
 
 -- Non-leading reluctant optional GROUP with a follower: (B (A X)?? C)
 -- Like the VAR case above but a multi-element group; it goes through the
@@ -5093,8 +5091,7 @@ WINDOW g  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
               DEFINE A AS 'A' = ANY(flags)),
        rr AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
               AFTER MATCH SKIP PAST LAST ROW PATTERN (((A??){2}?))
-              DEFINE A AS 'A' = ANY(flags))
-ORDER BY id;
+              DEFINE A AS 'A' = ANY(flags));
 -- (A* | B)*: A* is the preferred alternative and matches empty at row 3,
 -- which ends the loop by the lower-bound stopping rule.  B is never tried,
 -- so the match stops short of the B rows even though taking them would be

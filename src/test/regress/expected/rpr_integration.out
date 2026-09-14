@@ -162,8 +162,7 @@ SELECT * FROM (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val > PREV(val))
-) t WHERE cnt > 0
-ORDER BY id;
+) t WHERE cnt > 0;
  id | val | cnt 
 ----+-----+-----
   1 |  10 |   2
@@ -236,8 +235,7 @@ SELECT
         DEFINE B AS val > PREV(val)) AS rpr_cnt,
     count(*) OVER (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS normal_cnt
-FROM rpr_integ
-ORDER BY id;
+FROM rpr_integ;
  id | val | rpr_cnt | normal_cnt 
 ----+-----+---------+------------
   1 |  10 |       2 |         10
@@ -383,8 +381,7 @@ SELECT
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val < PREV(val)) AS cnt_down
-FROM rpr_integ
-ORDER BY id;
+FROM rpr_integ;
  id | val | cnt_up | cnt_down 
 ----+-----+--------+----------
   1 |  10 |      2 |        0
