@@ -299,7 +299,7 @@ define_walker() requires the argument of each navigation to contain at least
 one column reference, and requires each offset to be a run-time constant: an
 offset may contain neither a column reference nor another navigation.  The
 Var-free rule is what lets the executor settle an offset once per scan
-(VI-5) rather than once per row -- the offset expression is evaluated with no
+(VI-6) rather than once per row -- the offset expression is evaluated with no
 current row installed and the result pinned for the whole scan, which is
 sound only because no column can appear there.  A Param is still allowed, and
 is the case RPR_NAV_OFFSET_NEEDS_EVAL exists for.  An omitted offset stays
@@ -387,26 +387,7 @@ VARIADIC, named arguments, and any argument count other than one or two --
 is rejected with dedicated errors.  Anything added to the shared path has to
 stay safe to run on a name that will never reach the catalog.
 
-III-6. What a DEFINE Expression May Not Contain
-
-A DEFINE expression may not contain a subquery, an aggregate, a window
-function or a GROUPING expression.
-
-The subquery rejection is deliberate over-rejection.  The standard permits a
-subquery in a DEFINE expression provided it neither performs row pattern
-recognition itself nor references a row pattern variable of the outer query;
-the blanket rejection subsumes both conditions by making the subquery
-unreachable until those two walks are implemented.  The other three fall out
-of the EXPR_KIND_RPR_DEFINE arms in parse_agg.c and are reported the generic
-way ("aggregate functions are not allowed in DEFINE", and so on).
-
-Later phases lean on all four being impossible: parse analysis skips
-grouping-expression finalization for a DEFINE clause, and the planner walks
-one with a plain Var pull (XIII-2), neither of which would be correct if a
-DEFINE expression could contain a sublink or an aggregate.  Volatility is
-the one restriction not tested here; it is checked in the planner (XIII-5).
-
-III-7. Query Jumbling
+III-6. Query Jumbling
 
 A DEFINE clause is a list of TargetEntry whose resname carries the variable
 being defined, and TargetEntry.resname is query_jumble_ignore everywhere
@@ -420,7 +401,7 @@ resname.  A window with no DEFINE clause has an empty list, so the second
 step contributes nothing and its query id is unchanged.
 
 The other RPR node fields follow the usual rule.  RPRNavExpr.navno is
-query_jumble_ignore because the planner assigns it (VI-5), and
+query_jumble_ignore because the planner assigns it (VI-6), and
 RPRPatternNode.trailing_alt never survives parsing (III-2).
 
 Chapter IV  Compilation Phase
@@ -440,30 +421,10 @@ IV-2. The 6 Phases of buildRPRPattern()
   Phase 5: Finalization (finalizeRPRPattern)
   Phase 6: Absorbability analysis (computeAbsorbability)
 
-IV-2a. Compilation Limits
-
-Phase 2 is also where a pattern too large for the element array is
-rejected.  scanRPRPattern() raises two errors, both
-ERRCODE_PROGRAM_LIMIT_EXCEEDED:
-
-  "pattern nesting too deep"
-    A group or alternation nested RPR_DEPTH_MAX levels or deeper.  The
-    test is made on entry to each node, before its children raise the
-    counter, so the one-byte RPRDepth can never wrap.  maxDepth is the
-    deepest depth plus one (it is the length of a state's counts[]), so
-    the deepest nesting a pattern may carry is RPR_DEPTH_MAX - 1.
-
-  "pattern too complex"
-    More than RPR_ELEMIDX_MAX elements, the FIN marker included.  next
-    and jump are RPRElemIdx (int16), so an element past that bound
-    could not be referenced at all.
-
-The number of distinct pattern variables is bounded as well, to
-RPR_VARID_MAX + 1, but that bound belongs to the parser ("too many row
-pattern variables"); buildRPRPattern() collects the names into a
-fixed-size stack array and only asserts it.  None of the three limits
-depends on the input rows -- a pattern that compiles once compiles
-every time.
+Phase 2 also rejects a pattern too large for the element array or nested too
+deep.  The depth test is made on entry to each node, before the children
+raise the counter, so the one-byte RPRDepth can never wrap.  Neither limit
+depends on the input rows: a pattern that compiles once compiles every time.
 
 IV-3. Phase 1: Parse Tree Optimization
 
@@ -837,34 +798,6 @@ Through this mechanism, the runtime guarantees monotonicity:
 "a context that started earlier always subsumes a context that
 started later."
 
-IV-6. Plan Serialization of RPRPattern
-
-RPRPattern carries two variable-length arrays, so the generated node support
-cannot handle it: plannodes.h marks it pg_node_attr(custom_copy_equal,
-custom_read_write, no_equal, no_query_jumble) and the three routines are
-written by hand -- _copyRPRPattern() in copyfuncs.c, _outRPRPattern() in
-outfuncs.c and _readRPRPattern() in readfuncs.c.  equal() and query jumbling
-are suppressed rather than written: RPRPattern is a plan/exec-only node that
-no parse-level comparison reaches and that no Query can reach.
-
-Copy and the text round trip do not carry the same thing.  _copyRPRPattern()
-memcpy()s the elements array and therefore carries all eight fields of
-RPRPatternElement, the reserved padding byte of IV-4 included.
-_outRPRPattern() writes seven fields per element as
-"(varId depth flags min max next jump)" and _readRPRPattern() palloc0()s the
-array, which zeroes reserved, so the round trip drops that byte.  A field
-that takes the reserved byte over has to join those seven at the same time,
-or it will survive copyObject() and vanish through
-nodeToString()/stringToNode() -- the path a plan takes to a parallel worker.
-
-The read side does not leave the token stream to the counts alone.
-makeRPRPattern() guarantees numVars > 0 and numElements >= 2, so out always
-emits both arrays in exactly one shape; _readRPRPattern() drives its loops
-from numVars and numElements, but also checks the '(' and ')' delimiters of
-the varNames list and of every element, because a count that disagreed with
-the list would leave the token stream off by one for everything that follows
-it in the plan.
-
 Chapter V  NFA Runtime Data Structures
 ============================================================================
 
@@ -1149,7 +1082,7 @@ kind: PREV and NEXT default to 1, FIRST and LAST to 0, and every compound
 kind defaults to inner 0 with outer 1, so PREV(FIRST(x)) reads the row
 before the match start.  RPRNavExpr leaves a missing offset as a NULL
 offset_arg or compound_offset_arg rather than materializing a Const;
-resolve_nav_offsets() supplies the kind's default once per scan (VI-5),
+resolve_nav_offsets() supplies the kind's default once per scan (VI-6),
 and RPRNavKind (primnodes.h) is what records which default applies.
 
 When the computed target is the current row -- LAST(expr), PREV(expr, 0)
@@ -1180,7 +1113,7 @@ the same pair, so repeating it is harmless.
 The nfaVarMatched entries are filled lazily during Phase 1 (Match) as
 variables are consumed.
 
-VI-3a. Slot Swap Consumers: Interpreter and JIT
+VI-4. Slot Swap Consumers: Interpreter and JIT
 
 The swap happens in the middle of an already-compiled expression, so
 everything that expression cached about the outer tuple goes stale at
@@ -1221,7 +1154,7 @@ window is JIT-compiled like any other; the RPR-specific part of
 expression compilation is ExecInitExprRec()'s T_RPRNavExpr arm
 (execExpr.c).
 
-VI-4. Per-Context Invalidation (match_start_dependent variables)
+VI-5. Per-Context Invalidation (match_start_dependent variables)
 
 DEFINE variables that depend on match_start -- those containing FIRST or a
 compound PREV_FIRST/NEXT_FIRST, or a LAST that carries an offset of its own,
@@ -1257,7 +1190,7 @@ re-evaluated once per differing context):
   Compound (inner LAST, no off.)   cached (once per row)
   Compound (inner LAST, w/off.)    per-context
 
-VI-5. Tuplestore Mark and Trim (nodeWindowAgg.c)
+VI-6. Tuplestore Mark and Trim (nodeWindowAgg.c)
 
 Navigation functions require access to past rows via the tuplestore.
 To allow tuplestore_trim() to free rows that are no longer reachable,
@@ -1323,7 +1256,7 @@ in the DEFINE.  Each dimension is reported only when some navigation feeds it
 (hasMaxNav, hasFirstNav), so an empty one prints nothing rather than a reach of
 zero.
 
-VI-6. ExecRPRProcessRow(): 3-Phase Processing
+VI-7. ExecRPRProcessRow(): 3-Phase Processing
 
 NFA processing for a single row is divided into three phases:
 
@@ -2113,7 +2046,7 @@ XII-2. Forward-only Execution vs Backtracking
   re-fetching of earlier rows, and each row's DEFINE conditions (SQL
   expressions such as PREV or running aggregates, with high re-evaluation
   cost) are evaluated once per row and cached; only match_start-dependent
-  variables are re-evaluated per context (VI-4).  DFS order yields preferment
+  variables are re-evaluated per context (VI-5).  DFS order yields preferment
   naturally, with greedy or reluctant behavior per quantifier obtained by
   reversing that order.
 
@@ -2338,19 +2271,13 @@ Var already varies with the row; anything else -- the row-independent
 expression that would otherwise be folded into the argument -- comes back
 wrapped in a PlaceHolderVar.
 
-XIII-5. Where Volatility Is Rejected
+XIII-5. Why a DEFINE Expression May Not Be Volatile
 
-A DEFINE expression may not contain a volatile function, but volatility is
-not tested during parse analysis.  The check runs in the planner, where the
-DEFINE clause is passed through preprocess_expression(), and raises "DEFINE
-clause cannot contain volatile functions".  A subquery the planner discards
-before that point is therefore never checked, which is the same rule that
-lets a volatile expression fold away.
-
-The restriction exists because the NFA evaluates a DEFINE at most once per
-row and caches the result (VI-3), re-evaluating only the match_start
-dependent variables of VI-4.  The number of evaluations is not something a
-query can rely on.
+The NFA evaluates a DEFINE at most once per row and caches the result
+(VI-3), re-evaluating only the match_start dependent variables of VI-5.
+The number of evaluations is not something a query can rely on, so a
+volatile function is rejected -- "DEFINE clause cannot contain volatile
+functions".
 
 XIII-6. Optimizations an RPR Window Is Excluded From
 
@@ -2381,7 +2308,7 @@ spelled out for defineClause by hand.
 
 SS_finalize_plan() has the same blind spot and the same fix.  A DEFINE
 expression may carry a Param -- a navigation offset settled per scan is the
-case that matters (VI-5) -- and the parameter sets a plan node advertises are
+case that matters (VI-6) -- and the parameter sets a plan node advertises are
 collected by walking its expressions.  The T_WindowAgg arm therefore runs
 finalize_primnode() over defineClause beside startOffset and endOffset, so
 that a DEFINE Param reaches extParam and allParam.  A parameter missing from
@@ -2525,7 +2452,7 @@ not re-parse.
 
 XIV-8. Navigation Trim in EXPLAIN
 
-The two navigation reaches of VI-5 are printed as Nav Mark Lookback and Nav
+The two navigation reaches of VI-6 are printed as Nav Mark Lookback and Nav
 Mark Lookahead, read straight out of the WindowAggState.  They appear for a
 plain EXPLAIN as well, because executor init runs and that is where a
 constant offset is settled.  Each dimension prints its kind rather than
@@ -2556,7 +2483,7 @@ Appendix A. Data Structure Relationship Diagram
   WindowAgg (plan node)
     |--- rpSkipTo: RPSkipTo
     |--- defineClause: List<TargetEntry>
-    |--- defineMatchStartDependent: Bitmapset* (see VI-4)
+    |--- defineMatchStartDependent: Bitmapset* (see VI-5)
     +--- rpPattern: RPRPattern*
          |--- numVars: int
          |--- varNames: char**
@@ -2579,7 +2506,7 @@ Appendix A. Data Structure Relationship Diagram
     |--- defineClauseExprs: List<ExprState> (DEFINE order, index == varId)
     |--- nfaVarMatched: RPRVarMatch[] (per-row tri-state cache, lazy)
     |--- defineMatchStartDependent: Bitmapset* (match_start_dependent
-    |        DEFINE vars; see VI-4)
+    |        DEFINE vars; see VI-5)
     |--- nfaVisitedEnds: bitmapword* (cycle detection)
     |--- nfaVisitedMinWord / nfaVisitedMaxWord: int16
     |        (touched-word range for fast reset)
