@@ -5113,7 +5113,7 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS nosuch.val > 0
 );
-ERROR:  missing FROM-clause entry for table "nosuch"
+ERROR:  qualified expression "nosuch.val" is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS nosuch.val > 0
                         ^
 -- Unqualified composite field access in DEFINE works: no qualifier means no

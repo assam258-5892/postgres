@@ -72,7 +72,7 @@ static Node *transformXmlSerialize(ParseState *pstate, XmlSerialize *xs);
 static Node *transformBooleanTest(ParseState *pstate, BooleanTest *b);
 static Node *transformCurrentOfExpr(ParseState *pstate, CurrentOfExpr *cexpr);
 static Node *transformColumnRef(ParseState *pstate, ColumnRef *cref);
-static Node *transformWholeRowRef(ParseState *pstate, bool for_func_call,
+static Node *transformWholeRowRef(ParseState *pstate,
 								  ParseNamespaceItem *nsitem,
 								  int sublevels_up, int location);
 static Node *transformIndirection(ParseState *pstate, A_Indirection *ind);
@@ -656,6 +656,18 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 							   NameListToString(cref->fields)),
 						parser_errposition(pstate, cref->location));
 		}
+
+		/*
+		 * A whole-row reference is barred by its form alone: no qualifier
+		 * makes one legal here, so resolving it first would only choose which
+		 * rejection it gets.
+		 */
+		if (IsA(llast(cref->fields), A_Star))
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("whole-row reference is not allowed in DEFINE clause"),
+					errhint("A DEFINE condition may reference individual columns only."),
+					parser_errposition(pstate, cref->location));
 	}
 
 	/*----------
@@ -709,8 +721,22 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 												  cref->location,
 												  &levels_up);
 					if (nsitem)
-						node = transformWholeRowRef(pstate, false, nsitem,
-													levels_up, cref->location);
+					{
+						/*
+						 * A lone name that resolves as a range variable is
+						 * a whole-row reference without the star, which the
+						 * rule above has no A_Star to match on.
+						 */
+						if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
+							ereport(ERROR,
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("whole-row reference is not allowed in DEFINE clause"),
+									errhint("A DEFINE condition may reference individual columns only."),
+									parser_errposition(pstate, cref->location));
+
+						node = transformWholeRowRef(pstate, nsitem, levels_up,
+													cref->location);
+					}
 				}
 				break;
 			}
@@ -734,8 +760,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				/* Whole-row reference? */
 				if (IsA(field2, A_Star))
 				{
-					node = transformWholeRowRef(pstate, false, nsitem,
-												levels_up, cref->location);
+					node = transformWholeRowRef(pstate, nsitem, levels_up,
+												cref->location);
 					break;
 				}
 
@@ -747,8 +773,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				if (node == NULL)
 				{
 					/* Try it as a function call on the whole row */
-					node = transformWholeRowRef(pstate, true, nsitem,
-												levels_up, cref->location);
+					node = transformWholeRowRef(pstate, nsitem, levels_up,
+												cref->location);
 					node = ParseFuncOrColumn(pstate,
 											 list_make1(makeString(colname)),
 											 list_make1(node),
@@ -781,8 +807,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				/* Whole-row reference? */
 				if (IsA(field3, A_Star))
 				{
-					node = transformWholeRowRef(pstate, false, nsitem,
-												levels_up, cref->location);
+					node = transformWholeRowRef(pstate, nsitem, levels_up,
+												cref->location);
 					break;
 				}
 
@@ -794,8 +820,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				if (node == NULL)
 				{
 					/* Try it as a function call on the whole row */
-					node = transformWholeRowRef(pstate, true, nsitem,
-												levels_up, cref->location);
+					node = transformWholeRowRef(pstate, nsitem, levels_up,
+												cref->location);
 					node = ParseFuncOrColumn(pstate,
 											 list_make1(makeString(colname)),
 											 list_make1(node),
@@ -840,8 +866,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				/* Whole-row reference? */
 				if (IsA(field4, A_Star))
 				{
-					node = transformWholeRowRef(pstate, false, nsitem,
-												levels_up, cref->location);
+					node = transformWholeRowRef(pstate, nsitem, levels_up,
+												cref->location);
 					break;
 				}
 
@@ -853,8 +879,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				if (node == NULL)
 				{
 					/* Try it as a function call on the whole row */
-					node = transformWholeRowRef(pstate, true, nsitem,
-												levels_up, cref->location);
+					node = transformWholeRowRef(pstate, nsitem, levels_up,
+												cref->location);
 					node = ParseFuncOrColumn(pstate,
 											 list_make1(makeString(colname)),
 											 list_make1(node),
@@ -905,6 +931,23 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				errorMissingColumn(pstate, relname, colname, cref->location);
 				break;
 			case CRERR_NO_RTE:
+
+				/*
+				 * ISO/IEC 19075-5 6.5 reserves the qualifier slot in a DEFINE
+				 * clause for a row pattern variable, so a qualifier naming
+				 * nothing is rejected for occupying it, the same as one that
+				 * names something.  Reporting a missing FROM-clause entry
+				 * would point at a repair that does not exist: adding the
+				 * relation only moves the reference to the range variable
+				 * rejection below.
+				 */
+				if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
+					ereport(ERROR,
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("qualified expression \"%s\" is not allowed in DEFINE clause",
+								   NameListToString(cref->fields)),
+							parser_errposition(pstate, cref->location));
+
 				errorMissingRTE(pstate, makeRangeVar(nspname, relname,
 													 cref->location));
 				break;
@@ -2792,29 +2835,11 @@ transformCurrentOfExpr(ParseState *pstate, CurrentOfExpr *cexpr)
 
 /*
  * Construct a whole-row reference to represent the notation "relation.*".
- *
- * for_func_call is true when transformColumnRef is building the reference
- * speculatively, to retry a name that did not resolve as a column as a
- * function call on the composite value.  The query does not contain a
- * whole-row reference in that case, so restrictions on writing one must not
- * fire; whatever the retry resolves to is diagnosed by the caller.
  */
 static Node *
-transformWholeRowRef(ParseState *pstate, bool for_func_call,
-					 ParseNamespaceItem *nsitem, int sublevels_up,
-					 int location)
+transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
+					 int sublevels_up, int location)
 {
-	/*
-	 * A DEFINE clause cannot use a whole-row reference: ISO/IEC 19075-5 6.5
-	 * limits the range variables in scope to the row pattern variables.
-	 */
-	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE && !for_func_call)
-		ereport(ERROR,
-				errcode(ERRCODE_SYNTAX_ERROR),
-				errmsg("whole-row reference is not allowed in DEFINE clause"),
-				errhint("A DEFINE condition may reference individual columns only."),
-				parser_errposition(pstate, location));
-
 	/*
 	 * Build the appropriate referencing node.  Normally this can be a
 	 * whole-row Var, but if the nsitem is a JOIN USING alias then it contains
