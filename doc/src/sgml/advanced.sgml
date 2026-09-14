@@ -632,7 +632,7 @@ FROM stock
 );
 </programlisting>
 <screen>
- company  |   tdate    | price | first_value | max | count 
+ company  |   tdate    | price | first_value | max | count
 ----------+------------+-------+-------------+-----+-------
  company1 | 2023-07-01 |   100 |         100 | 200 |     4
  company1 | 2023-07-02 |   200 |             |     |     0
