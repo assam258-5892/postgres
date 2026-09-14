@@ -60,8 +60,7 @@ CREATE TABLE rpr_keywords (
 INSERT INTO rpr_keywords VALUES (1, 10, 20, 30, 40, 45, 50, 60);
 
 SELECT id, define, initial, past, pattern, permute, seek, skip
-FROM rpr_keywords
-ORDER BY id;
+FROM rpr_keywords;
 
 DROP TABLE rpr_keywords;
 
@@ -93,8 +92,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (UP+)
     DEFINE UP AS price > 150
-)
-ORDER BY dt;
+);
 
 -- Multiple column references
 SELECT dt, price, volume, COUNT(*) OVER w as cnt
@@ -105,8 +103,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (GOOD+)
     DEFINE GOOD AS price > 150 AND volume > 1000
-)
-ORDER BY dt;
+);
 
 -- Expression in DEFINE
 SELECT dt, price, COUNT(*) OVER w as cnt
@@ -117,8 +114,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (HIGH+)
     DEFINE HIGH AS price * 1.1 > 165
-)
-ORDER BY dt;
+);
 
 -- Arithmetic and functions
 SELECT dt, price, volume, COUNT(*) OVER w as cnt
@@ -129,8 +125,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (CALC+)
     DEFINE CALC AS (price + volume / 100) > 160
-)
-ORDER BY dt;
+);
 
 DROP TABLE stock_price;
 
@@ -146,8 +141,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+ B*)
     DEFINE A AS val > 15
-)
-ORDER BY id;
+);
 
 -- Multiple undefined variables
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -158,8 +152,7 @@ WINDOW w AS (
     PATTERN (A B C)
     DEFINE A AS val > 0
     -- B and C have no DEFINE entry, so they match every row
-)
-ORDER BY id;
+);
 
 -- All variables defined explicitly
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -172,8 +165,7 @@ WINDOW w AS (
         X AS val > 10,
         Y AS val > 20,
         Z AS val < 20
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_auto;
 
@@ -215,8 +207,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (T+)
     DEFINE T AS flag
-)
-ORDER BY id;
+);
 
 -- NULL::boolean
 SELECT id, COUNT(*) OVER w as cnt
@@ -226,8 +217,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (N+)
     DEFINE N AS NULL::boolean
-)
-ORDER BY id;
+);
 
 -- Implicit cast to boolean via custom type
 CREATE TYPE truthyint AS (v int);
@@ -272,8 +262,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS flag
-)
-ORDER BY id;
+);
 DROP TABLE rpr_domain;
 DROP DOMAIN boolish;
 
@@ -288,8 +277,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (UP+)
     DEFINE UP AS id > PREV(val)
-)
-ORDER BY id;
+);
 DROP TABLE rpr_nav;
 
 -- A non-boolean DEFINE expression is rejected
@@ -331,8 +319,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (C+)
     DEFINE C AS CASE WHEN val1 > 10 THEN val2 > 20 ELSE false END
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_complex;
 
@@ -348,8 +335,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS id > 0, B AS id > 5  -- B not in pattern
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_unused;
 
@@ -365,8 +351,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B)
     DEFINE A AS v < 0, B AS 1 / (v - v) > 0
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_lazy;
 
@@ -532,8 +517,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Zero offset: CURRENT ROW AND 0 FOLLOWING denotes the same one-row frame
 -- and is likewise rejected (caught at execution time).
@@ -545,8 +529,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- A non-constant frame end offset is allowed; a zero value is rejected by the
 -- same execution-time check the literal 0 above reaches.
@@ -559,8 +542,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 EXECUTE rpr_end_offset(2);
 EXECUTE rpr_end_offset(0);
 DEALLOCATE rpr_end_offset;
@@ -574,8 +556,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Maximum offset: CURRENT ROW AND 2147483646 FOLLOWING (INT_MAX - 1)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -586,8 +567,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- int64 frame-end overflow: a huge FOLLOWING offset must clamp to the
 -- partition end (matchStartRow + offset + 1 overflows int64; the clamp makes
@@ -602,8 +582,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- range frame is not allowed with RPR
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -614,8 +593,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A B?)
     DEFINE A AS val >= 0, B AS val >= 0
-)
-ORDER BY id;
+);
 
 -- GROUPS frame with RPR (not permitted)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -626,8 +604,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A B?)
     DEFINE A AS val >= 0, B AS val >= 0
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_frame;
 
@@ -651,8 +628,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A B+)
     DEFINE A AS val >= 10, B AS val > 15
-)
-ORDER BY id;
+);
 
 -- PARTITION BY with RANGE frame
 SELECT id, grp, val, COUNT(*) OVER w as cnt
@@ -664,8 +640,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A B?)
     DEFINE A AS val >= 10, B AS val >= 20
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_partition;
 
@@ -688,8 +663,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+ | B+ | C+)
     DEFINE A AS val > 35, B AS val BETWEEN 15 AND 35, C AS val < 15
-)
-ORDER BY id;
+);
 
 -- Grouping
 
@@ -701,8 +675,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (((A B) C)+)
     DEFINE A AS val > 10, B AS val > 20, C AS val > 30
-)
-ORDER BY id;
+);
 
 -- Sequence
 
@@ -719,8 +692,7 @@ WINDOW w AS (
         C AS val BETWEEN 25 AND 35,
         D AS val BETWEEN 35 AND 45,
         E AS val >= 45
-)
-ORDER BY id;
+);
 
 -- Complex combinations
 
@@ -732,8 +704,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN ((A B) | (C D))
     DEFINE A AS val < 20, B AS val >= 20, C AS val < 30, D AS val >= 30
-)
-ORDER BY id;
+);
 
 -- Alternation + sequence + grouping
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -748,8 +719,7 @@ WINDOW w AS (
         DOWN AS val <= 30,
         FLAT AS val BETWEEN 25 AND 35,
         FINISH AS val > 40
-)
-ORDER BY id;
+);
 
 -- Nested alternation in groups
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -759,8 +729,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN ((A | B) (C | D))
     DEFINE A AS val < 15, B AS val BETWEEN 15 AND 25, C AS val BETWEEN 25 AND 35, D AS val > 35
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_pattern;
 
@@ -783,8 +752,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A*)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- + (one or more)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -794,8 +762,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 50
-)
-ORDER BY id;
+);
 
 -- ? (zero or one)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -805,8 +772,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A?)
     DEFINE A AS val = 50
-)
-ORDER BY id;
+);
 
 -- Edge case quantifiers
 
@@ -818,8 +784,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{0} B)
     DEFINE A AS val > 1000, B AS val > 0
-)
-ORDER BY id;
+);
 
 -- {0,0} is not allowed (max must be >= 1)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -829,8 +794,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{0,0} B)
     DEFINE A AS val > 1000, B AS val > 0
-)
-ORDER BY id;
+);
 
 -- {0,1} (equivalent to ?)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -840,8 +804,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{0,1})
     DEFINE A AS val = 50
-)
-ORDER BY id;
+);
 
 -- Exact quantifiers {n}
 
@@ -853,8 +816,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{3})
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Range quantifiers {n,}
 
@@ -866,8 +828,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{2,})
     DEFINE A AS val > 40
-)
-ORDER BY id;
+);
 
 -- Upper bound quantifiers {,m}
 
@@ -879,8 +840,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{,3})
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Range quantifiers {n,m}
 
@@ -892,8 +852,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{3,7})
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_quant;
 
@@ -1618,8 +1577,7 @@ WINDOW w AS (
     DEFINE
         A AS val > 0,
         B AS val > PREV(val)
-)
-ORDER BY id;
+);
 
 -- NEXT function - reference next row in pattern
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -1631,8 +1589,7 @@ WINDOW w AS (
     DEFINE
         A AS val < NEXT(val),
         B AS val > 0
-)
-ORDER BY id;
+);
 
 -- Combined PREV and NEXT
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -1645,8 +1602,7 @@ WINDOW w AS (
         A AS val > 0,
         B AS val > PREV(val) AND val < NEXT(val),
         C AS val > PREV(val)
-)
-ORDER BY id;
+);
 
 -- PREV function cannot be used other than in DEFINE
 SELECT PREV(id), id, val, COUNT(*) OVER w as cnt
@@ -1658,8 +1614,7 @@ WINDOW w AS (
     DEFINE
         A AS val > 0,
         B AS val > PREV(val)
-)
-ORDER BY id;
+);
 
 -- NEXT function cannot be used other than in DEFINE
 SELECT NEXT(id), id, val, COUNT(*) OVER w as cnt
@@ -1671,8 +1626,7 @@ WINDOW w AS (
     DEFINE
         A AS val > 0,
         B AS val > PREV(val)
-)
-ORDER BY id;
+);
 
 -- FIRST function - reference match_start row
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -1684,8 +1638,7 @@ WINDOW w AS (
     DEFINE
         A AS val > 0,
         B AS val > FIRST(val)
-)
-ORDER BY id;
+);
 
 -- LAST function without offset - equivalent to current row's value
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -1697,8 +1650,7 @@ WINDOW w AS (
     DEFINE
         A AS val > 0,
         B AS LAST(val) > PREV(val)
-)
-ORDER BY id;
+);
 
 -- FIRST and LAST combined
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -1710,8 +1662,7 @@ WINDOW w AS (
     DEFINE
         A AS val > 0,
         B AS val > FIRST(val) AND LAST(val) > PREV(val)
-)
-ORDER BY id;
+);
 
 -- FIRST function cannot be used other than in DEFINE
 SELECT FIRST(id), id, val FROM rpr_nav;
@@ -2036,8 +1987,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A B C)
     DEFINE A AS val > 0, B AS val > 2, C AS val > 4
-)
-ORDER BY id;
+);
 
 -- SKIP PAST LAST ROW
 
@@ -2050,8 +2000,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A B C)
     DEFINE A AS val > 0, B AS val > 2, C AS val > 4
-)
-ORDER BY id;
+);
 
 -- Default behavior (should be SKIP PAST LAST ROW)
 
@@ -2063,8 +2012,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B)
     DEFINE A AS val > 0, B AS val > 1
-)
-ORDER BY id;
+);
 
 -- Compare default with explicit PAST LAST ROW
 -- Results should be identical
@@ -2108,8 +2056,7 @@ WINDOW w AS (
     INITIAL
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Implicit INITIAL (default)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -2119,8 +2066,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_init;
 
@@ -2776,8 +2722,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 EXECUTE rpr_prep_simple;
 EXECUTE rpr_prep_simple;
@@ -2794,8 +2739,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 10
-)
-ORDER BY id;
+);
 
 EXECUTE rpr_prep_param(2);
 EXECUTE rpr_prep_param(3);
@@ -2815,8 +2759,7 @@ WINDOW w AS (
         A AS val > 5,
         B AS val > 15,
         C AS val <= 15
-)
-ORDER BY id;
+);
 
 EXECUTE rpr_prep_complex;
 EXECUTE rpr_prep_complex;
@@ -2871,8 +2814,7 @@ FROM (
         DEFINE A AS val > 10, B AS val > 20
     )
 ) sub
-WHERE cnt > 0
-ORDER BY id;
+WHERE cnt > 0;
 
 -- Nested subqueries
 SELECT *
@@ -2889,8 +2831,7 @@ FROM (
         )
     ) inner_sub
     WHERE cnt > 0
-) outer_sub
-ORDER BY id;
+) outer_sub;
 
 DROP TABLE rpr_copy;
 
@@ -3126,8 +3067,7 @@ FROM rpr_glue
 WINDOW gs AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B) DEFINE A AS val > 0, B AS val <= 0),
        rs AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?|B) DEFINE A AS val > 0, B AS val <= 0),
        gp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+|B) DEFINE A AS val > 0, B AS val <= 0),
-       rp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+?|B) DEFINE A AS val > 0, B AS val <= 0)
-ORDER BY id;
+       rp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+?|B) DEFINE A AS val > 0, B AS val <= 0);
 -- Patterns that must stay rejected.  "&" is an invalid op; a '|' with an empty
 -- side (leading, trailing, doubled, or alone in a group) has no operand; "||"
 -- and "*||" are doubled pipes; "A* *|B"/"A* *?|B"/"A{2}*?|B" are doubled
@@ -3388,8 +3328,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0, B AS val > 5, C AS val > 10
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_err;
 
@@ -3406,8 +3345,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 15
-)
-ORDER BY id;
+);
 
 -- IS NULL in DEFINE
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -3417,8 +3355,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (N+)
     DEFINE N AS val IS NULL
-)
-ORDER BY id;
+);
 
 -- IS NOT NULL in DEFINE
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -3428,8 +3365,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (NN+)
     DEFINE NN AS val IS NOT NULL
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_null;
 
@@ -4243,8 +4179,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+ B)
     DEFINE A AS val <= 50, B AS val > 50
-)
-ORDER BY id;
+);
 
 -- Absorbable GROUP Pattern: (A B)+ C
 -- Pattern starts with unbounded GROUP
@@ -4257,8 +4192,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A B)+ C)
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
-)
-ORDER BY id;
+);
 
 -- Non-Absorbable: Unbounded Not at Start
 -- Pattern: A B+ (unbounded not at start)
@@ -4271,8 +4205,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A B+)
     DEFINE A AS val <= 50, B AS val > 50
-)
-ORDER BY id;
+);
 
 -- ALT with Absorbable Branches
 -- Pattern: (A+ | B+) C - both branches absorbable
@@ -4285,8 +4218,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A+ | B+) C)
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
-)
-ORDER BY id;
+);
 
 -- ALT with Mixed Branches
 -- Pattern: (A+ | B C) - only first branch absorbable
@@ -4299,8 +4231,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A+ | B C)+)
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
-)
-ORDER BY id;
+);
 
 -- Non-Absorbable: ALT Inside GROUP
 -- Pattern: (A | B){2,} - ALT inside unbounded GROUP
@@ -4313,8 +4244,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A | B){2,})
     DEFINE A AS val <= 50, B AS val > 50
-)
-ORDER BY id;
+);
 
 -- Non-Absorbable: Nested Unbounded
 -- Pattern: ((A B)+ C)+ - nested GROUP structure
@@ -4327,8 +4257,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (((A B)+ C)+)
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
-)
-ORDER BY id;
+);
 
 -- Non-Absorbable: Unbounded Element Inside GROUP
 -- Pattern: (A B+){2,} - unbounded inside GROUP
@@ -4341,8 +4270,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A B+){2,})
     DEFINE A AS val <= 50, B AS val > 50
-)
-ORDER BY id;
+);
 
 -- Runtime Conditions: SKIP TO NEXT ROW
 -- Absorption disabled with SKIP TO NEXT ROW
@@ -4355,8 +4283,7 @@ WINDOW w AS (
     AFTER MATCH SKIP TO NEXT ROW
     PATTERN (A+ B)
     DEFINE A AS val <= 50, B AS val > 50
-)
-ORDER BY id;
+);
 
 -- Runtime Conditions: Limited Frame
 -- Absorption disabled with limited frame end
@@ -4369,8 +4296,7 @@ WINDOW w AS (
     AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+ B)
     DEFINE A AS val <= 50, B AS val > 50
-)
-ORDER BY id;
+);
 
 -- ALT Non-Absorbable Branch Match: A+ B | C
 -- C match on the non-absorbable branch (id=2, id=5) must survive absorption of
@@ -4448,8 +4374,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A*)
     DEFINE A AS val > 1000  -- Never matches
-)
-ORDER BY id;
+);
 
 -- All Rows Match
 -- Pattern where every row matches
@@ -4461,8 +4386,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val >= 0  -- Always true
-)
-ORDER BY id;
+);
 
 -- Large Quantifiers
 -- Pattern: A{100} (large exact quantifier)
@@ -4474,8 +4398,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{100})
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Pattern: A{10,20} (large range quantifier)
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -4485,8 +4408,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A{10,20})
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Complex Multi-Level Nesting
 -- Pattern: (((A B) | C)+ D)+
@@ -4499,8 +4421,7 @@ WINDOW w AS (
     PATTERN ((((A B) | C)+ D)+)
     DEFINE A AS val <= 20, B AS val > 20 AND val <= 40,
            C AS val > 40 AND val <= 60, D AS val > 60
-)
-ORDER BY id;
+);
 
 -- Long Alternation Chain
 -- Pattern: A | B | C | D | E (5-way ALT)
@@ -4513,8 +4434,7 @@ WINDOW w AS (
     PATTERN (A | B | C | D | E)
     DEFINE A AS val = 10, B AS val = 30, C AS val = 50,
            D AS val = 70, E AS val = 90
-)
-ORDER BY id;
+);
 
 -- Long Sequence
 -- Pattern: A B C D E F G H (8-element SEQ)
@@ -4528,8 +4448,7 @@ WINDOW w AS (
     DEFINE A AS val >= 10, B AS val >= 20, C AS val >= 30,
            D AS val >= 40, E AS val >= 50, F AS val >= 60,
            G AS val >= 70, H AS val >= 80
-)
-ORDER BY id;
+);
 
 -- Interleaved Quantifiers
 -- Pattern: A{2} B+ C{3,5} D* E{1,}
@@ -4542,8 +4461,7 @@ WINDOW w AS (
     PATTERN (A{2} B+ C{3,5} D* E{1,})
     DEFINE A AS val > 0, B AS val > 0, C AS val > 0,
            D AS val > 0, E AS val > 0
-)
-ORDER BY id;
+);
 
 -- ============================================================
 -- Optimization Fallback Tests
@@ -4777,8 +4695,7 @@ w2 AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (B+)
     DEFINE B AS val >= 40
-)
-ORDER BY id;
+);
 
 -- Window Function with PARTITION BY
 
@@ -4791,8 +4708,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY category, id;
+);
 
 -- Window Function with Complex ORDER BY
 
@@ -4804,8 +4720,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY category DESC, val ASC;
+);
 
 -- Named Window Reference
 
@@ -4817,8 +4732,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Inline Window Definition
 
@@ -4829,8 +4743,7 @@ SELECT id, category, val,
            PATTERN (A+)
            DEFINE A AS val > 0
        ) as cnt
-FROM rpr_planner
-ORDER BY id;
+FROM rpr_planner;
 
 -- ============================================================
 -- Subquery and CTE Tests
@@ -4850,8 +4763,7 @@ SELECT * FROM (
         DEFINE A AS val > 0
     )
 ) sub
-WHERE cnt > 5
-ORDER BY id;
+WHERE cnt > 5;
 
 -- RPR with Subquery in WHERE
 
@@ -4864,8 +4776,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 50
-)
-ORDER BY id;
+);
 
 -- CTE with RPR
 
@@ -4940,8 +4851,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val1 + val2 > 100
-)
-ORDER BY t1.id;
+);
 
 -- RPR After LEFT JOIN
 
@@ -4954,8 +4864,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val1 > 0
-)
-ORDER BY t1.id;
+);
 
 -- RPR with Multiple Tables in DEFINE
 
@@ -4969,8 +4878,7 @@ WINDOW w AS (
     PATTERN (A+ B)
     DEFINE A AS val1 > 20,
            B AS val2 > 200
-)
-ORDER BY t1.id;
+);
 
 -- RPR After Cross Join
 
@@ -4984,8 +4892,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val1 + val2 > 0
-)
-ORDER BY t1.id, t2.id;
+);
 
 -- Self-Join with RPR
 
@@ -4999,8 +4906,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (X+)
     DEFINE X AS val1 < val1_next
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_join1, rpr_join2;
 
@@ -5024,8 +4930,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- CASE Expression in Target List
 
@@ -5042,8 +4947,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Subquery in Target List
 
@@ -5056,8 +4960,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Function Calls in Target List
 
@@ -5071,8 +4974,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Column Aliases and References
 
@@ -5085,8 +4987,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY row_id;
+);
 
 DROP TABLE rpr_target;
 
@@ -5210,8 +5111,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS COUNT(*) > 0
-)
-ORDER BY category;
+);
 
 -- RPR with HAVING (same aggregate-in-DEFINE error)
 
@@ -5226,8 +5126,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS COUNT(*) > 0
-)
-ORDER BY category;
+);
 
 -- RPR with DISTINCT
 
@@ -5798,8 +5697,7 @@ w3 AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (C+)
     DEFINE C AS val > 100
-)
-ORDER BY id;
+);
 
 -- Deeply Nested Subqueries with RPR
 
@@ -5818,8 +5716,7 @@ SELECT * FROM (
         ) sub1
     ) sub2
 ) sub3
-WHERE cnt > 10
-ORDER BY id;
+WHERE cnt > 10;
 
 -- Complex Expression in DEFINE Clause
 
@@ -5832,8 +5729,7 @@ WINDOW w AS (
     PATTERN (A+ B)
     DEFINE A AS (val % 3 = 0 OR val % 5 = 0),
            B AS (val * 2 > 100 AND val / 2 < 100)
-)
-ORDER BY id;
+);
 
 -- Window with No Matching Rows
 
@@ -5846,8 +5742,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 -- Window on Single Row
 
@@ -5860,8 +5755,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS val > 0
-)
-ORDER BY id;
+);
 
 DROP TABLE rpr_stress;
 
