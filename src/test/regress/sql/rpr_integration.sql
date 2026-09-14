@@ -126,8 +126,7 @@ SELECT * FROM (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val > PREV(val))
-) t WHERE cnt > 0
-ORDER BY id;
+) t WHERE cnt > 0;
 
 -- ============================================================
 -- A3. Window dedup prevention (RPR vs non-RPR)
@@ -174,8 +173,7 @@ SELECT
         DEFINE B AS val > PREV(val)) AS rpr_cnt,
     count(*) OVER (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS normal_cnt
-FROM rpr_integ
-ORDER BY id;
+FROM rpr_integ;
 
 -- Result level: if the two windows had been merged, fv_normal and fv_rpr
 -- would agree on every row.  They do not, so the windows stayed separate.
@@ -267,8 +265,7 @@ SELECT
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val < PREV(val)) AS cnt_down
-FROM rpr_integ
-ORDER BY id;
+FROM rpr_integ;
 
 -- ============================================================
 -- A5. Unused output removal around an RPR window
