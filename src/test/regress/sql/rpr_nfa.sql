@@ -4815,15 +4815,18 @@ WINDOW w AS (
 );
 
 -- ------------------------------------------------------------
--- 7.2.6 Anchors (not yet implemented - syntax error expected)
+-- 7.2.6 Anchors: not permitted in the WINDOW clause
+-- Per 6.13, "the anchors (^ and $) are not permitted with row pattern
+-- matching in windows".  R020 conformance: these must stay rejected;
+-- this is not a gap to be filled later.
 -- ------------------------------------------------------------
 
--- ^ anchor: not yet supported
+-- ^ anchor: rejected
 SELECT count(*) OVER w FROM (SELECT 1 AS v) t
 WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (^ A) DEFINE A AS TRUE);
 
--- $ anchor: not yet supported
+-- $ anchor: rejected
 SELECT count(*) OVER w FROM (SELECT 1 AS v) t
 WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A $) DEFINE A AS TRUE);
@@ -4832,13 +4835,14 @@ WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -- 7.2.8 Infinite repetitions of empty matches
 -- (Perl lower-bound stopping rule)
 -- ------------------------------------------------------------
--- Standard examples from 7.2.8:
---   (A?){0,3}: allowed strings include STR00=(), STR01=(A), STR02=(empty),
---              STR03=(AA), STR04=(A,empty), STR07=(AAA), STR08=(AA,empty)
---   (A?){1,3}: same as {0,3} but STR00 excluded (min=1 not met)
---   (A?){2,3}: STR03-06 (len 2) and STR07,08,11,12 (len 3) are valid
---              STR06=(STRE,STRE) IS valid because non-final STRE at
---              position 1 fills the lower bound
+-- The standard works this rule out by listing the iteration traces of
+-- the quantifier.  Below, A is an iteration that matched a row and ()
+-- one that matched nothing.  An empty iteration is allowed only as the
+-- last one, or at a position below the lower bound.
+--   (A?){0,3}: (), (A), (()), (A A), (A ()), (A A A), (A A ())
+--   (A?){1,3}: the same, less () -- it does not meet the lower bound
+--   (A?){2,3}: also (() A) and (() ()), where a non-final empty
+--              iteration at position 1 fills the lower bound of 2
 
 -- (A??)*B: Standard 7.2.8 introductory example
 -- "matched against a sequence of rows for which the only feasible
@@ -4911,8 +4915,9 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
--- (A?){2,3}: min=2, nullable inner.  Per ISO/IEC 19075-5 7.2.8 STR06 = (STRE STRE)
--- is valid: two empty iterations satisfy min=2.
+-- (A?){2,3}: min=2, nullable inner.  Two empty iterations -- ( () () ) --
+-- are valid here: the first is below the lower bound, so it does not
+-- stop the loop.
 WITH test_728_min2 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -4955,7 +4960,7 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
--- (A? | B){3}: an empty iteration below min fills the lower bound (STR06),
+-- (A? | B){3}: an empty iteration below min fills the lower bound,
 -- and it must outrank the later branch.  Row 2 is B only, so A? derives empty
 -- there; repeating that derivation fills the remaining iterations and the
 -- match ends at row 1.  Taking branch B instead would consume rows 2-3.
