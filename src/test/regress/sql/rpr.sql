@@ -1373,6 +1373,24 @@ WINDOW w AS (
         B AS PREV(price::numeric, 1) > PREV(price::numeric, 2)
 );
 
+-- Bare pass-by-reference column rather than a cast: the two navigations land
+-- on different rows, so the second fetch frees the tuple the first result
+-- points into.  The casts above allocate a fresh datum and never reach that;
+-- only EEOP_RPR_NAV_RESTORE's datumCopy keeps this one alive.
+CREATE TEMP TABLE rpr_byref (id int, s text);
+INSERT INTO rpr_byref VALUES
+  (1, 'aaa'), (2, 'bbb'), (3, 'ccc'), (4, 'bbb'), (5, 'ddd'), (6, 'aaa');
+SELECT id, s, first_value(s) OVER w AS fs, last_value(s) OVER w AS ls,
+       count(*) OVER w AS cnt
+FROM rpr_byref
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B+)
+    DEFINE A AS TRUE, B AS PREV(s, 1) > PREV(s, 2)
+);
+DROP TABLE rpr_byref;
+
 -- Typmod coercion over a navigation result: casting PREV(p) (a numeric(10,3)
 -- column) to a narrower numeric(8,2) inside DEFINE forces coerce_type_typmod,
 -- which calls exprTypmod() on the RPRNavExpr.
