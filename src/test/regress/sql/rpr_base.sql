@@ -69,14 +69,14 @@ DROP TABLE rpr_keywords;
 -- ============================================================
 
 -- Simple column references
-CREATE TABLE stock_price (
+CREATE TABLE rpr_stock_price (
     dt DATE,
     symbol TEXT,
     price NUMERIC,
     volume INT
 );
 
-INSERT INTO stock_price VALUES
+INSERT INTO rpr_stock_price VALUES
     ('2024-01-01', 'AAPL', 150, 1000),
     ('2024-01-02', 'AAPL', 155, 1200),
     ('2024-01-03', 'AAPL', 152, 900),
@@ -85,7 +85,7 @@ INSERT INTO stock_price VALUES
 
 -- Simple column reference
 SELECT dt, price, COUNT(*) OVER w as cnt
-FROM stock_price
+FROM rpr_stock_price
 WINDOW w AS (
     PARTITION BY symbol
     ORDER BY dt
@@ -96,7 +96,7 @@ WINDOW w AS (
 
 -- Multiple column references
 SELECT dt, price, volume, COUNT(*) OVER w as cnt
-FROM stock_price
+FROM rpr_stock_price
 WINDOW w AS (
     PARTITION BY symbol
     ORDER BY dt
@@ -107,7 +107,7 @@ WINDOW w AS (
 
 -- Expression in DEFINE
 SELECT dt, price, COUNT(*) OVER w as cnt
-FROM stock_price
+FROM rpr_stock_price
 WINDOW w AS (
     PARTITION BY symbol
     ORDER BY dt
@@ -118,7 +118,7 @@ WINDOW w AS (
 
 -- Arithmetic and functions
 SELECT dt, price, volume, COUNT(*) OVER w as cnt
-FROM stock_price
+FROM rpr_stock_price
 WINDOW w AS (
     PARTITION BY symbol
     ORDER BY dt
@@ -127,7 +127,7 @@ WINDOW w AS (
     DEFINE CALC AS (price + volume / 100) > 160
 );
 
-DROP TABLE stock_price;
+DROP TABLE rpr_stock_price;
 
 -- Pattern variables with no DEFINE entry
 CREATE TABLE rpr_auto (id INT, val INT);
@@ -220,15 +220,15 @@ WINDOW w AS (
 );
 
 -- Implicit cast to boolean via custom type
-CREATE TYPE truthyint AS (v int);
-CREATE FUNCTION truthyint_to_bool(truthyint) RETURNS boolean AS $$
+CREATE TYPE rpr_truthyint AS (v int);
+CREATE FUNCTION rpr_truthyint_to_bool(rpr_truthyint) RETURNS boolean AS $$
   SELECT ($1).v <> 0;
 $$ LANGUAGE SQL IMMUTABLE STRICT;
-CREATE CAST (truthyint AS boolean)
-  WITH FUNCTION truthyint_to_bool(truthyint)
+CREATE CAST (rpr_truthyint AS boolean)
+  WITH FUNCTION rpr_truthyint_to_bool(rpr_truthyint)
   AS ASSIGNMENT;
 
-CREATE TABLE rpr_coerce (id int, val truthyint);
+CREATE TABLE rpr_coerce (id int, val rpr_truthyint);
 INSERT INTO rpr_coerce VALUES (1, ROW(1)), (2, ROW(0)), (3, ROW(5)), (4, ROW(0));
 
 SELECT id, val, cnt
@@ -244,16 +244,16 @@ FROM (SELECT id, val,
 ) s ORDER BY id;
 
 DROP TABLE rpr_coerce;
-DROP CAST (truthyint AS boolean);
-DROP FUNCTION truthyint_to_bool(truthyint);
-DROP TYPE truthyint;
+DROP CAST (rpr_truthyint AS boolean);
+DROP FUNCTION rpr_truthyint_to_bool(rpr_truthyint);
+DROP TYPE rpr_truthyint;
 
 DROP TABLE rpr_bool;
 
 -- Coercion over a boolean domain is not a no-op; the wrapped Var must still
 -- propagate when referenced only in DEFINE (flag is not in the select list)
-CREATE DOMAIN boolish AS boolean;
-CREATE TABLE rpr_domain (id int, flag boolish);
+CREATE DOMAIN rpr_boolish AS boolean;
+CREATE TABLE rpr_domain (id int, flag rpr_boolish);
 INSERT INTO rpr_domain VALUES (1, true), (2, false), (3, true);
 SELECT id, COUNT(*) OVER w AS cnt
 FROM rpr_domain
@@ -264,7 +264,7 @@ WINDOW w AS (
     DEFINE A AS flag
 );
 DROP TABLE rpr_domain;
-DROP DOMAIN boolish;
+DROP DOMAIN rpr_boolish;
 
 -- A Var referenced only inside a navigation operation must still propagate
 -- (val appears only inside PREV(), not as a bare operand or in the select list)
@@ -1719,20 +1719,20 @@ DROP TABLE rpr_nav;
 -- Name-space: prev/next/first/last are navigation functions, not ordinary functions
 CREATE SCHEMA rpr_navns;
 SET search_path TO rpr_navns, public;
-CREATE TABLE nt (g text, id int, val int);
-INSERT INTO nt VALUES ('x', 1, 100), ('x', 2, 200), ('x', 3, 150),
+CREATE TABLE rpr_nav_rows (g text, id int, val int);
+INSERT INTO rpr_nav_rows VALUES ('x', 1, 100), ('x', 2, 200), ('x', 3, 150),
                       ('x', 4, 140), ('x', 5, 150);
 
 -- Outside DEFINE these are ordinary identifiers and resolve to nothing
-SELECT prev(val) FROM nt;
-SELECT next(val) FROM nt;
-SELECT prev(val, 2) FROM nt;
-SELECT next(val, 2) FROM nt;
-SELECT first(val) FROM nt;
-SELECT last(val) FROM nt;
-SELECT first(val, 1) FROM nt;
+SELECT prev(val) FROM rpr_nav_rows;
+SELECT next(val) FROM rpr_nav_rows;
+SELECT prev(val, 2) FROM rpr_nav_rows;
+SELECT next(val, 2) FROM rpr_nav_rows;
+SELECT first(val) FROM rpr_nav_rows;
+SELECT last(val) FROM rpr_nav_rows;
+SELECT first(val, 1) FROM rpr_nav_rows;
 -- A schema-qualified call is also a plain (failing) function lookup
-SELECT pg_catalog.prev(val) FROM nt;
+SELECT pg_catalog.prev(val) FROM rpr_nav_rows;
 
 -- Outside DEFINE, a user-defined function of that name is callable
 CREATE FUNCTION next(numeric) RETURNS numeric AS 'SELECT -999::numeric'
@@ -1741,7 +1741,7 @@ SELECT next(10);
 
 -- Inside DEFINE, unqualified PREV is nav whether or not a user prev() exists
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (START UP+)
@@ -1753,14 +1753,14 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
 CREATE FUNCTION prev(integer) RETURNS integer
   LANGUAGE plpgsql VOLATILE AS 'BEGIN RETURN -999; END';
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (START UP+)
     DEFINE START AS TRUE, UP AS val > PREV(val))
   ORDER BY id;
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+)
@@ -1771,7 +1771,7 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
 CREATE OR REPLACE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
   LANGUAGE sql VOLATILE;
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+)
@@ -1781,7 +1781,7 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
 -- No OVER references the window, so flattening the subquery drops it
 -- before the check runs, the same way an unreferenced CTE is never planned
 SELECT id FROM (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5)) s
@@ -1791,14 +1791,14 @@ ORDER BY id;
 -- the planner withdraws the DEFINE clause of a window it will not run and the
 -- check finds nothing left to reject
 SELECT id FROM (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
 
 -- ERROR: a subquery window that does run keeps its DEFINE, so it is checked
 SELECT id, c FROM (
- SELECT id, count(*) OVER w AS c FROM nt
+ SELECT id, count(*) OVER w AS c FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5)) sub;
@@ -1806,7 +1806,7 @@ SELECT id, c FROM (
 -- WHERE false makes the subquery rel dummy, so the planner never plans it
 -- and nothing looks at its DEFINE
 SELECT id FROM (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub
@@ -1815,7 +1815,7 @@ WHERE false;
 -- The volatile is in a dead CASE arm that folds away, so nothing
 -- volatile is left for the check to find
 SELECT id FROM (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS CASE WHEN false THEN random()::int > 0
@@ -1836,17 +1836,17 @@ DROP FUNCTION rpr_off_leak(bigint);
 -- A UNION ALL leaf is flattened like any other subquery, so its
 -- unreferenced window goes the same way
 SELECT id FROM (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5)
  UNION ALL
- SELECT id FROM nt) s;
+ SELECT id FROM rpr_nav_rows) s;
 
 -- An unreferenced CTE is never planned, so nothing looks at its
 -- DEFINE
 WITH unused AS (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5))
@@ -1854,7 +1854,7 @@ SELECT 1;
 
 -- ERROR: referencing it plans the CTE, and the check reaches the DEFINE there
 WITH used AS (
- SELECT id FROM nt
+ SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5))
@@ -1865,7 +1865,7 @@ DROP FUNCTION prev(integer);
 CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
   LANGUAGE sql IMMUTABLE;
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (START UP+)
@@ -1874,14 +1874,14 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
 -- (val).prev is attribute notation, so it calls the ordinary function prev(val)
 -- (the IMMUTABLE user prev here), the same as the schema-qualified call below
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+)
     DEFINE A AS (val).prev = -999)
   ORDER BY id;
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+)
@@ -1889,119 +1889,119 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   ORDER BY id;
 
 -- Zero or more than two arguments is an error, with no function fallback
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV() IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val, 1, 2) IS NULL);
 -- the error stands even when a user function of that exact arity exists
 CREATE FUNCTION prev(integer, integer, integer) RETURNS integer
   AS 'SELECT -999' LANGUAGE sql IMMUTABLE;
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val, 1, 2) IS NULL);
 DROP FUNCTION prev(integer, integer, integer);
 
 -- Syntactic decoration is rejected
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(*) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(DISTINCT val) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val ORDER BY val) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val) FILTER (WHERE true) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val) WITHIN GROUP (ORDER BY val) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val) OVER () IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(VARIADIC ARRAY[val]) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS prev(x => val) IS NULL);
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val) IGNORE NULLS IS NULL);
 
 -- Quoting does not escape: "prev" is nav, "PREV" is an ordinary name
 SELECT id, val, count(*) OVER w AS cnt
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (START UP+)
     DEFINE START AS TRUE, UP AS val > "prev"(val))
   ORDER BY id;
-SELECT count(*) OVER w FROM nt
+SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS "PREV"(val) IS NULL);
 
 -- A view round-trips: bare PREV stays a navigation function, and a qualified
 -- user prev() stays schema-qualified so it does not reparse as navigation
-CREATE VIEW navns_nav AS
-  SELECT id, count(*) OVER w AS cnt FROM nt
+CREATE VIEW rpr_navns_nav AS
+  SELECT id, count(*) OVER w AS cnt FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (START UP+) DEFINE START AS TRUE, UP AS val > PREV(val));
-CREATE VIEW navns_fn AS
-  SELECT id, count(*) OVER w AS cnt FROM nt
+CREATE VIEW rpr_navns_fn AS
+  SELECT id, count(*) OVER w AS cnt FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS rpr_navns.prev(val) = -999);
-SELECT pg_get_viewdef('navns_nav');
-SELECT pg_get_viewdef('navns_fn');
-DROP VIEW navns_nav, navns_fn;
+SELECT pg_get_viewdef('rpr_navns_nav');
+SELECT pg_get_viewdef('rpr_navns_fn');
+DROP VIEW rpr_navns_nav, rpr_navns_fn;
 
 -- A qualified last() in DEFINE must stay schema-qualified on deparse so that
 -- it does not reparse as the LAST navigation function (force-qualify path)
 CREATE FUNCTION rpr_navns.last(integer) RETURNS integer AS 'SELECT -999' LANGUAGE sql IMMUTABLE;
-CREATE VIEW navns_fn_last AS
-  SELECT id, count(*) OVER w AS cnt FROM nt
+CREATE VIEW rpr_navns_fn_last AS
+  SELECT id, count(*) OVER w AS cnt FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS rpr_navns.last(val) = -999);
-SELECT pg_get_viewdef('navns_fn_last');
-DROP VIEW navns_fn_last;
+SELECT pg_get_viewdef('rpr_navns_fn_last');
+DROP VIEW rpr_navns_fn_last;
 DROP FUNCTION rpr_navns.last(integer);
 
 -- Attribute notation is field selection only, never a function fallback
 CREATE TYPE rpr_navns_pair AS (first int, last int);
-CREATE TABLE ct (id int, p rpr_navns_pair);
-INSERT INTO ct VALUES (1, (10, 20)), (2, (30, 40));
-SELECT (p).last FROM ct ORDER BY id;
-SELECT count(*) OVER w FROM ct
+CREATE TABLE rpr_composite_rows (id int, p rpr_navns_pair);
+INSERT INTO rpr_composite_rows VALUES (1, (10, 20)), (2, (30, 40));
+SELECT (p).last FROM rpr_composite_rows ORDER BY id;
+SELECT count(*) OVER w FROM rpr_composite_rows
   WINDOW w AS (ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS (p).last > 0);
-SELECT count(*) OVER w FROM ct
+SELECT count(*) OVER w FROM rpr_composite_rows
   WINDOW w AS (ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS (p).prev > 0);
 
 -- Navigation offset must not contain a navigation operation
 SELECT id, val
-  FROM nt
+  FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+)
