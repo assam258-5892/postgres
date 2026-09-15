@@ -15,7 +15,7 @@
 --    A1. Frame optimization bypass
 --    A2. Run condition pushdown bypass
 --    A3. Window dedup prevention (RPR vs non-RPR)
---    A4. Window dedup prevention (same PATTERN, different DEFINE)
+--    A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
 --    A5. Unused output removal around an RPR window
 --    A6. Inverse transition bypass
 --    A7. Cost estimation RPR awareness
@@ -214,14 +214,17 @@ WINDOW
 EXPLAIN (COSTS OFF) SELECT * FROM rpr_ev_opt_mixed;
 
 -- ============================================================
--- A4. Window dedup prevention (same PATTERN, different DEFINE)
+-- A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
 -- ============================================================
--- Verify that inline-window dedup does not merge two RPR windows
--- that share the same PATTERN structure but have different DEFINE
--- conditions.  Even though the ORDER BY, frame, and PATTERN coincide,
--- the differing DEFINE expressions classify rows differently and
--- must therefore yield two separate WindowAgg nodes.  Inline specs
--- are used here because dedup only applies to inline windows.
+-- Verify that inline-window dedup does not merge two RPR windows that
+-- share the same PATTERN structure but differ in one other part of the
+-- row pattern common syntax.  Even though the ORDER BY, frame, and
+-- PATTERN coincide, a differing DEFINE classifies rows differently and
+-- a differing AFTER MATCH SKIP resumes the scan differently, so either
+-- must yield two separate WindowAgg nodes.  transformWindowFuncCall()
+-- compares the whole RPCommonSyntax node, which carries rpDefs and
+-- rpSkipTo alongside rpPattern; the cases below cover one field each.
+-- Inline specs are used here because dedup only applies to inline windows.
 
 -- Baseline: two inline RPR windows that are structurally identical
 -- (same PARTITION BY, ORDER BY, frame, PATTERN, and DEFINE) are deduped by the
@@ -265,6 +268,40 @@ SELECT
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val < PREV(val)) AS cnt_down
+FROM rpr_integ;
+
+-- Two inline RPR windows alike in every way but the AFTER MATCH SKIP
+-- mode must also remain separate.  SKIP PAST LAST ROW resumes after the
+-- match, SKIP TO NEXT ROW resumes one row in, so the later rows of a
+-- match can start a match of their own.
+EXPLAIN (COSTS OFF)
+SELECT
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP PAST LAST ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_past,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP TO NEXT ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_next
+FROM rpr_integ;
+
+-- Verify the two windows disagree on the rows that a skipped-past match
+-- covered, confirming the skip modes were not collapsed by dedup.
+SELECT
+    id, val,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP PAST LAST ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_past,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP TO NEXT ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_next
 FROM rpr_integ;
 
 -- ============================================================

@@ -914,6 +914,48 @@ WINDOW gg  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATT
        ca  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A??)        DEFINE A AS isa),
        cs  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?)        DEFINE A AS isa);
 
+-- The same greedy/reluctant contrast with a MULTI-ELEMENT body.  The columns
+-- above all have a single-variable body, so the empty-preferred bit reaching
+-- the group's END always came from one child; here it has to survive the
+-- AND-reduction fillRPRPattern() performs over a sequence's children.  A
+-- greedy body takes the longest match, a reluctant one prefers the empty
+-- derivation, and the min>=2 pair shows the outer bound does not change that.
+WITH t(id, isa, isb) AS
+  (VALUES (1,true,false),(2,false,true),(3,true,false),(4,false,true),(5,false,false))
+SELECT id,
+       count(*) OVER gg  AS gg,     -- (A? B?)+      greedy body
+       count(*) OVER gr  AS gr,     -- (A?? B??)+    reluctant body
+       count(*) OVER gg2 AS gg2,    -- (A? B?){2,}   greedy body, min>=2
+       count(*) OVER gr2 AS gr2     -- (A?? B??){2,} reluctant body, min>=2
+FROM t
+WINDOW gg  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A? B?)+)      DEFINE A AS isa, B AS isb),
+       gr  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A?? B??)+)    DEFINE A AS isa, B AS isb),
+       gg2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A? B?){2,})   DEFINE A AS isa, B AS isb),
+       gr2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A?? B??){2,}) DEFINE A AS isa, B AS isb);
+
+-- Branch position inside a quantified alternation.  fillRPRPatternAlt() ORs
+-- nullability across every branch but takes empty-preferred from the FIRST
+-- branch alone, so the two reductions are asymmetric.  Every empty-preferred
+-- branch elsewhere in this file leads its alternation, which only exercises
+-- the direction that propagates the bit; these columns exercise the direction
+-- that must suppress it.  With the empty-preferred branch second the group is
+-- nullable but not empty-preferred, so the loop-back is explored first and the
+-- match runs long; swapping the branches makes the empty derivation win.  The
+-- min>=2 forms are the ones that can tell the two apart -- at min 1 the exit
+-- is reachable either way.
+WITH t(id, isa, isb) AS
+  (VALUES (1,true,false),(2,true,false),(3,true,false),(4,false,false))
+SELECT id,
+       count(*) OVER nf1 AS nf1,    -- (A | B??){2,}  empty-preferred branch second
+       count(*) OVER nf2 AS nf2,    -- (A | B*?){2,}  likewise, with a star
+       count(*) OVER fst AS fst,    -- (B?? | A){2,}  empty-preferred branch first
+       count(*) OVER nfp AS nfp     -- (A | B??)+     same as nf1 at min 1
+FROM t
+WINDOW nf1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A | B??){2,}) DEFINE A AS isa, B AS isb),
+       nf2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A | B*?){2,}) DEFINE A AS isa, B AS isb),
+       fst AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((B?? | A){2,}) DEFINE A AS isa, B AS isb),
+       nfp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A | B??)+)    DEFINE A AS isa, B AS isb);
+
 -- Doubly-nested reluctant nullable group: (((A??){2,}?){2,}?).  Reluctant
 -- quantifiers disable optimizer flattening, so both levels survive and the
 -- inner group's END->next lands on the outer END.  This exercises the
