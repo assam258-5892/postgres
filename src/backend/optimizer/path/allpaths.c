@@ -2457,6 +2457,17 @@ find_window_run_conditions(Query *subquery, AttrNumber attno,
 	wclause = (WindowClause *) list_nth(subquery->windowClause,
 										wfunc->winref - 1);
 
+	/*
+	 * If a DEFINE clause exists, we cannot push down a run condition. In the
+	 * case, a window partition (or frame) is divided into multiple reduced
+	 * frames and each frame should be evaluated to the end of the partition
+	 * (or full frame end). This means we cannot apply the run condition
+	 * optimization because it stops evaluation window functions in certain
+	 * cases.
+	 */
+	if (wclause->defineClause != NIL)
+		return false;
+
 	req.type = T_SupportRequestWFuncMonotonic;
 	req.window_func = wfunc;
 	req.window_clause = wclause;
@@ -4791,6 +4802,94 @@ recurse_push_qual(Node *setOp, Query *topquery,
  *****************************************************************************/
 
 /*
+ * subquery_output_is_unneeded
+ *		Can remove_unused_subquery_outputs() replace this entry with a null?
+ *
+ * This answers for the reasons that apply to any entry.  The DEFINE-clause
+ * protection is not among them: it only ever holds on to a Var, and it needs
+ * an active window set that is not settled until the window function entries
+ * have been decided.
+ */
+static bool
+subquery_output_is_unneeded(Query *subquery, TargetEntry *tle,
+							Bitmapset *attrs_used)
+{
+	Node	   *texpr = (Node *) tle->expr;
+
+	/*
+	 * If it has a sortgroupref number, it's used in some sort/group clause so
+	 * we'd better not remove it.  Also, don't remove any resjunk columns,
+	 * since their reason for being has nothing to do with anybody reading the
+	 * subquery's output.  (It's likely that resjunk columns in a sub-SELECT
+	 * would always have ressortgroupref set, but even if they don't, it seems
+	 * imprudent to remove them.)
+	 */
+	if (tle->ressortgroupref || tle->resjunk)
+		return false;
+
+	/*
+	 * If it's used by the upper query, we can't remove it.
+	 */
+	if (bms_is_member(tle->resno - FirstLowInvalidHeapAttributeNumber,
+					  attrs_used))
+		return false;
+
+	/*
+	 * If it contains a set-returning function, we can't remove it since that
+	 * could change the number of rows returned by the subquery.
+	 */
+	if (subquery->hasTargetSRFs &&
+		expression_returns_set(texpr))
+		return false;
+
+	/*
+	 * If it contains volatile functions, we daren't remove it for fear that
+	 * the user is expecting their side-effects to happen.
+	 */
+	if (contain_volatile_functions(texpr))
+		return false;
+
+	return true;
+}
+
+/*
+ * define_live_winrefs_walker
+ *		Collect the winrefs that the WindowFuncs of this query level still
+ *		carry.
+ *
+ * find_window_functions() cannot serve here.  It asserts that no SubLink is
+ * left in the tree, which holds only once the query has been through
+ * preprocess_expression(), and remove_unused_subquery_outputs() runs on a
+ * subquery that set_subquery_pathlist() has not planned yet.
+ *
+ * A sub-select is not descended into: a window function written there
+ * references that query level's own window clauses, not ours.  Its test
+ * expression is another matter, because the parser leaves the left-hand
+ * operand of an ANY/ALL comparison there and that operand belongs to this
+ * level.
+ */
+static bool
+define_live_winrefs_walker(Node *node, Bitmapset **winrefs)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, WindowFunc))
+	{
+		*winrefs = bms_add_member(*winrefs, ((WindowFunc *) node)->winref);
+
+		/*
+		 * A window function may not appear in another's arguments or filter
+		 * clause, so there is nothing below this node to collect.
+		 */
+		return false;
+	}
+	if (IsA(node, SubLink))
+		return define_live_winrefs_walker(((SubLink *) node)->testexpr,
+										  winrefs);
+	return expression_tree_walker(node, define_live_winrefs_walker, winrefs);
+}
+
+/*
  * remove_unused_subquery_outputs
  *		Remove subquery targetlist items we don't need
  *
@@ -4817,6 +4916,7 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 {
 	Bitmapset  *attrs_used;
 	ListCell   *lc;
+	bool		has_rpr = false;
 
 	/*
 	 * Just point directly to extra_used_attrs. No need to bms_copy as none of
@@ -4866,6 +4966,93 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		return;
 
 	/*
+	 * If the subquery uses row pattern recognition, work out which of its
+	 * window clauses will still be active once this function is done, so that
+	 * the DEFINE guard below does not hold a column alive for one that will
+	 * not be.  select_active_windows() keeps a window clause only while some
+	 * window function references it, and the loop below is what removes those
+	 * references, so settle the window function entries first and read the
+	 * active set off what they leave.  Reading it from the targetlist as it
+	 * stands now would count a window function this call is about to remove.
+	 * The same answer decides which DEFINE clauses to withdraw outright; see
+	 * below.
+	 */
+	foreach_node(WindowClause, wc, subquery->windowClause)
+	{
+		if (wc->rpPattern != NULL)
+		{
+			has_rpr = true;
+			break;
+		}
+	}
+
+	if (has_rpr)
+	{
+		Bitmapset  *live_winrefs = NULL;
+
+		/*
+		 * A window function entry the upper query does not read is replaced
+		 * with a null Const, exactly as the loop below would replace it.  Its
+		 * window clause keeps whatever references survive that.
+		 */
+		foreach(lc, subquery->targetList)
+		{
+			TargetEntry *tle = (TargetEntry *) lfirst(lc);
+			Node	   *texpr = (Node *) tle->expr;
+
+			if (IsA(texpr, WindowFunc) &&
+				subquery_output_is_unneeded(subquery, tle, attrs_used))
+				tle->expr = (Expr *) makeNullConst(exprType(texpr),
+												   exprTypmod(texpr),
+												   exprCollation(texpr));
+		}
+
+		define_live_winrefs_walker((Node *) subquery->targetList,
+								   &live_winrefs);
+
+		/*
+		 * Withdraw the DEFINE clause of every window clause no window
+		 * function references any more.  select_active_windows() will leave
+		 * such a clause out, so nothing downstream ever evaluates its DEFINE
+		 * expressions -- and the loop below is about to replace the
+		 * targetlist entries that were holding their input columns with null
+		 * Consts.  Empty the clause in the same breath, so that the parse
+		 * tree stops carrying expressions that read columns no part of the
+		 * plan computes.
+		 *
+		 * The DEFINE clause is the one field in which a window clause owns an
+		 * expression tree of its own: partitionClause and orderClause only
+		 * point into the targetlist, and a frame offset may not contain Vars.
+		 * query_tree_walker() therefore walks it, and a Query-wide rewriter
+		 * cannot tell a dead window's Vars from a live one's.  In particular
+		 * join removal, once nothing needs a relation any more, deletes its
+		 * relid from the whole parse tree with ChangeVarNodes(...,
+		 * INVALID_VAR, ...), which requires that no ordinary Var of that
+		 * relation be left anywhere in it.  Compare subquery_planner(), which
+		 * clears joinaliasvars once they stop agreeing with the rest of the
+		 * tree rather than teaching every later scan of the tree to skip
+		 * them.
+		 *
+		 * Only defineClause is cleared, not the window clause itself: winref
+		 * is a one-based index into windowClause, and bounds the
+		 * find_window_functions() that select_active_windows() reads later,
+		 * so the list must keep its length and its order.  rpPattern stays
+		 * too.  It holds no Vars, a pattern variable with no definition means
+		 * TRUE, and leaving it is what keeps optimize_window_clauses() from
+		 * mistaking an emptied RPR clause for a duplicate of a plain one.
+		 *
+		 * Modifying the clause is as safe as modifying the targetlist just
+		 * above: set_subquery_pathlist() gave us a copy of the subquery.
+		 */
+		foreach_node(WindowClause, wc, subquery->windowClause)
+		{
+			if (wc->defineClause != NIL &&
+				!bms_is_member(wc->winref, live_winrefs))
+				wc->defineClause = NIL;
+		}
+	}
+
+	/*
 	 * Run through the tlist and zap entries we don't need.  It's okay to
 	 * modify the tlist items in-place because set_subquery_pathlist made a
 	 * copy of the subquery.
@@ -4875,38 +5062,62 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		TargetEntry *tle = (TargetEntry *) lfirst(lc);
 		Node	   *texpr = (Node *) tle->expr;
 
-		/*
-		 * If it has a sortgroupref number, it's used in some sort/group
-		 * clause so we'd better not remove it.  Also, don't remove any
-		 * resjunk columns, since their reason for being has nothing to do
-		 * with anybody reading the subquery's output.  (It's likely that
-		 * resjunk columns in a sub-SELECT would always have ressortgroupref
-		 * set, but even if they don't, it seems imprudent to remove them.)
-		 */
-		if (tle->ressortgroupref || tle->resjunk)
+		if (!subquery_output_is_unneeded(subquery, tle, attrs_used))
 			continue;
 
 		/*
-		 * If it's used by the upper query, we can't remove it.
+		 * If any RPR (Row Pattern Recognition) window clause references this
+		 * column in its DEFINE clause, don't remove it.  The DEFINE
+		 * expression needs these columns in the tuplestore slot for pattern
+		 * matching evaluation, even if the outer query doesn't reference
+		 * them.  This is the only protection: nothing downstream re-adds a
+		 * DEFINE column to the WindowAgg's input target.
 		 */
-		if (bms_is_member(tle->resno - FirstLowInvalidHeapAttributeNumber,
-						  attrs_used))
-			continue;
+		if (IsA(texpr, Var))
+		{
+			Var		   *var = (Var *) texpr;
+			bool		needed_by_define = false;
 
-		/*
-		 * If it contains a set-returning function, we can't remove it since
-		 * that could change the number of rows returned by the subquery.
-		 */
-		if (subquery->hasTargetSRFs &&
-			expression_returns_set(texpr))
-			continue;
+			foreach_node(WindowClause, wc, subquery->windowClause)
+			{
+				/*
+				 * Only a window clause that will actually run still has a
+				 * DEFINE clause at this point; the loop above emptied the
+				 * others.
+				 */
+				if (wc->defineClause != NIL)
+				{
+					/*
+					 * flags == 0 is safe: DEFINE rejects aggregates, window
+					 * functions and subqueries at parse time, and this runs
+					 * before any PlaceHolderVar could be planted.
+					 */
+					List	   *vars = pull_var_clause((Node *) wc->defineClause, 0);
 
-		/*
-		 * If it contains volatile functions, we daren't remove it for fear
-		 * that the user is expecting their side-effects to happen.
-		 */
-		if (contain_volatile_functions(texpr))
-			continue;
+					foreach_node(Var, dvar, vars)
+					{
+						/*
+						 * Match varno too: varattno alone can collide with an
+						 * unrelated column of another relation. varlevelsup
+						 * is paranoia, since DEFINE rejects outer references
+						 * at parse time.
+						 */
+						if (dvar->varno == var->varno &&
+							dvar->varattno == var->varattno &&
+							dvar->varlevelsup == var->varlevelsup)
+						{
+							needed_by_define = true;
+							break;
+						}
+					}
+					list_free(vars);
+					if (needed_by_define)
+						break;
+				}
+			}
+			if (needed_by_define)
+				continue;
+		}
 
 		/*
 		 * OK, we don't need it.  Replace the expression with a NULL constant.
