@@ -720,7 +720,7 @@ DROP FUNCTION rpr_logging_minvfunc(text, anyelement);
 -- cost_windowagg() must account for DEFINE expression evaluation cost.
 -- Verify RPR WindowAgg cost > non-RPR WindowAgg cost.
 
-CREATE FUNCTION get_windowagg_cost(query text) RETURNS numeric AS $$
+CREATE FUNCTION rpr_get_windowagg_cost(query text) RETURNS numeric AS $$
 DECLARE
     plan json;
     cost numeric;
@@ -731,17 +731,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT get_windowagg_cost(
+SELECT rpr_get_windowagg_cost(
     'SELECT count(*) OVER w FROM rpr_integ
      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                   PATTERN (A B+ C+) DEFINE B AS val > PREV(val), C AS val < PREV(val))')
     >
-    get_windowagg_cost(
+    rpr_get_windowagg_cost(
     'SELECT count(*) OVER w FROM rpr_integ
      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)')
     AS rpr_cost_is_higher;
 
-DROP FUNCTION get_windowagg_cost(text);
+DROP FUNCTION rpr_get_windowagg_cost(text);
 
 -- ============================================================
 -- A8. Subquery flattening prevention
