@@ -24,8 +24,8 @@ CREATE TABLE rpr_stock (
 COPY rpr_stock FROM :'filename';
 ANALYZE rpr_stock;
 
-CREATE TEMP TABLE stock (company TEXT, tdate DATE, price INTEGER);
-INSERT INTO stock VALUES
+CREATE TEMP TABLE rpr_price (company TEXT, tdate DATE, price INTEGER);
+INSERT INTO rpr_price VALUES
 ('company1', '2023-07-01', 100), ('company1', '2023-07-02', 200),
 ('company1', '2023-07-03', 150), ('company1', '2023-07-04', 140),
 ('company1', '2023-07-05', 150), ('company1', '2023-07-06', 90),
@@ -37,7 +37,7 @@ INSERT INTO stock VALUES
 ('company2', '2023-07-07', 1100), ('company2', '2023-07-08', 1300),
 ('company2', '2023-07-09', 1200), ('company2', '2023-07-10', 1300);
 
-SELECT * FROM stock;
+SELECT * FROM rpr_price;
 
 --
 -- Basic pattern matching with PREV/NEXT
@@ -46,7 +46,7 @@ SELECT * FROM stock;
 -- basic test using PREV
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -61,7 +61,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 -- basic test using PREV. UP appears twice
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -76,7 +76,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 -- basic test using PREV. Use '*'
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -91,7 +91,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 -- basic test using PREV. Use '?'
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -105,7 +105,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- test using alternation (|) with sequence
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -119,7 +119,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- test using alternation (|) with group quantifier
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -133,7 +133,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- test using nested alternation
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -148,7 +148,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- test using group with quantifier
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -162,7 +162,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 -- test using absolute threshold values (not relative PREV)
 -- HIGH: price > 150, LOW: price < 100, MID: neutral range
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -176,7 +176,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- test threshold-based pattern with alternation
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -190,7 +190,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- basic test with fixed-length pattern (A A A = exactly 3)
 SELECT company, tdate, price, count(*) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -202,7 +202,7 @@ SELECT company, tdate, price, count(*) OVER w
 
 -- test using {n} quantifier (A A A should be optimized to A{3})
 SELECT company, tdate, price, count(*) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -214,7 +214,7 @@ SELECT company, tdate, price, count(*) OVER w
 
 -- test using {n,} quantifier (2 or more)
 SELECT company, tdate, price, count(*) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -226,7 +226,7 @@ SELECT company, tdate, price, count(*) OVER w
 
 -- test using {n,m} quantifier (2 to 4)
 SELECT company, tdate, price, count(*) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -238,15 +238,15 @@ SELECT company, tdate, price, count(*) OVER w
 
 -- test prefix/suffix merge optimization with bounded quantifier
 -- Pattern A B (A B){1,2} A B should be optimized to (A B){3,4}
-CREATE TEMP TABLE rpr_t (id int, val text);
-INSERT INTO rpr_t VALUES
+CREATE TEMP TABLE rpr_ab_pairs (id int, val text);
+INSERT INTO rpr_ab_pairs VALUES
   (1,'A'),(2,'B'),
   (3,'A'),(4,'B'),
   (5,'A'),(6,'B'),
   (7,'A'),(8,'B'),
   (9,'X');
 SELECT id, val, count(*) OVER w AS match_count
-FROM rpr_t
+FROM rpr_ab_pairs
 WINDOW w AS (
   ORDER BY id
   ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -257,11 +257,11 @@ WINDOW w AS (
     A AS val = 'A',
     B AS val = 'B'
 );
-DROP TABLE rpr_t;
+DROP TABLE rpr_ab_pairs;
 
 -- last_value() should remain consistent
 SELECT company, tdate, price, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -278,7 +278,7 @@ SELECT company, tdate, price, last_value(price) OVER w
 -- implicitly defined. per spec.
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -291,7 +291,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- the first row start with less than or equal to 100
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -305,7 +305,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- second row raises 120%
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -319,7 +319,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- using NEXT
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -334,7 +334,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 -- match length is always 2, so result is identical to SKIP PAST LAST ROW.
 -- SKIP TO NEXT ROW's distinct effect is tested in backtracking section.)
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -348,7 +348,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 
 -- PREV returns NULL at the partition's first row (no earlier row to fetch)
 SELECT company, tdate, price, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -361,7 +361,7 @@ WINDOW w AS (
 
 -- NEXT returns NULL at the partition's last row (no later row to fetch)
 SELECT company, tdate, price, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -375,7 +375,7 @@ WINDOW w AS (
 
 -- DESC order: PREV refers to the row with later date
 SELECT company, tdate, price, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate DESC
@@ -432,7 +432,7 @@ WINDOW w AS (
 --
 
 -- Nested PREV
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -442,7 +442,7 @@ WINDOW w AS (
 );
 
 -- Nested NEXT
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -452,7 +452,7 @@ WINDOW w AS (
 );
 
 -- PREV nested inside NEXT
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -462,7 +462,7 @@ WINDOW w AS (
 );
 
 -- PREV nested inside expression inside NEXT
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -472,7 +472,7 @@ WINDOW w AS (
 );
 
 -- Triple nesting: error reported at outermost PREV
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -483,7 +483,7 @@ WINDOW w AS (
 
 -- No column reference in PREV/NEXT argument
 -- PREV(1): constant only, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -493,7 +493,7 @@ WINDOW w AS (
 );
 
 -- NEXT(1 + 2): constant expression, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -503,7 +503,7 @@ WINDOW w AS (
 );
 
 -- 2-arg form: PREV(1, 1): constant expression as first arg
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -515,7 +515,7 @@ WINDOW w AS (
 -- Compound navigation without a column reference must be rejected too,
 -- consistent with the simple forms above.
 -- PREV(FIRST(1)): compound, constant only, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -525,7 +525,7 @@ WINDOW w AS (
 );
 
 -- NEXT(LAST(1 + 2)): compound, constant expression, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -535,7 +535,7 @@ WINDOW w AS (
 );
 
 -- PREV(FIRST(1, 2)): compound, two-arg inner, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -545,7 +545,7 @@ WINDOW w AS (
 );
 
 -- PREV(FIRST(1), 2): compound, outer offset only, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -555,7 +555,7 @@ WINDOW w AS (
 );
 
 -- PREV(FIRST(1, 2), 3): compound, inner and outer offsets, no column reference
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -565,7 +565,7 @@ WINDOW w AS (
 );
 
 -- Non-constant offset: column reference as offset
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -575,7 +575,7 @@ WINDOW w AS (
 );
 
 -- Non-constant offset: column reference in compound inner offset
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -585,7 +585,7 @@ WINDOW w AS (
 );
 
 -- Non-constant offset: column reference in compound outer offset
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -595,7 +595,7 @@ WINDOW w AS (
 );
 
 -- Non-constant offset: volatile function as offset
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -605,7 +605,7 @@ WINDOW w AS (
 );
 
 -- Non-constant offset: volatile function as compound outer offset
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -615,7 +615,7 @@ WINDOW w AS (
 );
 
 -- Non-constant offset: subquery as offset
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -625,7 +625,7 @@ WINDOW w AS (
 );
 
 -- First arg: subquery (caught by DEFINE-level subquery restriction)
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -637,7 +637,7 @@ WINDOW w AS (
 -- Volatile function inside nav.arg is rejected in the planner
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -647,7 +647,7 @@ WINDOW w AS (
 
 -- nextval is volatile, so a DEFINE that calls it is rejected
 CREATE SEQUENCE rpr_seq;
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -661,7 +661,7 @@ DROP SEQUENCE rpr_seq;
 -- created successfully and errors only when read.
 CREATE TEMP VIEW rpr_volatile_view AS
 SELECT company, tdate, price, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -678,7 +678,7 @@ DROP VIEW rpr_volatile_view;
 -- Qualified outer reference (o.threshold):
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -690,7 +690,7 @@ LATERAL (
 -- Unqualified name resolving to the outer column (threshold):
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -702,7 +702,7 @@ LATERAL (
 -- Outer reference inside a navigation argument is rejected too:
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company ORDER BY tdate
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -716,7 +716,7 @@ LATERAL (
 -- keeps its own diagnosis rather than being reported as a qualifier problem.
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -727,7 +727,7 @@ LATERAL (
 ) s;
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -743,7 +743,7 @@ LATERAL (
 -- these are rejected for the spelling, not for what they name.
 CREATE FUNCTION rpr_sqlfn(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -758,7 +758,7 @@ DECLARE
     n bigint;
 BEGIN
     SELECT count(*) INTO n FROM (
-        SELECT price FROM stock
+        SELECT price FROM rpr_price
         WINDOW w AS (
             PARTITION BY company
             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -775,7 +775,7 @@ DROP FUNCTION rpr_plfn(int);
 -- Unqualified, the same parameter is readable.
 CREATE FUNCTION rpr_sqlfn(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -794,7 +794,7 @@ DROP FUNCTION rpr_sqlfn(int);
 -- enter into it.
 CREATE FUNCTION rpr_pv(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -807,7 +807,7 @@ $$;
 -- defined: any pattern variable of that name reserves it.
 CREATE FUNCTION rpr_pv(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -822,7 +822,7 @@ $$;
 CREATE TYPE rpr_pair AS (lo int, hi int);
 CREATE FUNCTION rpr_compfn(p rpr_pair) RETURNS SETOF int
 LANGUAGE sql AS $$
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -832,7 +832,7 @@ LANGUAGE sql AS $$
 $$;
 CREATE FUNCTION rpr_compfn(p rpr_pair) RETURNS SETOF int
 LANGUAGE sql AS $$
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -855,7 +855,7 @@ DECLARE
     n bigint;
 BEGIN
     SELECT count(*) INTO n FROM (
-        SELECT price FROM stock
+        SELECT price FROM rpr_price
         WINDOW w AS (
             PARTITION BY company
             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -875,12 +875,12 @@ DROP FUNCTION rpr_plfn_var(int);
 CREATE FUNCTION rpr_conflictfn_err() RETURNS bigint
 LANGUAGE plpgsql AS $$
 DECLARE
-    a stock%ROWTYPE;
+    a rpr_price%ROWTYPE;
     n bigint;
 BEGIN
     a.price := 95;
     SELECT count(*) INTO n FROM (
-        SELECT price FROM stock
+        SELECT price FROM rpr_price
         WINDOW w AS (
             PARTITION BY company
             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -898,12 +898,12 @@ CREATE FUNCTION rpr_conflictfn() RETURNS bigint
 LANGUAGE plpgsql AS $$
 #variable_conflict use_variable
 DECLARE
-    a stock%ROWTYPE;
+    a rpr_price%ROWTYPE;
     n bigint;
 BEGIN
     a.price := 95;
     SELECT count(*) INTO n FROM (
-        SELECT price FROM stock
+        SELECT price FROM rpr_price
         WINDOW w AS (
             PARTITION BY company
             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -925,7 +925,7 @@ INSERT INTO rpr_outer VALUES (95);
 CREATE FUNCTION rpr_rowfn(rpr_outer) RETURNS int LANGUAGE sql AS 'SELECT 1';
 SELECT * FROM rpr_outer AS o,
 LATERAL (
-    SELECT price FROM stock
+    SELECT price FROM rpr_price
     WINDOW w AS (
         PARTITION BY company
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -938,42 +938,42 @@ DROP FUNCTION rpr_rowfn(rpr_outer);
 DROP TABLE rpr_outer;
 
 -- DEFINE rejects a schema-qualified column reference (three or more name
--- parts) once it resolves; the qualified form itself is not allowed.  (stock
+-- parts) once it resolves; the qualified form itself is not allowed.  (rpr_price
 -- is a temp table, so it is qualified with pg_temp here.)
 -- 3-part (schema.table.column):
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS pg_temp.stock.price > 0
+    DEFINE A AS pg_temp.rpr_price.price > 0
 );
 -- whole-row variant (schema.table.*):
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS (pg_temp.stock.*) IS NOT NULL
+    DEFINE A AS (pg_temp.rpr_price.*) IS NOT NULL
 );
 -- A two-part table-qualified whole-row reference is rejected as well, and by
 -- the whole-row check rather than by a qualifier rule: the error names the
 -- whole-row reference, not the qualifier.
 -- 2-part (table.*):
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS (stock.*) IS NOT NULL
+    DEFINE A AS (rpr_price.*) IS NOT NULL
 );
 -- The form decides before the qualifier is looked up, so a misspelled table
 -- name is reported as the whole-row reference it is written as, not as a
 -- missing FROM-clause entry:
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -982,7 +982,7 @@ WINDOW w AS (
     DEFINE A AS (stok.*) IS NOT NULL
 );
 -- and the same through a row constructor:
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -995,44 +995,44 @@ WINDOW w AS (
 -- transformExpressionList(), whose star expansion binds them by RTE into
 -- individual column Vars, past every check.  DEFINE skips it.
 -- ROW(schema.table.*):
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS ROW(pg_temp.stock.*) IS NOT NULL
+    DEFINE A AS ROW(pg_temp.rpr_price.*) IS NOT NULL
 );
 -- ROW(table.*):
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS ROW(stock.*) IS NOT NULL
+    DEFINE A AS ROW(rpr_price.*) IS NOT NULL
 );
 -- the ROW keyword is optional, so the bare constructor needs the same
 -- treatment:
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS (stock.*, 1) IS NOT NULL
+    DEFINE A AS (rpr_price.*, 1) IS NOT NULL
 );
 -- redundant parentheses are not a way around it:
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS ROW((stock.*)) IS NOT NULL
+    DEFINE A AS ROW((rpr_price.*)) IS NOT NULL
 );
 -- a pattern variable qualifier is a separate class of rejection:
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1042,7 +1042,7 @@ WINDOW w AS (
 );
 -- The plain two-part form is the one the standard writes its DEFINE examples
 -- with, and it is decided on the qualifier alone, before resolution.
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1053,7 +1053,7 @@ WINDOW w AS (
 -- Deciding on the qualifier alone means a pattern variable takes a name a
 -- range variable would otherwise answer to: the rejection names the pattern
 -- variable, not the alias, even though "a" is a live alias here.
-SELECT price FROM stock AS a
+SELECT price FROM rpr_price AS a
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1065,24 +1065,24 @@ WINDOW w AS (
 -- misspelled column keeps the diagnosis and the suggestion it gets anywhere
 -- else.  Firing on the qualifier alone would report a range variable problem
 -- before the rest of the name was looked at.
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS stock.pric > 0
+    DEFINE A AS rpr_price.pric > 0
 );
-SELECT price FROM stock
+SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     INITIAL
     PATTERN (A)
-    DEFINE A AS pg_temp.stock.pric > 0
+    DEFINE A AS pg_temp.rpr_price.pric > 0
 );
 -- the same typo outside a DEFINE clause, for comparison:
-SELECT price FROM stock WHERE stock.pric > 0;
+SELECT price FROM rpr_price WHERE rpr_price.pric > 0;
 
 -- Retrying an unresolved column as a function call on the whole row builds a
 -- whole-row reference the query does not contain.  That must not be reported
@@ -1139,7 +1139,7 @@ DROP TABLE rpr_j_l, rpr_j_r;
 
 -- A row constructor over plain columns is unaffected.
 SELECT company, tdate, count(*) OVER w AS cnt
-FROM stock
+FROM rpr_price
 WHERE company = 'company2' AND tdate <= '2023-07-03'
 WINDOW w AS (
     PARTITION BY company
@@ -1159,7 +1159,7 @@ WINDOW w AS (
 -- 200 -> 150, then 110 -> 130 -> 120, which stops where 130 only ties 130.
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1174,7 +1174,7 @@ WINDOW w AS (
 -- then 140, 150 up to where 90 falls short of 130.
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1186,7 +1186,7 @@ WINDOW w AS (
 -- PREV(price - 50, 1): fetches (price - 50) from 1 row back
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1197,7 +1197,7 @@ WINDOW w AS (
 -- NEXT(price * 2, 1): fetches (price * 2) from 1 row ahead
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1229,7 +1229,7 @@ LIMIT 3;
 -- A+ matches entire partition as one group; count = partition size
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1239,7 +1239,7 @@ WINDOW w AS (
 
 -- 2-arg PREV/NEXT: negative offset
 SELECT company, tdate, price, first_value(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1249,7 +1249,7 @@ WINDOW w AS (
 
 -- 2-arg PREV/NEXT: NULL offset (typed)
 SELECT company, tdate, price, first_value(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1259,7 +1259,7 @@ WINDOW w AS (
 
 -- 2-arg PREV/NEXT: NULL offset (untyped)
 SELECT company, tdate, price, first_value(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1270,7 +1270,7 @@ WINDOW w AS (
 -- 2-arg PREV/NEXT: host variable negative and NULL
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1284,7 +1284,7 @@ DEALLOCATE test_prev_offset;
 -- 2-arg PREV/NEXT: host variable with expression (0 + $1)
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1301,7 +1301,7 @@ DEALLOCATE test_prev_offset;
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1318,7 +1318,7 @@ RESET plan_cache_mode;
 -- B: price exceeds both 1-back and 2-back values
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1333,7 +1333,7 @@ WINDOW w AS (
 -- A: price exceeds 1-back and is below 1-ahead (ascending interior point)
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1347,7 +1347,7 @@ WINDOW w AS (
 -- 1-back and 2-back tdate text.
 SELECT company, tdate, tdate::text AS tdate_text,
        first_value(tdate::text) OVER w, last_value(tdate::text) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1362,7 +1362,7 @@ WINDOW w AS (
 -- B matches when price 1-back > price 2-back (ascending pair).
 SELECT company, tdate, price::numeric AS nprice,
        first_value(price::numeric) OVER w, last_value(price::numeric) OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
     PARTITION BY company ORDER BY tdate
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1412,15 +1412,15 @@ DROP TABLE rpr_typmod;
 
 -- Test data for FIRST/LAST: values cycle back so FIRST(val) = LAST(val)
 -- at specific positions.
-CREATE TEMP TABLE rpr_nav (id int, val int);
-INSERT INTO rpr_nav VALUES (1,10),(2,20),(3,30),(4,10),(5,50),(6,10);
+CREATE TEMP TABLE rpr_nav_cycle (id int, val int);
+INSERT INTO rpr_nav_cycle VALUES (1,10),(2,20),(3,30),(4,10),(5,50),(6,10);
 
 -- FIRST(val) = constant: B matches when match_start has val=10
 -- match_start=1(10): A=id1, B=id2, FIRST(val)=10 -> match {1,2}
 -- match_start=3(30): A=id3, B=id4, FIRST(val)=30!=10 -> no match
 -- match_start=4(10): A=id4, B=id5, FIRST(val)=10 -> match {4,5}
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1431,7 +1431,7 @@ FROM rpr_nav WINDOW w AS (
 -- LAST(val): always equals current row's val (offset 0 default)
 -- Equivalent to: B AS val > 15
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1445,7 +1445,7 @@ FROM rpr_nav WINDOW w AS (
 --   id2(20!=10), id3(30!=10), id4(10=10) -> match {1,2,3,4}
 -- match_start=5(50): id6(10!=50) -> no match
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1458,7 +1458,7 @@ FROM rpr_nav WINDOW w AS (
 -- match_start=1(10): greedy A eats all, B tries last:
 --   id6(10=10) -> match {1,2,3,4,5,6}
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1469,7 +1469,7 @@ FROM rpr_nav WINDOW w AS (
 -- SKIP TO NEXT ROW with FIRST(val) = LAST(val): overlapping match attempts.
 -- Each row reports only the match that starts at it.
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP TO NEXT ROW
@@ -1481,7 +1481,7 @@ FROM rpr_nav WINDOW w AS (
 --
 -- FIRST(val, 0) = FIRST(val): match_start row
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1493,7 +1493,7 @@ FROM rpr_nav WINDOW w AS (
 -- match_start=1(10): FIRST(val,1)=20, B needs val=20 -> id2(20) match, id3(30) no
 -- match_start=3(30): FIRST(val,1)=10, B needs val=10 -> id4(10) match
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1503,7 +1503,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- FIRST(val, 99): offset beyond match range -> NULL, no match
 SELECT id, val, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1513,7 +1513,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- LAST(val, 0) = LAST(val): current row
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1525,7 +1525,7 @@ FROM rpr_nav WINDOW w AS (
 -- At B evaluation on id2: LAST(val,1) = val at id1 = 10
 -- B matches when previous row val < 30
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1535,7 +1535,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- LAST(val, 99): offset before match_start -> NULL
 SELECT id, val, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1544,7 +1544,7 @@ FROM rpr_nav WINDOW w AS (
 );
 
 -- Error: NULL offset
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1552,7 +1552,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 );
 
 -- Error: negative offset
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1566,10 +1566,10 @@ SELECT prev(f), next(f), first(f), last(f) FROM rpr_names f;
 DROP TABLE rpr_names;
 
 -- Compound navigation: PREV(FIRST(val), M)
--- rpr_nav: (1,10),(2,20),(3,30),(4,10),(5,50),(6,10)
+-- rpr_nav_cycle: (1,10),(2,20),(3,30),(4,10),(5,50),(6,10)
 -- PREV(FIRST(val), 1): target = match_start + 0 - 1 = match_start - 1
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1580,7 +1580,7 @@ FROM rpr_nav WINDOW w AS (
 -- NEXT(FIRST(val, 1), 1): target = match_start + 1 + 1 = match_start + 2
 -- At match_start=1, B on id2: target=1+1+1=3(val=30), 30>0 -> true
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1594,7 +1594,7 @@ FROM rpr_nav WINDOW w AS (
 -- At currentpos=3 (start id=2): target=1(val=10) -> in range -> B runs on id3..id6,
 -- so the match is id2..id6.
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1609,7 +1609,7 @@ FROM rpr_nav WINDOW w AS (
 -- B stays true through id5 (target=6); at id6 target=7 -> out of range -> NULL,
 -- so the match is id1..id5.
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1619,7 +1619,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- Compound: outer offset beyond partition (PREV far back)
 SELECT id, val, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1628,7 +1628,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- Compound: outer offset beyond partition (NEXT far forward)
 SELECT id, val, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1637,7 +1637,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- Compound: inner offset beyond match range (FIRST offset too large)
 SELECT id, val, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1646,7 +1646,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- Compound: inner offset beyond match range (LAST offset too large)
 SELECT id, val, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1654,7 +1654,7 @@ FROM rpr_nav WINDOW w AS (
 );
 
 -- Compound: NULL outer offset (runtime error)
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1662,7 +1662,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 );
 
 -- Compound: negative outer offset (runtime error)
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1672,25 +1672,25 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 -- Compound: an out-of-range inner offset must not skip validation of the outer
 -- one.  All four arms resolve their outer offset through the same call, so each
 -- appears once, and the negative and the null case take two arms apiece.
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
     DEFINE A AS TRUE, B AS PREV(FIRST(val, 99), -1) IS NULL
 );
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
     DEFINE A AS TRUE, B AS PREV(LAST(val, 99), NULL::int8) IS NULL
 );
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
     DEFINE A AS TRUE, B AS NEXT(FIRST(val, 99), NULL::int8) IS NULL
 );
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1702,7 +1702,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 -- The reach reads "runtime" here; a custom plan would fold it to 99 - 1 = 98.
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_compound_illegal(int8, int8) AS
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1749,7 +1749,7 @@ DROP TABLE rpr_nav_empty;
 
 -- Outer offset overflows int64: target position out of range -> NULL.
 -- Plain NEXT(val, INT64_MAX): currentpos + INT64_MAX overflows.
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1758,7 +1758,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 
 -- Compound NEXT(FIRST()): outer offset overflow.  Inner offset 1 forces
 -- inner_pos >= 1, so inner_pos + INT64_MAX overflows at every match.
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1766,7 +1766,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 );
 
 -- Compound NEXT(LAST()): outer offset overflow.
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1779,7 +1779,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 -- match starts there and match_start is at least 1 wherever B is evaluated;
 -- match_start + INT64_MAX then overflows.  With match_start 0 the sum still
 -- fits and the clamp below it answers instead.
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1788,7 +1788,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 
 -- The same overflow reached through a compound navigation, where it happens
 -- before the outer offset is applied
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1798,7 +1798,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 -- Compound: default offsets on both sides
 -- PREV(FIRST(val)): inner=0 (match_start), outer=1 -> target = match_start - 1
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1808,7 +1808,7 @@ FROM rpr_nav WINDOW w AS (
 
 -- NEXT(LAST(val)): inner=0 (currentpos), outer=1 -> target = currentpos + 1
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1817,7 +1817,7 @@ FROM rpr_nav WINDOW w AS (
 );
 
 -- Compound: inner NULL offset (runtime error)
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1825,7 +1825,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 );
 
 -- Compound: inner negative offset (runtime error)
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
@@ -1833,7 +1833,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 );
 
 -- Offset argument whose type has no implicit cast to bigint (parse error)
-SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
+SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
@@ -1843,7 +1843,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav WINDOW w AS (
 -- Compound + host variable offsets
 PREPARE test_compound_offset(int8, int8) AS
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP PAST LAST ROW
@@ -1856,7 +1856,7 @@ DEALLOCATE test_compound_offset;
 
 -- Compound + SKIP TO NEXT ROW: overlapping matches with PREV(FIRST())
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
-FROM rpr_nav WINDOW w AS (
+FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP TO NEXT ROW
@@ -1880,7 +1880,7 @@ FROM rpr_nav_part WINDOW w AS (
 DROP TABLE rpr_nav_part;
 
 -- Reverse nesting: FIRST wrapping PREV is prohibited
-SELECT id, val FROM rpr_nav WINDOW w AS (
+SELECT id, val FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B)
@@ -1888,14 +1888,14 @@ SELECT id, val FROM rpr_nav WINDOW w AS (
 );
 
 -- Reverse nesting: LAST wrapping NEXT is prohibited
-SELECT id, val FROM rpr_nav WINDOW w AS (
+SELECT id, val FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B)
     DEFINE A AS TRUE, B AS LAST(NEXT(val)) > 0
 );
 
-DROP TABLE rpr_nav;
+DROP TABLE rpr_nav_cycle;
 
 --
 -- SKIP TO / Backtracking / Frame boundary
@@ -1903,7 +1903,7 @@ DROP TABLE rpr_nav;
 
 -- match everything
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -1918,7 +1918,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
 -- nth_value beyond reduced frame (no IGNORE NULLS)
 SELECT company, tdate, price,
  nth_value(price, 5) OVER w AS nth_5
-FROM stock
+FROM rpr_price
 WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -1934,7 +1934,7 @@ WINDOW w AS (
 -- backtracking with reclassification of rows
 -- using AFTER MATCH SKIP PAST LAST ROW
 SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -1950,7 +1950,7 @@ SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER 
 -- backtracking with reclassification of rows
 -- using AFTER MATCH SKIP TO NEXT ROW
 SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -2002,7 +2002,7 @@ WINDOW w AS (
 -- ROWS BETWEEN CURRENT ROW AND offset FOLLOWING
 SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER w,
  count(*) OVER w
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -2028,7 +2028,7 @@ SELECT company, tdate, price,
  sum(price) OVER w,
  avg(price) OVER w,
  count(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
 PARTITION BY company
 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2050,7 +2050,7 @@ SELECT company, tdate, price,
  sum(price) OVER w,
  avg(price) OVER w,
  count(price) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
 PARTITION BY company
 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2065,7 +2065,7 @@ DOWN AS price < PREV(price)
 
 -- row_number() within RPR reduced frame
 SELECT company, tdate, price, row_number() OVER w, count(*) OVER w
-FROM stock
+FROM rpr_price
 WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -2083,20 +2083,20 @@ WINDOW w AS (
 --
 
 -- JOIN case
-CREATE TEMP TABLE t1 (i int, v1 int);
-CREATE TEMP TABLE t2 (j int, v2 int);
-INSERT INTO t1 VALUES(1,10);
-INSERT INTO t1 VALUES(1,11);
-INSERT INTO t1 VALUES(1,12);
-INSERT INTO t2 VALUES(2,10);
-INSERT INTO t2 VALUES(2,11);
-INSERT INTO t2 VALUES(2,12);
+CREATE TEMP TABLE rpr_join_left (i int, v1 int);
+CREATE TEMP TABLE rpr_join_right (j int, v2 int);
+INSERT INTO rpr_join_left VALUES(1,10);
+INSERT INTO rpr_join_left VALUES(1,11);
+INSERT INTO rpr_join_left VALUES(1,12);
+INSERT INTO rpr_join_right VALUES(2,10);
+INSERT INTO rpr_join_right VALUES(2,11);
+INSERT INTO rpr_join_right VALUES(2,12);
 
-SELECT * FROM t1, t2 WHERE t1.v1 <= 11 AND t2.v2 <= 11;
+SELECT * FROM rpr_join_left, rpr_join_right WHERE rpr_join_left.v1 <= 11 AND rpr_join_right.v2 <= 11;
 
-SELECT *, count(*) OVER w FROM t1, t2
+SELECT *, count(*) OVER w FROM rpr_join_left, rpr_join_right
 WINDOW w AS (
- PARTITION BY t1.i
+ PARTITION BY rpr_join_left.i
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  INITIAL
  PATTERN (A)
@@ -2106,7 +2106,7 @@ WINDOW w AS (
 
 -- WITH case
 WITH wstock AS (
-  SELECT * FROM stock WHERE tdate < '2023-07-08'
+  SELECT * FROM rpr_price WHERE tdate < '2023-07-08'
 )
 SELECT tdate, price,
 first_value(tdate) OVER w,
@@ -2143,10 +2143,10 @@ LATERAL (
 ORDER BY g.x, sub.id;
 
 -- PREV has multiple column reference
-CREATE TEMP TABLE rpr1 (id INTEGER, i SERIAL, j INTEGER);
-INSERT INTO rpr1(id, j) SELECT 1, g*2 FROM generate_series(1, 10) AS g;
+CREATE TEMP TABLE rpr_prev_multicol (id INTEGER, i SERIAL, j INTEGER);
+INSERT INTO rpr_prev_multicol(id, j) SELECT 1, g*2 FROM generate_series(1, 10) AS g;
 SELECT id, i, j, count(*) OVER w
- FROM rpr1
+ FROM rpr_prev_multicol
  WINDOW w AS (
  PARTITION BY id
  ORDER BY i
@@ -2271,7 +2271,7 @@ RESET jit;
 SELECT company, tdate, price, first_value(price) IGNORE NULLS OVER w,
  last_value(price) IGNORE NULLS OVER w,
  nth_value(tdate, 2) IGNORE NULLS OVER w AS nth_second
- FROM stock
+ FROM rpr_price
  WINDOW w AS (
  PARTITION BY company
  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2321,7 +2321,7 @@ WITH data AS (
 -- nth_value beyond reduced frame with IGNORE NULLS
 SELECT company, tdate, price,
  nth_value(price, 5) IGNORE NULLS OVER w AS nth_5_in
-FROM stock
+FROM rpr_price
 WINDOW w AS (
  PARTITION BY company
  ORDER BY tdate
@@ -2469,14 +2469,14 @@ DROP TABLE rpr_dormant;
 -- NULL handling
 --
 
-CREATE TEMP TABLE stock_null (company TEXT, tdate DATE, price INTEGER);
-INSERT INTO stock_null VALUES ('c1', '2023-07-01', 100);
-INSERT INTO stock_null VALUES ('c1', '2023-07-02', NULL);  -- NULL in middle
-INSERT INTO stock_null VALUES ('c1', '2023-07-03', 200);
-INSERT INTO stock_null VALUES ('c1', '2023-07-04', 150);
+CREATE TEMP TABLE rpr_stock_null (company TEXT, tdate DATE, price INTEGER);
+INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-01', 100);
+INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-02', NULL);  -- NULL in middle
+INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-03', 200);
+INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-04', 150);
 
 SELECT company, tdate, price, count(*) OVER w AS match_count
-FROM stock_null
+FROM rpr_stock_null
 WINDOW w AS (
   PARTITION BY company
   ORDER BY tdate
