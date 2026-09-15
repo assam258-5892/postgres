@@ -15,7 +15,7 @@
 --    A1. Frame optimization bypass
 --    A2. Run condition pushdown bypass
 --    A3. Window dedup prevention (RPR vs non-RPR)
---    A4. Window dedup prevention (same PATTERN, different DEFINE)
+--    A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
 --    A5. Unused output removal around an RPR window
 --    A6. Inverse transition bypass
 --    A7. Cost estimation RPR awareness
@@ -307,14 +307,17 @@ EXPLAIN (COSTS OFF) SELECT * FROM rpr_ev_opt_mixed;
 (9 rows)
 
 -- ============================================================
--- A4. Window dedup prevention (same PATTERN, different DEFINE)
+-- A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
 -- ============================================================
--- Verify that inline-window dedup does not merge two RPR windows
--- that share the same PATTERN structure but have different DEFINE
--- conditions.  Even though the ORDER BY, frame, and PATTERN coincide,
--- the differing DEFINE expressions classify rows differently and
--- must therefore yield two separate WindowAgg nodes.  Inline specs
--- are used here because dedup only applies to inline windows.
+-- Verify that inline-window dedup does not merge two RPR windows that
+-- share the same PATTERN structure but differ in one other part of the
+-- row pattern common syntax.  Even though the ORDER BY, frame, and
+-- PATTERN coincide, a differing DEFINE classifies rows differently and
+-- a differing AFTER MATCH SKIP resumes the scan differently, so either
+-- must yield two separate WindowAgg nodes.  transformWindowFuncCall()
+-- compares the whole RPCommonSyntax node, which carries rpDefs and
+-- rpSkipTo alongside rpPattern; the cases below cover one field each.
+-- Inline specs are used here because dedup only applies to inline windows.
 -- Baseline: two inline RPR windows that are structurally identical
 -- (same PARTITION BY, ORDER BY, frame, PATTERN, and DEFINE) are deduped by the
 -- parser into a single WindowAgg node, confirming that parser-level dedup is
@@ -394,6 +397,67 @@ FROM rpr_integ;
   8 |  20 |      3 |        0
   9 |  40 |      0 |        0
  10 |  45 |      0 |        0
+(10 rows)
+
+-- Two inline RPR windows alike in every way but the AFTER MATCH SKIP
+-- mode must also remain separate.  SKIP PAST LAST ROW resumes after the
+-- match, SKIP TO NEXT ROW resumes one row in, so the later rows of a
+-- match can start a match of their own.
+EXPLAIN (COSTS OFF)
+SELECT
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP PAST LAST ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_past,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP TO NEXT ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_next
+FROM rpr_integ;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a b+
+   Nav Mark Lookback: 1
+   ->  WindowAgg
+         Window: w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+         Pattern: a b+
+         Nav Mark Lookback: 1
+         ->  Sort
+               Sort Key: id
+               ->  Seq Scan on rpr_integ
+(11 rows)
+
+-- Verify the two windows disagree on the rows that a skipped-past match
+-- covered, confirming the skip modes were not collapsed by dedup.
+SELECT
+    id, val,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP PAST LAST ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_past,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP TO NEXT ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_next
+FROM rpr_integ;
+ id | val | cnt_past | cnt_next 
+----+-----+----------+----------
+  1 |  10 |        2 |        2
+  2 |  20 |        0 |        0
+  3 |  15 |        2 |        2
+  4 |  25 |        0 |        0
+  5 |   5 |        3 |        3
+  6 |  30 |        0 |        2
+  7 |  35 |        0 |        0
+  8 |  20 |        3 |        3
+  9 |  40 |        0 |        2
+ 10 |  45 |        0 |        0
 (10 rows)
 
 -- ============================================================
