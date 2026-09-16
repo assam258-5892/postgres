@@ -236,6 +236,7 @@ static void optimize_window_clauses(PlannerInfo *root,
 									WindowFuncLists *wflists);
 static List *select_active_windows(PlannerInfo *root, WindowFuncLists *wflists);
 static void name_active_windows(List *activeWindows);
+static bool add_define_inputs_walker(Node *node, PathTarget *input_target);
 static PathTarget *make_window_input_target(PlannerInfo *root,
 											PathTarget *final_target,
 											List *activeWindows);
@@ -1062,6 +1063,21 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 												EXPRKIND_LIMIT);
 		wc->endOffset = preprocess_expression(root, wc->endOffset,
 											  EXPRKIND_LIMIT);
+		wc->defineClause = (List *) preprocess_expression(root,
+														  (Node *) wc->defineClause,
+														  EXPRKIND_TARGET);
+
+		/*
+		 * Reject volatile expressions in an RPR DEFINE clause.  This is done
+		 * here, not during parse analysis, to follow the convention of not
+		 * checking expression volatility while parsing.  A subquery the
+		 * planner discards before reaching this point is therefore not
+		 * checked, which is the same rule that lets a volatile fold away.
+		 */
+		if (contain_volatile_functions((Node *) wc->defineClause))
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("DEFINE clause cannot contain volatile functions"));
 	}
 
 	parse->limitOffset = preprocess_expression(root, parse->limitOffset,
@@ -1241,6 +1257,23 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 			flatten_group_exprs(root, root->parse, (Node *) parse->targetList);
 		parse->havingQual =
 			flatten_group_exprs(root, root->parse, parse->havingQual);
+
+		/*
+		 * A row pattern DEFINE clause holds an expression tree of its own, so
+		 * parseCheckAggregates() put GROUP Vars into it as well.  Expand them
+		 * here too, and with the root, so that the varnullingrels a grouping
+		 * set attached survive onto the replacement -- setrefs.c matches the
+		 * DEFINE copy against the target list copy and insists they agree.
+		 */
+		foreach(l, parse->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, l);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(root, root->parse,
+										(Node *) wc->defineClause);
+		}
 	}
 
 	/* Constant-folding might have removed all set-returning functions */
@@ -1864,6 +1897,28 @@ grouping_planner(PlannerInfo *root, double tuple_fraction,
 			}
 			else
 				parse->hasWindowFuncs = false;
+		}
+
+		/*
+		 * Empty the DEFINE clause of every window clause that will not be
+		 * executed.  Whoever settles that a window clause is not executed is
+		 * responsible for this: build_base_rel_tlists() marks what a DEFINE
+		 * clause reads as needed at relation 0, and a column needed by
+		 * nothing that runs keeps an outer join from being removed.  Only
+		 * defineClause is cleared, for the reasons remove_unused_subquery_
+		 * outputs() sets out; that function does the same for a window in a
+		 * subquery, and this is the counterpart for one at this level, where
+		 * it never runs.
+		 *
+		 * This covers a window clause no window function names, and equally a
+		 * query whose window functions were all folded away above, where
+		 * activeWindows stays empty.
+		 */
+		foreach_node(WindowClause, wc, parse->windowClause)
+		{
+			if (wc->defineClause != NIL &&
+				!list_member_ptr(activeWindows, wc))
+				wc->defineClause = NIL;
 		}
 
 		/*
@@ -6083,6 +6138,14 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 		if (wflists->windowFuncs[wc->winref] == NIL)
 			continue;
 
+		/*
+		 * If a DEFINE clause exists, do not let support functions replace the
+		 * frame with a non-RPR-compatible one.  RPR windows require ROWS
+		 * BETWEEN CURRENT ROW AND ...
+		 */
+		if (wc->defineClause != NIL)
+			continue;
+
 		foreach(lc2, wflists->windowFuncs[wc->winref])
 		{
 			SupportRequestOptimizeWindowClause req;
@@ -6160,13 +6223,19 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 
 				/*
 				 * Perform the same duplicate check that is done in
-				 * transformWindowFuncCall.
+				 * transformWindowFuncCall. wc is never an RPR clause here
+				 * (those are skipped above), and an RPR existing_wc differs
+				 * in its frame options anyway, so the RPR-related comparisons
+				 * are a defensive backstop for parity.
 				 */
 				if (equal(wc->partitionClause, existing_wc->partitionClause) &&
 					equal(wc->orderClause, existing_wc->orderClause) &&
 					wc->frameOptions == existing_wc->frameOptions &&
 					equal(wc->startOffset, existing_wc->startOffset) &&
-					equal(wc->endOffset, existing_wc->endOffset))
+					equal(wc->endOffset, existing_wc->endOffset) &&
+					wc->rpSkipTo == existing_wc->rpSkipTo &&
+					equal(wc->defineClause, existing_wc->defineClause) &&
+					equal(wc->rpPattern, existing_wc->rpPattern))
 				{
 					ListCell   *lc4;
 
@@ -6376,6 +6445,50 @@ common_prefix_cmp(const void *a, const void *b)
 }
 
 /*
+ * add_define_inputs_walker
+ *	  Add to a WindowAgg's input target whatever a DEFINE clause reads that
+ *	  the target does not offer yet.
+ *
+ * This is the window's counterpart of the HAVING handling a few functions up:
+ * build_base_rel_tlists() marks the columns needed so they reach the top of
+ * the join tree, and the node's own input target has to ask for them again
+ * because the upper planner projects through explicit targets rather than
+ * propagating attr_needed.  make_group_input_target() does the same for
+ * havingQual.
+ *
+ * The walk stops at any expression the target already computes whole, since
+ * setrefs.c resolves the DEFINE copy of it against that column.  Stopping
+ * matters rather than merely saving work: under GROUP BY the Vars underneath
+ * a grouping expression are not available on their own, so descending into
+ * one would ask the grouping step for a column it cannot produce.  This is
+ * the one rule HAVING does not need, the Agg's input target sitting below
+ * the grouping step rather than above it.
+ */
+static bool
+add_define_inputs_walker(Node *node, PathTarget *input_target)
+{
+	ListCell   *lc;
+
+	if (node == NULL)
+		return false;
+
+	foreach(lc, input_target->exprs)
+	{
+		if (equal(node, lfirst(lc)))
+			return false;
+	}
+
+	if (IsA(node, Var) || IsA(node, PlaceHolderVar))
+	{
+		add_new_column_to_pathtarget(input_target, (Expr *) node);
+		return false;
+	}
+
+	return expression_tree_walker(node, add_define_inputs_walker,
+								  input_target);
+}
+
+/*
  * make_window_input_target
  *	  Generate appropriate PathTarget for initial input to WindowAgg nodes.
  *
@@ -6507,6 +6620,23 @@ make_window_input_target(PlannerInfo *root,
 									   PVC_RECURSE_WINDOWFUNCS |
 									   PVC_INCLUDE_PLACEHOLDERS);
 	add_new_columns_to_pathtarget(input_target, flattenable_vars);
+
+	/*
+	 * A row pattern DEFINE clause is evaluated by the WindowAgg itself, so
+	 * everything it reads has to reach this target too.  Nothing above has a
+	 * reason to put it here: DEFINE is not part of the query's final target
+	 * list, and the window's own PARTITION BY/ORDER BY entries are added
+	 * whole, which does not make the Vars inside them available separately.
+	 * Add what is missing now, once the clause has the shape it will be
+	 * executed with.
+	 */
+	foreach(lc, activeWindows)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			add_define_inputs_walker((Node *) wc->defineClause, input_target);
+	}
 
 	/* clean up cruft */
 	list_free(flattenable_vars);
