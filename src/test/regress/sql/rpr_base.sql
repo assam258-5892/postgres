@@ -5006,6 +5006,51 @@ WINDOW w AS (
 
 DROP TABLE rpr_join1, rpr_join2;
 
+-- A mismatched-type USING merge column used to let the other side's
+-- pulled-up constant fold into a navigation argument at plan time.
+CREATE TABLE rpr_join4 (k bigint);
+INSERT INTO rpr_join4 VALUES (10);
+
+SELECT count(*) OVER w AS cnt
+FROM (SELECT 10 AS k) a LEFT JOIN rpr_join4 USING (k)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS PREV(k / 0) > 0
+);
+
+-- Same, but RIGHT JOIN with the constant subquery on its preserved
+-- (right) side.
+SELECT count(*) OVER w AS cnt
+FROM rpr_join4 RIGHT JOIN (SELECT 10 AS k) a USING (k)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS PREV(k / 0) > 0
+);
+
+DROP TABLE rpr_join4;
+
+-- Same shape with real per-row data, confirming navigation still sees
+-- each row's own value.
+CREATE TABLE rpr_join5 (k int, v int);
+INSERT INTO rpr_join5 VALUES (1, 10), (2, 0), (3, 5);
+CREATE TABLE rpr_join6 (k bigint, w int);
+INSERT INTO rpr_join6 VALUES (1, 1), (2, 1), (3, 1);
+
+SELECT k, v, cnt
+FROM (SELECT k, v, count(*) OVER win AS cnt
+      FROM rpr_join5 LEFT JOIN rpr_join6 USING (k)
+      WINDOW win AS (
+          ORDER BY k
+          ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+          PATTERN (A+)
+          DEFINE A AS PREV(v) IS NOT NULL
+      )) s
+ORDER BY k;
+
+DROP TABLE rpr_join5, rpr_join6;
+
 -- ============================================================
 -- Complex Expression Tests
 -- ============================================================
