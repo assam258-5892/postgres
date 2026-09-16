@@ -98,6 +98,7 @@ create_upper_paths_hook_type create_upper_paths_hook = NULL;
 #define EXPRKIND_TABLEFUNC			11
 #define EXPRKIND_TABLEFUNC_LATERAL	12
 #define EXPRKIND_GROUPEXPR			13
+#define EXPRKIND_RPR_DEFINE			14
 
 /*
  * Data specific to grouping sets
@@ -1062,6 +1063,21 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 												EXPRKIND_LIMIT);
 		wc->endOffset = preprocess_expression(root, wc->endOffset,
 											  EXPRKIND_LIMIT);
+		wc->defineClause = (List *) preprocess_expression(root,
+														  (Node *) wc->defineClause,
+														  EXPRKIND_RPR_DEFINE);
+
+		/*
+		 * Reject volatile expressions in an RPR DEFINE clause.  This is done
+		 * here, not during parse analysis, to follow the convention of not
+		 * checking expression volatility while parsing.  A subquery the
+		 * planner discards before reaching this point is therefore not
+		 * checked, which is the same rule that lets a volatile fold away.
+		 */
+		if (contain_volatile_functions((Node *) wc->defineClause))
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("DEFINE clause cannot contain volatile functions"));
 	}
 
 	parse->limitOffset = preprocess_expression(root, parse->limitOffset,
@@ -1241,6 +1257,23 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 			flatten_group_exprs(root, root->parse, (Node *) parse->targetList);
 		parse->havingQual =
 			flatten_group_exprs(root, root->parse, parse->havingQual);
+
+		/*
+		 * A row pattern DEFINE clause holds an expression tree of its own, so
+		 * parseCheckAggregates() put GROUP Vars into it as well.  Expand them
+		 * here too, and with the root, so that the varnullingrels a grouping
+		 * set attached survive onto the replacement -- setrefs.c matches the
+		 * DEFINE copy against the target list copy and insists they agree.
+		 */
+		foreach(l, parse->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, l);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(root, root->parse,
+										(Node *) wc->defineClause);
+		}
 	}
 
 	/* Constant-folding might have removed all set-returning functions */
@@ -1459,7 +1492,17 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 	 * careful to maintain AND/OR flatness --- that is, do not generate a tree
 	 * with AND directly under AND, nor OR directly under OR.
 	 */
-	if (kind != EXPRKIND_RTFUNC)
+	if (kind == EXPRKIND_RPR_DEFINE)
+	{
+		/*
+		 * Don't split a ROW(...) IS [NOT] NULL in DEFINE into per-field
+		 * tests: the fields it would split into are never planted (see
+		 * transformDefineClause()), and DEFINE gets no benefit from the split
+		 * anyway since it's evaluated per row, not via an index.
+		 */
+		expr = eval_const_expressions_keep_row_nulltest(root, expr);
+	}
+	else if (kind != EXPRKIND_RTFUNC)
 		expr = eval_const_expressions(root, expr);
 
 	/*
@@ -1480,7 +1523,8 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 	 * hashfuncid of any that might execute more quickly by using hash lookups
 	 * instead of a linear search.
 	 */
-	if (kind == EXPRKIND_QUAL || kind == EXPRKIND_TARGET)
+	if (kind == EXPRKIND_QUAL || kind == EXPRKIND_TARGET ||
+		kind == EXPRKIND_RPR_DEFINE)
 	{
 		convert_saop_to_hashed_saop(expr);
 	}
@@ -6083,6 +6127,14 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 		if (wflists->windowFuncs[wc->winref] == NIL)
 			continue;
 
+		/*
+		 * If a DEFINE clause exists, do not let support functions replace the
+		 * frame with a non-RPR-compatible one.  RPR windows require ROWS
+		 * BETWEEN CURRENT ROW AND ...
+		 */
+		if (wc->defineClause != NIL)
+			continue;
+
 		foreach(lc2, wflists->windowFuncs[wc->winref])
 		{
 			SupportRequestOptimizeWindowClause req;
@@ -6160,13 +6212,19 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 
 				/*
 				 * Perform the same duplicate check that is done in
-				 * transformWindowFuncCall.
+				 * transformWindowFuncCall. wc is never an RPR clause here
+				 * (those are skipped above), and an RPR existing_wc differs
+				 * in its frame options anyway, so the RPR-related comparisons
+				 * are a defensive backstop for parity.
 				 */
 				if (equal(wc->partitionClause, existing_wc->partitionClause) &&
 					equal(wc->orderClause, existing_wc->orderClause) &&
 					wc->frameOptions == existing_wc->frameOptions &&
 					equal(wc->startOffset, existing_wc->startOffset) &&
-					equal(wc->endOffset, existing_wc->endOffset))
+					equal(wc->endOffset, existing_wc->endOffset) &&
+					wc->rpSkipTo == existing_wc->rpSkipTo &&
+					equal(wc->defineClause, existing_wc->defineClause) &&
+					equal(wc->rpPattern, existing_wc->rpPattern))
 				{
 					ListCell   *lc4;
 
