@@ -281,6 +281,35 @@ build_base_rel_tlists(PlannerInfo *root, List *final_tlist)
 			list_free(having_vars);
 		}
 	}
+
+	/*
+	 * A row pattern DEFINE clause is not in the target list, so nothing above
+	 * has asked for the columns it reads.  The WindowAgg evaluates it all the
+	 * same, and setrefs.c has to resolve it against the window's input, so
+	 * mark those columns needed here and let them propagate up through the
+	 * join steps the way the target list's own columns do.
+	 */
+	foreach_node(WindowClause, wc, root->parse->windowClause)
+	{
+		List	   *define_vars;
+
+		if (wc->defineClause == NIL)
+			continue;
+
+		/*
+		 * PVC_INCLUDE_PLACEHOLDERS is the only flag needed: DEFINE rejects
+		 * aggregates, window functions and subqueries at parse time.
+		 */
+		define_vars = pull_var_clause((Node *) wc->defineClause,
+									  PVC_INCLUDE_PLACEHOLDERS);
+
+		if (define_vars != NIL)
+		{
+			add_vars_to_targetlist(root, define_vars,
+								   bms_make_singleton(0));
+			list_free(define_vars);
+		}
+	}
 }
 
 /*

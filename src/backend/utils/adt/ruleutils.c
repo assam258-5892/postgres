@@ -122,6 +122,7 @@ typedef struct
 	bool		varprefix;		/* true to print prefixes on Vars */
 	bool		colNamesVisible;	/* do we care about output column names? */
 	bool		inGroupBy;		/* deparsing GROUP BY clause? */
+	bool		inRPRDefine;	/* deparsing an RPR DEFINE clause? */
 	bool		varInOrderBy;	/* deparsing simple Var in ORDER BY? */
 	Bitmapset  *appendparents;	/* if not null, map child Vars of these relids
 								 * back to the parent rel */
@@ -321,6 +322,16 @@ typedef struct
 	int			counter;		/* Largest addition used so far for name */
 } NameHashEntry;
 
+/*
+ * Context for the passes that settle DEFINE-referenced column names
+ */
+typedef struct
+{
+	deparse_namespace *dpns;
+	Node	   *jointree;		/* query's jointree, when pin is false */
+	bool		pin;			/* reserve the names, or pin them? */
+} define_names_context;
+
 /* Callback signature for resolve_special_varno() */
 typedef void (*rsv_callback) (Node *node, deparse_context *context,
 							  void *callback_arg);
@@ -381,6 +392,28 @@ static void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
+static bool colname_is_fixed(deparse_namespace *dpns, int varno,
+							 AttrNumber attno);
+static void set_define_names(deparse_namespace *dpns, Query *query,
+							 bool pin);
+static bool set_define_names_walker(Node *node,
+									define_names_context *context);
+static char *define_colname(deparse_namespace *dpns, Var *var, int *p_varno,
+							AttrNumber *p_attno);
+static void reserve_define_colname(define_names_context *context, Var *var);
+static bool define_colname_is_merged(Node *jtnode, int varno,
+									 const char *colname, bool merged);
+static void pin_define_colname(define_names_context *context, Var *var);
+static bool tablefunc_fixes_colname(Node *jtnode, deparse_namespace *dpns,
+									int varno, const char *colname, bool hidden);
+static void reserve_colname(deparse_namespace *dpns, char *colname);
+static List *function_rte_late_colnames(RangeTblEntry *rte);
+static void collapse_define_join_vars(Query *query);
+static Node *collapse_define_join_vars_mutator(Node *node, List *rtable);
+static Var *find_merged_join_var(Node *node, List *rtable,
+								 bool ignore_nullingrels);
+static Node *strip_nullingrels(Node *node);
+static Node *strip_nullingrels_mutator(Node *node, void *context);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -439,6 +472,10 @@ static void get_rule_groupingset(GroupingSet *gset, List *targetlist,
 								 bool omit_parens, deparse_context *context);
 static void get_rule_orderby(List *orderList, List *targetList,
 							 bool force_colno, deparse_context *context);
+static void append_pattern_quantifier(StringInfo buf, RPRPatternNode *node);
+static void get_rule_pattern_node(RPRPatternNode *node, deparse_context *context);
+static void get_rule_pattern(RPRPatternNode *rpPattern, deparse_context *context);
+static void get_rule_define(List *defineClause, deparse_context *context);
 static void get_rule_windowclause(Query *query, deparse_context *context);
 static void get_rule_windowspec(WindowClause *wc, List *targetList,
 								deparse_context *context);
@@ -536,7 +573,7 @@ static char *generate_qualified_relation_name(Oid relid);
 static char *generate_function_name(Oid funcid, int nargs,
 									List *argnames, Oid *argtypes,
 									bool has_variadic, bool *use_variadic_p,
-									bool inGroupBy);
+									bool inGroupBy, bool inRPRDefine);
 static char *generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 static void add_cast_to(StringInfo buf, Oid typid);
 static char *generate_qualified_type_name(Oid typid);
@@ -1122,6 +1159,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 		context.indentLevel = PRETTYINDENT_STD;
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
+		context.inRPRDefine = false;
 		context.varInOrderBy = false;
 		context.appendparents = NULL;
 
@@ -1133,7 +1171,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 	appendStringInfo(&buf, "EXECUTE FUNCTION %s(",
 					 generate_function_name(trigrec->tgfoid, 0,
 											NIL, NULL,
-											false, NULL, false));
+											false, NULL, false, false));
 
 	if (trigrec->tgnargs > 0)
 	{
@@ -3044,7 +3082,7 @@ pg_get_functiondef(PG_FUNCTION_ARGS)
 		appendStringInfo(&buf, " SUPPORT %s",
 						 generate_function_name(proc->prosupport, 1,
 												NIL, argtypes,
-												false, NULL, false));
+												false, NULL, false, false));
 	}
 
 	if (oldlen != buf.len)
@@ -3697,6 +3735,7 @@ deparse_expression_pretty(Node *expr, List *dpcontext,
 	context.indentLevel = startIndent;
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
+	context.inRPRDefine = false;
 	context.varInOrderBy = false;
 	context.appendparents = NULL;
 
@@ -4028,6 +4067,138 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 }
 
 /*
+ * collapse_define_join_vars: put an expanded merged join column back together
+ *
+ * Expanding the GROUP Vars of a DEFINE clause above leaves it holding whatever
+ * the grouping expression was written over, and over a column merged by USING
+ * that is the expression the parser built for the merge -- a COALESCE of the
+ * two inputs, where the join is a FULL one.  Printing that is wrong twice.  A
+ * DEFINE clause carries no qualifiers, so both arms come out spelled the same,
+ * COALESCE(id, id), and which column each came from is gone from the text; and
+ * re-parsing what is printed nests one merged column inside another, so even
+ * the shape no longer matches what the grouping step offers.
+ *
+ * The join RTE still holds the expression it built, so an expanded one can be
+ * recognised there and folded back into a Var naming the merged column itself.
+ * That is what the user wrote, and it re-parses.
+ */
+static void
+collapse_define_join_vars(Query *query)
+{
+	ListCell   *lc;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			wc->defineClause = (List *)
+				collapse_define_join_vars_mutator((Node *) wc->defineClause,
+												  query->rtable);
+	}
+}
+
+static Node *
+collapse_define_join_vars_mutator(Node *node, List *rtable)
+{
+	if (node == NULL)
+		return NULL;
+
+	/*
+	 * A Var already names one column, so there is nothing to put back
+	 * together; only an expanded expression is a candidate.
+	 */
+	if (!IsA(node, Var))
+	{
+		Var		   *merged = find_merged_join_var(node, rtable, false);
+
+		/*
+		 * Failing that, look again without the nulling bitmapsets.  An outer
+		 * join above the one that merged the column marks the copy the
+		 * grouping expression carries and not the copy the join RTE keeps,
+		 * and neither mark reaches the printed text.  The exact match is
+		 * tried first, so that a query merging the same columns twice still
+		 * names the merge its expression actually came from.
+		 */
+		if (merged == NULL)
+			merged = find_merged_join_var(node, rtable, true);
+
+		if (merged != NULL)
+			return (Node *) merged;
+	}
+
+	return expression_tree_mutator(node, collapse_define_join_vars_mutator,
+								   rtable);
+}
+
+/*
+ * find_merged_join_var: the column some JOIN USING of this query merged by
+ * evaluating this expression, or NULL if no join did
+ */
+static Var *
+find_merged_join_var(Node *node, List *rtable, bool ignore_nullingrels)
+{
+	ListCell   *lc;
+	int			rtindex = 0;
+
+	if (ignore_nullingrels)
+		node = strip_nullingrels(node);
+
+	foreach(lc, rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+		ListCell   *lc2;
+		AttrNumber	attno = 0;
+
+		rtindex++;
+		if (rte->rtekind != RTE_JOIN)
+			continue;
+
+		foreach(lc2, rte->joinaliasvars)
+		{
+			Node	   *aliasvar = (Node *) lfirst(lc2);
+
+			/* Only a merged column has an expression of its own */
+			if (++attno > rte->joinmergedcols)
+				break;
+
+			if (ignore_nullingrels)
+				aliasvar = strip_nullingrels(aliasvar);
+
+			if (equal(node, aliasvar))
+				return makeVar(rtindex, attno, exprType(node),
+							   exprTypmod(node), exprCollation(node), 0);
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * strip_nullingrels: a copy of the expression with the nulling marks cleared
+ */
+static Node *
+strip_nullingrels(Node *node)
+{
+	return strip_nullingrels_mutator(node, NULL);
+}
+
+static Node *
+strip_nullingrels_mutator(Node *node, void *context)
+{
+	if (node == NULL)
+		return NULL;
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) copyObject(node);
+
+		var->varnullingrels = NULL;
+		return (Node *) var;
+	}
+	return expression_tree_mutator(node, strip_nullingrels_mutator, context);
+}
+
+/*
  * set_deparse_for_query: set up deparse_namespace for deparsing a Query tree
  *
  * For convenience, this is defined to initialize the deparse_namespace struct
@@ -4066,10 +4237,23 @@ set_deparse_for_query(deparse_namespace *dpns, Query *query,
 			has_dangerous_join_using(dpns, (Node *) query->jointree);
 
 		/*
+		 * Reserve the column names that DEFINE clauses reference and that are
+		 * settled already, so that the USING names chosen next are chosen
+		 * around them rather than over them.
+		 */
+		set_define_names(dpns, query, false);
+
+		/*
 		 * Select names for columns merged by USING, via a recursive pass over
 		 * the query jointree.
 		 */
 		set_using_names(dpns, (Node *) query->jointree, NIL);
+
+		/*
+		 * Pin the column names that DEFINE clauses reference, so that they
+		 * still resolve as written when the query is re-parsed.
+		 */
+		set_define_names(dpns, query, true);
 	}
 
 	/*
@@ -4325,11 +4509,29 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 					colname = colinfo->colnames[i];
 				else
 				{
-					/* Prefer user-written output alias if any */
-					if (rte->alias && i < list_length(rte->alias->colnames))
-						colname = strVal(list_nth(rte->alias->colnames, i));
-					/* Make it appropriately unique */
-					colname = make_colname_unique(colname, dpns, colinfo);
+					bool		fixed;
+
+					/*
+					 * A merged column has to be named the same on both sides,
+					 * so an input whose columns cannot be renamed settles the
+					 * name for all of it.  Neither the output alias nor a
+					 * uniqueness adjustment can be honored then: either would
+					 * name a column that the input does not have, and the
+					 * USING clause would not reparse.
+					 */
+					fixed = (colname_is_fixed(dpns, colinfo->leftrti,
+											  leftattnos[i]) ||
+							 colname_is_fixed(dpns, colinfo->rightrti,
+											  rightattnos[i]));
+
+					if (!fixed)
+					{
+						/* Prefer user-written output alias if any */
+						if (rte->alias && i < list_length(rte->alias->colnames))
+							colname = strVal(list_nth(rte->alias->colnames, i));
+						/* Make it appropriately unique */
+						colname = make_colname_unique(colname, dpns, colinfo);
+					}
 					if (dpns->unique_using)
 						dpns->using_names = lappend(dpns->using_names,
 													colname);
@@ -4373,6 +4575,526 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 }
 
 /*
+ * colname_is_fixed: is this column one that no rename can reach?
+ *
+ * A TABLEFUNC RTE writes its column names into the clause that produces them
+ * and carries no column alias list, so a renamed column of one would reach the
+ * output only where it is referenced.  A join answers for whatever its inputs
+ * put in the column, so it is followed down to them.
+ */
+static bool
+colname_is_fixed(deparse_namespace *dpns, int varno, AttrNumber attno)
+{
+	RangeTblEntry *rte;
+
+	if (varno < 1 || varno > list_length(dpns->rtable) || attno <= 0)
+		return false;
+
+	rte = rt_fetch(varno, dpns->rtable);
+
+	if (rte->rtekind == RTE_TABLEFUNC)
+		return true;
+
+	if (rte->rtekind == RTE_JOIN &&
+		attno <= list_length(rte->joinaliasvars))
+	{
+		Node	   *aliasvar = (Node *) list_nth(rte->joinaliasvars, attno - 1);
+		List	   *vars = pull_var_clause(aliasvar, 0);
+		ListCell   *lc;
+
+		foreach(lc, vars)
+		{
+			Var		   *var = (Var *) lfirst(lc);
+
+			if (colname_is_fixed(dpns, var->varno, var->varattno))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+/*
+ * set_define_names: settle the column names that DEFINE clauses reference
+ *
+ * Within a DEFINE clause a column can only be named without a qualifier,
+ * since the qualifier slot names a pattern variable; get_rule_define()
+ * deparses with varprefix off for that reason.  So an unqualified reference
+ * there has to resolve exactly as printed, much like a column merged by
+ * USING.  If another relation of the same query later acquires a column of
+ * that name, re-parsing the deparsed query would find the name ambiguous.
+ *
+ * We therefore treat such a name the way set_using_names() treats a merged
+ * USING name: register it in dpns->using_names, so that no other RTE can be
+ * given that name, and store it into the owning RTE's colnames entry, which
+ * exempts the column itself from being renamed.  set_relation_column_names()
+ * then does the rest, uniquifying the intruding column to name_1 and printing
+ * a column alias list for its RTE.
+ *
+ * This runs on both sides of set_using_names(), because the two want
+ * incompatible things and only one of them can give way.  A merged USING name
+ * is invented there and may be spelled any way we please, the inputs being
+ * renamed along with it; the name a DEFINE clause reads cannot be spelled any
+ * other way at all.  The pass with pin off therefore reserves the DEFINE
+ * names that are settled already -- an ordinary column of a relation is named
+ * by the catalog or by a column alias no matter what set_using_names() goes on
+ * to do -- and the invention works around them.  What that pass cannot do is
+ * reserve the name of a merged column that a DEFINE clause reads, there being
+ * no such name until set_using_names() picks one.  The pass with pin on takes
+ * those, and fills in the colnames entries for all of them.
+ */
+static void
+set_define_names(deparse_namespace *dpns, Query *query, bool pin)
+{
+	define_names_context context;
+	ListCell   *lc;
+
+	context.dpns = dpns;
+	context.jointree = (Node *) query->jointree;
+	context.pin = pin;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			(void) set_define_names_walker((Node *) wc->defineClause,
+										   &context);
+	}
+}
+
+/*
+ * Walk a DEFINE clause, settling the name of every column it references.
+ */
+static bool
+set_define_names_walker(Node *node, define_names_context *context)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Var))
+	{
+		if (context->pin)
+			pin_define_colname(context, (Var *) node);
+		else
+			reserve_define_colname(context, (Var *) node);
+		return false;
+	}
+	/* Sub-selects are not allowed here, but be safe: they have own namespace */
+	if (IsA(node, Query))
+		return false;
+	return expression_tree_walker(node, set_define_names_walker, context);
+}
+
+/*
+ * define_colname: the name one DEFINE-referenced column will be printed with
+ *
+ * Returns NULL when there is no name to settle, which is the case for an
+ * outer-level reference, for a system column, and for a column that has been
+ * dropped.  Otherwise *p_varno and *p_attno receive the reference resolved
+ * the way get_variable() resolves it.
+ */
+static char *
+define_colname(deparse_namespace *dpns, Var *var, int *p_varno,
+			   AttrNumber *p_attno)
+{
+	RangeTblEntry *rte;
+	deparse_columns *colinfo;
+	int			varno;
+	AttrNumber	attno;
+	char	   *colname;
+
+	/*
+	 * Resolve the reference the way get_variable() will when it prints this
+	 * Var, or the name settled here is not the name that reaches the output.
+	 * A Var that reads a join column carries the child relation in varno and
+	 * the join RTE in varnosyn, and it is the latter that gets printed.
+	 */
+	if (var->varnosyn > 0 && dpns->plan == NULL)
+	{
+		varno = var->varnosyn;
+		attno = var->varattnosyn;
+	}
+	else
+	{
+		varno = var->varno;
+		attno = var->varattno;
+	}
+
+	/* An outer-level reference is no column of ours to settle */
+	if (var->varlevelsup != 0)
+		return NULL;
+	if (varno < 1 || varno > list_length(dpns->rtable))
+		return NULL;
+	/* A whole-row reference is rejected in a DEFINE clause, but be safe */
+	if (attno == InvalidAttrNumber)
+		return NULL;
+
+	rte = rt_fetch(varno, dpns->rtable);
+	colinfo = deparse_columns_fetch(varno, dpns);
+
+	/*
+	 * A system column's name is fixed: get_variable() reads it from the
+	 * catalog rather than from colinfo, so there is no alias to choose and
+	 * nothing about the column itself to protect.  The name still has to be
+	 * held against the rest of the query, so it is returned like any other
+	 * and the caller tells the two apart by the sign of *p_attno.
+	 */
+	if (attno < 0)
+	{
+		if (rte->rtekind != RTE_RELATION)
+			return NULL;
+		*p_varno = varno;
+		*p_attno = attno;
+		return get_rte_attribute_name(rte, attno);
+	}
+
+	/*
+	 * Find the name this column is going to be printed with.  If a name was
+	 * assigned already, that is the one to protect; set_using_names() does
+	 * that both for a join's merged column and for the input columns it was
+	 * merged from.
+	 */
+	if (attno <= colinfo->num_cols && colinfo->colnames[attno - 1] != NULL)
+		colname = colinfo->colnames[attno - 1];
+	else if (rte->rtekind == RTE_RELATION)
+	{
+		char	   *real_colname = get_attname(rte->relid, attno, true);
+
+		if (real_colname == NULL)
+			return NULL;		/* dropped column */
+
+		/*
+		 * Resolve as set_relation_column_names() will: a column alias the
+		 * user wrote is what gets printed, and the catalog name only stands
+		 * in where there is none.  Settling on the catalog name instead would
+		 * protect a name that never reaches the output, and would replace the
+		 * alias in the printed text besides.
+		 */
+		if (rte->alias && attno <= list_length(rte->alias->colnames))
+			colname = strVal(list_nth(rte->alias->colnames, attno - 1));
+		else
+			colname = real_colname;
+	}
+	else if (attno <= list_length(rte->eref->colnames))
+	{
+		colname = strVal(list_nth(rte->eref->colnames, attno - 1));
+		if (colname[0] == '\0')
+			return NULL;		/* dropped column */
+	}
+	else
+		return NULL;
+
+	*p_varno = varno;
+	*p_attno = attno;
+	return colname;
+}
+
+/*
+ * reserve_define_colname: hold one DEFINE-referenced name against the USING
+ * names that set_using_names() is about to invent
+ *
+ * Only a column whose name set_using_names() will leave alone can be reserved
+ * here.  A column it renames has no name to reserve yet, and reserving the one
+ * the column carries now would push the choice off a name that the DEFINE
+ * clause is going to be printed with anyway.  define_colname_is_merged() is
+ * the test, and what it excludes is a column that some JOIN USING of this
+ * query merges; those are left to pin_define_colname(), which runs once the
+ * name exists.
+ */
+static void
+reserve_define_colname(define_names_context *context, Var *var)
+{
+	deparse_namespace *dpns = context->dpns;
+	int			varno;
+	AttrNumber	attno;
+	char	   *colname = define_colname(dpns, var, &varno, &attno);
+
+	if (colname == NULL)
+		return;
+	if (define_colname_is_merged(context->jointree, varno, colname, false))
+		return;
+
+	reserve_colname(dpns, colname);
+}
+
+/*
+ * define_colname_is_merged: is this column merged by a JOIN USING?
+ *
+ * Answers for the column varno.attno, named colname as it stands, by asking
+ * whether it sits at or under a join that lists that name in its USING clause.
+ * We cannot read the answer off the deparse_columns structs because the caller
+ * runs before they are filled in, but the raw jointree carries it:
+ * set_using_names() matches a USING name against the output column names of
+ * the join's two inputs, which is the name reached here, and renames the
+ * inputs along with the merged column.
+ *
+ * varno names a relation for most references and a join for the rest.  Both
+ * kinds of merged column arrive as the latter: the one whose value is not
+ * either input, a FULL JOIN's COALESCE, because the parser has nowhere else to
+ * put it, and every column of an aliased join, because such a join hides its
+ * inputs and answers for them.  A column of a join that its own USING clause
+ * does not name is no more merged than a relation's would be, and is reserved.
+ *
+ * "merged" reports whether such a join has been entered already.
+ */
+static bool
+define_colname_is_merged(Node *jtnode, int varno, const char *colname,
+						 bool merged)
+{
+	if (jtnode == NULL)
+		return false;
+	if (IsA(jtnode, RangeTblRef))
+	{
+		return merged && ((RangeTblRef *) jtnode)->rtindex == varno;
+	}
+	else if (IsA(jtnode, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) jtnode;
+		ListCell   *lc;
+
+		foreach(lc, f->fromlist)
+		{
+			if (define_colname_is_merged((Node *) lfirst(lc), varno, colname,
+										 merged))
+				return true;
+		}
+		return false;
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
+		ListCell   *lc;
+
+		foreach(lc, j->usingClause)
+		{
+			if (strcmp(strVal(lfirst(lc)), colname) == 0)
+			{
+				merged = true;
+				break;
+			}
+		}
+		if (j->rtindex == varno)
+			return merged;
+		return define_colname_is_merged(j->larg, varno, colname, merged) ||
+			define_colname_is_merged(j->rarg, varno, colname, merged);
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d", (int) nodeTag(jtnode));
+	return false;				/* keep compiler quiet */
+}
+
+/*
+ * pin_define_colname: settle the printed name of one DEFINE-referenced column
+ */
+static void
+pin_define_colname(define_names_context *context, Var *var)
+{
+	deparse_namespace *dpns = context->dpns;
+	deparse_columns *colinfo;
+	int			varno;
+	AttrNumber	attno;
+	char	   *colname = define_colname(dpns, var, &varno, &attno);
+	int			i;
+
+	if (colname == NULL)
+		return;
+
+	/* A system column has no colnames entry to store; just hold the name */
+	if (attno < 0)
+	{
+		reserve_colname(dpns, colname);
+		return;
+	}
+
+	/*
+	 * Where a column that cannot be renamed answers to this name already,
+	 * this is the column that has to give way instead.  Hold the name for the
+	 * other one and leave this one to be renamed like any intruder would be:
+	 * a DEFINE reference is printed from colinfo, so the clause follows the
+	 * column to whatever it ends up called, and goes on naming it alone.
+	 */
+	if (tablefunc_fixes_colname(context->jointree, dpns, varno, colname,
+								false))
+	{
+		reserve_colname(dpns, colname);
+		return;
+	}
+
+	/*
+	 * Store the name into the owning RTE's colnames entry, which is what
+	 * exempts this column from being renamed for some other name's sake.
+	 *
+	 * No other column of this RTE should be carrying the name already.  The
+	 * reservation pass is what rules that out: set_using_names() puts a name
+	 * here only by handing down one it chose, it chooses around what that
+	 * pass reserved, and the names reaching one RTE come from that RTE's own
+	 * parent join, where they are unique among themselves.  So the only name
+	 * of ours it can have left here is this column's own, which is what we
+	 * are about to write back.
+	 *
+	 * Should that fail to hold, there is nothing to be done about it here.
+	 * Neither name can move: ours is the one the DEFINE clause is printed
+	 * with, and the other was handed to both sides of a join at once, so
+	 * changing it means choosing the join's merged name over again.  What is
+	 * left is to refuse, and refusing is worth the check because the damage
+	 * is otherwise silent -- a column alias list carrying one name twice is
+	 * printed without complaint and fails only when the dump is restored,
+	 * which is the furthest possible place from the cause.
+	 */
+	colinfo = deparse_columns_fetch(varno, dpns);
+	expand_colnames_array_to(colinfo, attno);
+	for (i = 0; i < colinfo->num_cols; i++)
+	{
+		if (i != attno - 1 && colinfo->colnames[i] != NULL &&
+			strcmp(colinfo->colnames[i], colname) == 0)
+			elog(ERROR, "cannot print two columns of the same range table entry as \"%s\"",
+				 colname);
+	}
+	colinfo->colnames[attno - 1] = colname;
+
+	reserve_colname(dpns, colname);
+}
+
+/*
+ * tablefunc_fixes_colname: does a column no rename can reach answer to this
+ * name?
+ *
+ * A TABLEFUNC RTE writes its column names into the clause that produces them,
+ * so there is nowhere to print a rename of one and set_relation_column_names()
+ * leaves them alone.  A name one of them carries is therefore taken for good,
+ * and whatever else would print the same name has to move instead.
+ *
+ * Only a TABLEFUNC that the query can name without a qualifier counts, which
+ * is why this walks the jointree rather than the range table: an aliased join
+ * answers for its inputs and hides them, so a column of one is out of reach of
+ * an unqualified reference and collides with nothing.  "hidden" reports
+ * whether such a join has been entered already.  varno is the RTE the DEFINE
+ * reference resolves to, and is not itself an answer.
+ */
+static bool
+tablefunc_fixes_colname(Node *jtnode, deparse_namespace *dpns, int varno,
+						const char *colname, bool hidden)
+{
+	if (jtnode == NULL)
+		return false;
+	if (IsA(jtnode, RangeTblRef))
+	{
+		int			rtindex = ((RangeTblRef *) jtnode)->rtindex;
+		RangeTblEntry *rte;
+		ListCell   *lc;
+
+		if (hidden || rtindex == varno)
+			return false;
+		rte = rt_fetch(rtindex, dpns->rtable);
+		if (rte->rtekind != RTE_TABLEFUNC)
+			return false;
+
+		foreach(lc, rte->eref->colnames)
+		{
+			if (strcmp(strVal(lfirst(lc)), colname) == 0)
+				return true;
+		}
+		return false;
+	}
+	else if (IsA(jtnode, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) jtnode;
+		ListCell   *lc;
+
+		foreach(lc, f->fromlist)
+		{
+			if (tablefunc_fixes_colname((Node *) lfirst(lc), dpns, varno,
+										colname, hidden))
+				return true;
+		}
+		return false;
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
+
+		if (j->alias != NULL)
+			hidden = true;
+		return tablefunc_fixes_colname(j->larg, dpns, varno, colname,
+									   hidden) ||
+			tablefunc_fixes_colname(j->rarg, dpns, varno, colname, hidden);
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d", (int) nodeTag(jtnode));
+	return false;				/* keep compiler quiet */
+}
+
+/*
+ * reserve_colname: keep any other RTE from being given this column name
+ */
+static void
+reserve_colname(deparse_namespace *dpns, char *colname)
+{
+	ListCell   *lc;
+
+	foreach(lc, dpns->using_names)
+	{
+		if (strcmp((char *) lfirst(lc), colname) == 0)
+			return;
+	}
+	dpns->using_names = lappend(dpns->using_names, colname);
+}
+
+/*
+ * function_rte_late_colnames: the names of the columns a function RTE's result
+ * type has grown since the query was parsed
+ *
+ * expandRTE() stops at the column count recorded at parse time, so a column
+ * the type has gained since then is not in the list the deparser works from --
+ * and a column the deparser cannot see is one it cannot rename out of the way
+ * of a name that has to resolve exactly as printed.  A DEFINE clause is what
+ * has such a name; everything else the deparser prints carries a qualifier.
+ *
+ * Returns NIL unless there is one function and no WITH ORDINALITY, those being
+ * the cases where the grown columns land at the end of the RTE.  Anywhere else
+ * they land in the middle, shifting the attnos this query was parsed with.
+ */
+static List *
+function_rte_late_colnames(RangeTblEntry *rte)
+{
+	RangeTblFunction *rtfunc;
+	TypeFuncClass functypclass;
+	Oid			funcrettype;
+	TupleDesc	tupdesc;
+	List	   *result = NIL;
+	int			i;
+
+	if (rte->funcordinality || list_length(rte->functions) != 1)
+		return NIL;
+
+	rtfunc = (RangeTblFunction *) linitial(rte->functions);
+
+	/* A coldeflist fixes the column set, and pins the return type at RECORD */
+	if (rtfunc->funccolnames != NIL)
+		return NIL;
+
+	functypclass = get_expr_result_type(rtfunc->funcexpr, &funcrettype,
+										&tupdesc);
+	if (functypclass != TYPEFUNC_COMPOSITE &&
+		functypclass != TYPEFUNC_COMPOSITE_DOMAIN)
+		return NIL;
+
+	for (i = rtfunc->funccolcount; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+		/* Spell a dropped column the way expandRTE() does */
+		if (attr->attisdropped)
+			result = lappend(result, makeString(pstrdup("")));
+		else
+			result = lappend(result,
+							 makeString(pstrdup(NameStr(attr->attname))));
+	}
+
+	return result;
+}
+
+/*
  * set_relation_column_names: select column aliases for a non-join RTE
  *
  * Column alias info is saved in *colinfo, which is assumed to be pre-zeroed.
@@ -4387,6 +5109,9 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	char	  **real_colnames;
 	bool		changed_any;
 	int			noldcolumns;
+	int			nparsecols = -1;
+	int			nbasenew = -1;
+	int			lastlate = -1;
 	int			i;
 	int			j;
 
@@ -4444,6 +5169,19 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			/* Since we're not creating Vars, rtindex etc. don't matter */
 			expandRTE(rte, 1, 0, VAR_RETURNING_DEFAULT, -1,
 					  true /* include dropped */ , &colnames, NULL);
+
+			/*
+			 * Take the columns the result type has grown since parse time as
+			 * well, but only where there is a name to keep them off of.  The
+			 * loop below leaves them off the printed alias list again unless
+			 * one of them turns out to need renaming.
+			 */
+			if (dpns->using_names != NIL)
+			{
+				nparsecols = list_length(colnames);
+				colnames = list_concat(colnames,
+									   function_rte_late_colnames(rte));
+			}
 		}
 		else
 			colnames = rte->eref->colnames;
@@ -4478,6 +5216,10 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	expand_colnames_array_to(colinfo, ncolumns);
 	Assert(colinfo->num_cols == ncolumns);
 
+	/* Without grown columns, every column is one the query was parsed with */
+	if (nparsecols < 0)
+		nparsecols = ncolumns;
+
 	/*
 	 * Make sufficiently large new_colnames and is_new_col arrays, too.
 	 *
@@ -4506,6 +5248,10 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 		char	   *real_colname = real_colnames[i];
 		char	   *colname = colinfo->colnames[i];
 
+		/* Remember where the columns the query was parsed with leave off */
+		if (i == nparsecols)
+			nbasenew = j;
+
 		/* Skip dropped columns */
 		if (real_colname == NULL)
 		{
@@ -4522,8 +5268,16 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			else
 				colname = real_colname;
 
-			/* Unique-ify and insert into colinfo */
-			colname = make_colname_unique(colname, dpns, colinfo);
+			/*
+			 * Unique-ify and insert into colinfo, unless this RTE has nowhere
+			 * to carry a column alias list: a renamed column would then reach
+			 * the output only where it is referenced, naming a column that no
+			 * longer exists.  A TABLEFUNC RTE is such a one -- its column
+			 * names are written into the clause that produces them, which is
+			 * why printaliases is forced off for it below.
+			 */
+			if (rte->rtekind != RTE_TABLEFUNC)
+				colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
 			add_to_names_hash(colinfo, colname);
@@ -4538,6 +5292,10 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 		/* Remember if any assigned aliases differ from "real" name */
 		if (!changed_any && strcmp(colname, real_colname) != 0)
 			changed_any = true;
+
+		/* And how far into the grown columns a renamed one reaches */
+		if (i >= nparsecols && strcmp(colname, real_colname) != 0)
+			lastlate = j - 1;
 	}
 
 	/* We're now done needing the colinfo's names_hash */
@@ -4550,6 +5308,15 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	 * they won't affect varattnos of pre-existing columns.)
 	 */
 	colinfo->num_new_cols = j;
+
+	/*
+	 * Print the grown columns only as far as a renamed one reaches.  The
+	 * alias list is positional, so a renamed column has to be counted up to;
+	 * the ones past it were never on the list before and are better left off
+	 * it.
+	 */
+	if (nparsecols < ncolumns)
+		colinfo->num_new_cols = (lastlate >= 0) ? lastlate + 1 : nbasenew;
 
 	/*
 	 * For a relation RTE, we need only print the alias column names if any
@@ -5491,6 +6258,7 @@ make_ruledef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc,
 		context.indentLevel = PRETTYINDENT_STD;
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
+		context.inRPRDefine = false;
 		context.varInOrderBy = false;
 		context.appendparents = NULL;
 
@@ -5654,10 +6422,28 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	 */
 	if (query->hasGroupRTE)
 	{
+		ListCell   *lc;
+
 		query->targetList = (List *)
 			flatten_group_exprs(NULL, query, (Node *) query->targetList);
 		query->havingQual =
 			flatten_group_exprs(NULL, query, query->havingQual);
+
+		/*
+		 * A row pattern DEFINE clause carries GROUP Vars of its own; expand
+		 * them, or the deparsed text would name the grouping step rather than
+		 * the expression the user wrote, and the view would not re-parse.
+		 */
+		foreach(lc, query->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, lc);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(NULL, query, (Node *) wc->defineClause);
+		}
+
+		collapse_define_join_vars(query);
 	}
 
 	/*
@@ -5683,6 +6469,7 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	context.indentLevel = startIndent;
 	context.colNamesVisible = colNamesVisible;
 	context.inGroupBy = false;
+	context.inRPRDefine = false;
 	context.varInOrderBy = false;
 	context.appendparents = NULL;
 
@@ -6752,6 +7539,169 @@ get_rule_orderby(List *orderList, List *targetList,
 }
 
 /*
+ * Helper function to append quantifier string for pattern node
+ */
+static void
+append_pattern_quantifier(StringInfo buf, RPRPatternNode *node)
+{
+	bool		has_quantifier = true;
+
+	if (node->min == 1 && node->max == 1)
+	{
+		/* {1,1} = no quantifier */
+		has_quantifier = false;
+	}
+	else if (node->min == 0 && node->max == PG_INT32_MAX)
+		appendStringInfoChar(buf, '*');
+	else if (node->min == 1 && node->max == PG_INT32_MAX)
+		appendStringInfoChar(buf, '+');
+	else if (node->min == 0 && node->max == 1)
+		appendStringInfoChar(buf, '?');
+	else if (node->max == PG_INT32_MAX)
+		appendStringInfo(buf, "{%d,}", node->min);
+	else if (node->min == node->max)
+		appendStringInfo(buf, "{%d}", node->min);
+	else
+		appendStringInfo(buf, "{%d,%d}", node->min, node->max);
+
+	if (node->reluctant)
+	{
+		if (!has_quantifier)
+			appendStringInfoString(buf, "{1}"); /* make reluctant ?
+												 * unambiguous */
+		appendStringInfoChar(buf, '?');
+	}
+}
+
+/*
+ * quote_pattern_variable
+ *		Like quote_identifier(), but also quotes PERMUTE.
+ *
+ * PERMUTE is unreserved, so quote_identifier() leaves it bare, but a bare
+ * permute followed by '(' in a PATTERN would be re-read as the unsupported
+ * PERMUTE syntax.
+ *
+ * EXPLAIN deparses the compiled pattern with its own printer, so it calls
+ * this too; both spellings of a pattern must agree.
+ */
+const char *
+quote_pattern_variable(const char *varName)
+{
+	const char *result = quote_identifier(varName);
+
+	if (result == varName && strcmp(varName, "permute") == 0)
+		result = psprintf("\"%s\"", varName);
+
+	return result;
+}
+
+/*
+ * Recursive helper to display RPRPatternNode tree
+ */
+static void
+get_rule_pattern_node(RPRPatternNode *node, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+	const char *sep;
+
+	Assert(node != NULL);
+
+	switch (node->nodeType)
+	{
+		case RPR_PATTERN_VAR:
+			appendStringInfoString(buf, quote_pattern_variable(node->varName));
+			append_pattern_quantifier(buf, node);
+			break;
+
+		case RPR_PATTERN_SEQ:
+			sep = "";
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				appendStringInfoString(buf, sep);
+				get_rule_pattern_node(child, context);
+				sep = " ";
+			}
+			break;
+
+		case RPR_PATTERN_ALT:
+			sep = "";
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				appendStringInfoString(buf, sep);
+				get_rule_pattern_node(child, context);
+				sep = " | ";
+			}
+			break;
+
+		case RPR_PATTERN_GROUP:
+			appendStringInfoChar(buf, '(');
+			sep = "";
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				appendStringInfoString(buf, sep);
+				get_rule_pattern_node(child, context);
+				sep = " ";
+			}
+			appendStringInfoChar(buf, ')');
+			append_pattern_quantifier(buf, node);
+			break;
+	}
+}
+
+/*
+ * Display a PATTERN clause.
+ */
+static void
+get_rule_pattern(RPRPatternNode *rpPattern, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+
+	appendStringInfoChar(buf, '(');
+	get_rule_pattern_node(rpPattern, context);
+	appendStringInfoChar(buf, ')');
+}
+
+/*
+ * Display a DEFINE clause.
+ */
+static void
+get_rule_define(List *defineClause, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+	const char *sep = "  ";
+	bool		save_inrprdefine = context->inRPRDefine;
+	bool		save_varprefix = context->varprefix;
+
+	/*
+	 * Within the DEFINE clause an unqualified prev/next/first/last is a
+	 * navigation operation, so a user function of one of those names must be
+	 * schema-qualified to survive a reparse; see generate_function_name().
+	 */
+	context->inRPRDefine = true;
+
+	/*
+	 * DEFINE clause referenced columns cannot be table/schema-qualified: the
+	 * qualifier slot is for pattern variables, so print bare column names.
+	 */
+	context->varprefix = false;
+
+	/*
+	 * A name here is always followed by AS and so cannot start a PERMUTE
+	 * construct, which is why plain quote_identifier() is enough: the same
+	 * variable may print bare here and quoted in the PATTERN.
+	 */
+	foreach_node(TargetEntry, te, defineClause)
+	{
+		appendStringInfo(buf, "%s%s AS ", sep, quote_identifier(te->resname));
+		get_rule_expr((Node *) te->expr, context, false);
+		sep = ",\n  ";
+	}
+
+	context->varprefix = save_varprefix;
+	context->inRPRDefine = save_inrprdefine;
+}
+
+/*
  * Display a WINDOW clause.
  *
  * Note that the windowClause list might contain only anonymous window
@@ -6840,6 +7790,28 @@ get_rule_windowspec(WindowClause *wc, List *targetList,
 								 wc->startOffset, wc->endOffset,
 								 context);
 	}
+
+	/* RPR clauses start their own line, so no separator space is wanted */
+	if (wc->rpPattern)
+	{
+		if (wc->rpSkipTo == ST_NEXT_ROW)
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP TO NEXT ROW");
+		else
+		{
+			Assert(wc->rpSkipTo == ST_PAST_LAST_ROW);
+
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP PAST LAST ROW");
+		}
+
+		appendStringInfoString(buf, "\n  INITIAL\n  PATTERN ");
+		get_rule_pattern(wc->rpPattern, context);
+
+		appendStringInfoString(buf, "\n  DEFINE\n");
+		get_rule_define(wc->defineClause, context);
+	}
+
 	appendStringInfoChar(buf, ')');
 }
 
@@ -6935,6 +7907,7 @@ get_window_frame_options_for_explain(int frameOptions,
 	context.indentLevel = 0;
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
+	context.inRPRDefine = false;
 	context.varInOrderBy = false;
 	context.appendparents = NULL;
 
@@ -8922,6 +9895,7 @@ isSimpleNode(Node *node, Node *parentNode, int prettyFlags)
 		case T_FuncExpr:
 		case T_JsonConstructorExpr:
 		case T_JsonExpr:
+		case T_RPRNavExpr:
 			/* function-like: name(..) or name[..] */
 			return true;
 
@@ -9415,6 +10389,89 @@ get_rule_expr(Node *node, deparse_context *context,
 
 		case T_FuncExpr:
 			get_func_expr((FuncExpr *) node, context, showimplicit);
+			break;
+
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *nav = (RPRNavExpr *) node;
+				const char *outer_func = NULL;
+				const char *inner_func;
+
+				switch (nav->kind)
+				{
+					case RPR_NAV_PREV:
+						inner_func = "PREV(";
+						break;
+					case RPR_NAV_NEXT:
+						inner_func = "NEXT(";
+						break;
+					case RPR_NAV_FIRST:
+						inner_func = "FIRST(";
+						break;
+					case RPR_NAV_LAST:
+						inner_func = "LAST(";
+						break;
+					case RPR_NAV_PREV_FIRST:
+						outer_func = "PREV(";
+						inner_func = "FIRST(";
+						break;
+					case RPR_NAV_PREV_LAST:
+						outer_func = "PREV(";
+						inner_func = "LAST(";
+						break;
+					case RPR_NAV_NEXT_FIRST:
+						outer_func = "NEXT(";
+						inner_func = "FIRST(";
+						break;
+					case RPR_NAV_NEXT_LAST:
+						outer_func = "NEXT(";
+						inner_func = "LAST(";
+						break;
+					default:
+						elog(ERROR, "unrecognized RPR navigation kind: %d",
+							 nav->kind);
+						inner_func = NULL;	/* keep compiler quiet */
+						break;
+				}
+
+				if (outer_func != NULL)
+				{
+					/*
+					 * Compound: PREV(FIRST(arg [, inner_offset]) [,
+					 * outer_offset])
+					 */
+					appendStringInfoString(buf, outer_func);
+					appendStringInfoString(buf, inner_func);
+					get_rule_expr((Node *) nav->arg, context, showimplicit);
+					if (nav->offset_arg != NULL)
+					{
+						appendStringInfoString(buf, ", ");
+						get_rule_expr((Node *) nav->offset_arg, context,
+									  showimplicit);
+					}
+					appendStringInfoChar(buf, ')');
+					if (nav->compound_offset_arg != NULL)
+					{
+						appendStringInfoString(buf, ", ");
+						get_rule_expr((Node *) nav->compound_offset_arg,
+									  context, showimplicit);
+					}
+					appendStringInfoChar(buf, ')');
+				}
+				else
+				{
+					/* Simple: FUNC(arg [, offset]) */
+					appendStringInfoString(buf, inner_func);
+					get_rule_expr((Node *) nav->arg, context, showimplicit);
+					if (nav->offset_arg != NULL)
+					{
+						appendStringInfoString(buf, ", ");
+						get_rule_expr((Node *) nav->offset_arg, context,
+									  showimplicit);
+					}
+					appendStringInfoChar(buf, ')');
+				}
+			}
 			break;
 
 		case T_NamedArgExpr:
@@ -10909,7 +11966,8 @@ get_func_expr(FuncExpr *expr, deparse_context *context,
 											argnames, argtypes,
 											expr->funcvariadic,
 											&use_variadic,
-											context->inGroupBy));
+											context->inGroupBy,
+											context->inRPRDefine));
 	nargs = 0;
 	foreach(l, expr->args)
 	{
@@ -10979,7 +12037,8 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 		funcname = generate_function_name(aggref->aggfnoid, nargs, NIL,
 										  argtypes, aggref->aggvariadic,
 										  &use_variadic,
-										  context->inGroupBy);
+										  context->inGroupBy,
+										  context->inRPRDefine);
 
 	/* Print the aggregate name, schema-qualified if needed */
 	appendStringInfo(buf, "%s(%s", funcname,
@@ -11120,7 +12179,8 @@ get_windowfunc_expr_helper(WindowFunc *wfunc, deparse_context *context,
 	if (!funcname)
 		funcname = generate_function_name(wfunc->winfnoid, nargs, argnames,
 										  argtypes, false, NULL,
-										  context->inGroupBy);
+										  context->inGroupBy,
+										  context->inRPRDefine);
 
 	appendStringInfo(buf, "%s(", funcname);
 
@@ -13072,7 +14132,7 @@ get_tablesample_def(TableSampleClause *tablesample, deparse_context *context)
 	appendStringInfo(buf, " TABLESAMPLE %s (",
 					 generate_function_name(tablesample->tsmhandler, 1,
 											NIL, argtypes,
-											false, NULL, false));
+											false, NULL, false, false));
 
 	nargs = 0;
 	foreach(l, tablesample->args)
@@ -13486,12 +14546,14 @@ generate_qualified_relation_name(Oid relid)
  *
  * inGroupBy must be true if we're deparsing a GROUP BY clause.
  *
+ * inRPRDefine must be true if we're deparsing an RPR DEFINE clause.
+ *
  * The result includes all necessary quoting and schema-prefixing.
  */
 static char *
 generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 					   bool has_variadic, bool *use_variadic_p,
-					   bool inGroupBy)
+					   bool inGroupBy, bool inRPRDefine)
 {
 	char	   *result;
 	HeapTuple	proctup;
@@ -13522,6 +14584,24 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	if (inGroupBy)
 	{
 		if (strcmp(proname, "cube") == 0 || strcmp(proname, "rollup") == 0)
+			force_qualify = true;
+	}
+
+	/*
+	 * Inside a row pattern DEFINE clause, the parser binds an unqualified
+	 * prev/next/first/last to a navigation operation before any catalog
+	 * lookup, so an unqualified call to a user function of one of those names
+	 * would change meaning across a deparse/reparse cycle.  Force schema
+	 * qualification; the qualified form is the documented escape hatch.  Only
+	 * the exact lower-case names are at risk: a mixed-case proname deparses
+	 * quoted and cannot match the parser's downcased comparison.
+	 */
+	if (inRPRDefine)
+	{
+		if (strcmp(proname, "prev") == 0 ||
+			strcmp(proname, "next") == 0 ||
+			strcmp(proname, "first") == 0 ||
+			strcmp(proname, "last") == 0)
 			force_qualify = true;
 	}
 
