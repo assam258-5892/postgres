@@ -3313,8 +3313,51 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS ROW((items).*) IS NOT NULL
 );
+
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
+
+-- A composite value that reaches DEFINE by way of a subquery Var only takes
+-- its ROW(...) shape after pullup, and the ORDER BY copy's sortgroupref
+-- keeps it from being flattened.  make_window_input_target() adds the fields
+-- the split leaves behind.
+CREATE TABLE rpr_ordrow (a int, b int);
+INSERT INTO rpr_ordrow SELECT g, g % 4 FROM generate_series(1, 10) g;
+SELECT count(*) OVER w AS c
+FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
+WINDOW w AS (ORDER BY x
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
+-- Control: without ORDER BY, x is flattened normally and this succeeds too.
+SELECT count(*) OVER w AS c
+FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
+DROP TABLE rpr_ordrow;
+
+-- The same split by way of a pulled-up composite target, both as a plain
+-- subquery and as a view.
+CREATE TABLE rpr_partrow (a int, b int);
+INSERT INTO rpr_partrow VALUES (1, 1), (2, 2), (3, 3);
+SELECT count(*) OVER w
+FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (p q+) DEFINE q AS k IS NOT NULL);
+CREATE TYPE rpr_partrow_t AS (x int, y int);
+CREATE VIEW rpr_partrow_v AS SELECT b, row(a, 1)::rpr_partrow_t AS k FROM rpr_partrow;
+SELECT count(*) OVER w FROM rpr_partrow_v
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (p q+) DEFINE q AS k IS NOT NULL);
+-- Control: PATTERN/DEFINE aside, the same window clause runs fine.
+SELECT count(*) OVER w
+FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING);
+DROP VIEW rpr_partrow_v;
+DROP TYPE rpr_partrow_t;
+DROP TABLE rpr_partrow;
 
 -- ERROR: undefined column in DEFINE
 SELECT COUNT(*) OVER w
@@ -5051,6 +5094,88 @@ ORDER BY k;
 
 DROP TABLE rpr_join5, rpr_join6;
 
+-- A DEFINE clause reading a USING column whose two sides differ in typmod.
+-- The merged column stays a join alias Var, pullup leaves its joinaliasvars
+-- entry a non-trivial expression, and the outer join's nullingrels wrap that
+-- in a PlaceHolderVar.  The target list copy and the DEFINE copy are wrapped
+-- by separate calls, so their phids differ and equal() does not match them --
+-- the window input has to carry the DEFINE clause's own PlaceHolderVar.
+CREATE TABLE rpr_phv_src (n int);
+CREATE TABLE rpr_phv_dim (c varchar(10), tdate date);
+CREATE TABLE rpr_phv_out (k varchar);
+INSERT INTO rpr_phv_src VALUES (2), (4);
+INSERT INTO rpr_phv_dim VALUES ('zz', '2024-01-01'), ('zzzz', '2024-01-02');
+INSERT INTO rpr_phv_out VALUES ('zz'), ('zzzz');
+
+SELECT j.c, j.tdate, count(*) OVER w AS cnt
+FROM rpr_phv_out o1
+     LEFT JOIN ( (SELECT n, repeat('z', n)::varchar(5) AS c FROM rpr_phv_src) s
+                 JOIN rpr_phv_dim USING (c) ) j
+     ON o1.k = j.c
+WINDOW w AS (ORDER BY j.tdate
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (p q+)
+             DEFINE p AS TRUE, q AS c > '');
+
+-- The same with one more join level above it.  Reaching the window input is
+-- not enough on its own: an intermediate join emits only what something above
+-- has declared a need for, so what a DEFINE clause reads is marked needed at
+-- relation 0 the way the target list's own columns are.
+SELECT j.c, j.tdate, count(*) OVER w AS cnt
+FROM rpr_phv_out o1
+     LEFT JOIN rpr_phv_out o2 ON o1.k = o2.k
+     LEFT JOIN ( (SELECT n, repeat('z', n)::varchar(5) AS c FROM rpr_phv_src) s
+                 JOIN rpr_phv_dim USING (c) ) j
+     ON o2.k = j.c
+WINDOW w AS (ORDER BY j.tdate
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (p q+)
+             DEFINE p AS TRUE, q AS c > '');
+
+-- Control: with both sides of USING at the same typmod the merged column is a
+-- plain Var of one side, no PlaceHolderVar is built, and neither shape above
+-- needs any of this.
+SELECT j.c, j.tdate, count(*) OVER w AS cnt
+FROM rpr_phv_out o1
+     LEFT JOIN rpr_phv_out o2 ON o1.k = o2.k
+     LEFT JOIN ( (SELECT n, repeat('z', n)::varchar(10) AS c
+                  FROM rpr_phv_src) s
+                 JOIN rpr_phv_dim USING (c) ) j
+     ON o2.k = j.c
+WINDOW w AS (ORDER BY j.tdate
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (p q+)
+             DEFINE p AS TRUE, q AS c > '');
+
+DROP TABLE rpr_phv_src, rpr_phv_dim, rpr_phv_out;
+
+-- A WINDOW clause no window function names is never executed, but what its
+-- DEFINE reads is marked needed at relation 0 all the same, and an outer join
+-- is not removable while something above still needs the inner side.
+-- remove_unused_subquery_outputs() empties defineClause for a dead window,
+-- but it only runs for a subquery; at the top level nothing does.  The three
+-- plans below isolate it: no WINDOW clause and a plain one both lose the
+-- join, and only the row pattern one keeps it.
+CREATE TABLE rpr_jr (id int, v int);
+CREATE TABLE rpr_jr_u (id int PRIMARY KEY, uval int);
+INSERT INTO rpr_jr SELECT g, g * 10 FROM generate_series(1, 5) g;
+INSERT INTO rpr_jr_u SELECT g, g * 100 FROM generate_series(1, 5) g;
+
+EXPLAIN (COSTS OFF)
+SELECT t.id FROM rpr_jr t LEFT JOIN rpr_jr_u u ON t.id = u.id;
+
+EXPLAIN (COSTS OFF)
+SELECT t.id FROM rpr_jr t LEFT JOIN rpr_jr_u u ON t.id = u.id
+WINDOW w AS (ORDER BY t.id);
+
+EXPLAIN (COSTS OFF)
+SELECT t.id FROM rpr_jr t LEFT JOIN rpr_jr_u u ON t.id = u.id
+WINDOW w AS (ORDER BY t.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS uval > PREV(uval));
+
+DROP TABLE rpr_jr, rpr_jr_u;
+
 -- ============================================================
 -- Complex Expression Tests
 -- ============================================================
@@ -5806,6 +5931,41 @@ DROP TABLE rpr_srf_t;
 DROP FUNCTION rpr_srf_inline(int);
 
 DROP TABLE rpr_planner;
+
+-- A DEFINE clause reading a compound GROUP BY expression.  After grouping
+-- only the expression itself exists, so make_window_input_target() has to
+-- take it whole and stop: asking for the Vars underneath would ask the
+-- grouping step for columns it cannot produce.  "((a + b))" alone on the
+-- Output lines, with no bare a or b anywhere above the HashAggregate, is the
+-- assertion.
+CREATE TABLE rpr_gexp (a int, b int);
+INSERT INTO rpr_gexp VALUES (1, 1), (2, 2), (3, 3), (4, 4);
+
+SELECT a + b AS ab, count(*) OVER w AS c
+FROM rpr_gexp
+GROUP BY a + b
+WINDOW w AS (ORDER BY a + b
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (X+) DEFINE X AS a + b > 2);
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT a + b AS ab, count(*) OVER w AS c
+FROM rpr_gexp
+GROUP BY a + b
+WINDOW w AS (ORDER BY a + b
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (X+) DEFINE X AS a + b > 2);
+
+-- Reaching below the grouping expression is rejected, as it would be in any
+-- other clause evaluated after grouping.
+SELECT a + b AS ab, count(*) OVER w AS c
+FROM rpr_gexp
+GROUP BY a + b
+WINDOW w AS (ORDER BY a + b
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (X+) DEFINE X AS a > 2);
+
+DROP TABLE rpr_gexp;
 
 -- ============================================================
 -- Stress Tests

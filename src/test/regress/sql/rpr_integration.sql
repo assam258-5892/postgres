@@ -34,7 +34,7 @@
 --    B8. RPR + Incremental sort
 --    B9. RPR + Volatile function in DEFINE
 --    B10. RPR + Correlated subquery in WHERE
---    B11. RPR + Junk targetlist pruning
+--    B11. RPR + DEFINE-only column pruning
 --    B12. RPR + Correlated navigation offsets
 --    B13. RPR + DEFINE-only parameter caching
 --    B14. RPR + Multiple window definitions
@@ -390,9 +390,10 @@ SELECT count(*) FROM (
 
 -- The same column has to survive at the top level, where
 -- remove_unused_subquery_outputs() never runs at all: "val" is referenced only
--- by DEFINE, so the parser's resjunk targetlist entry is the only thing
--- carrying it into the WindowAgg's input.  The trailing "val" on the
--- WindowAgg's Output line is the assertion.
+-- by DEFINE, so build_base_rel_tlists() marking it needed is the only thing
+-- carrying it up the join tree, and make_window_input_target() is what asks
+-- for it again.  "val" on the Sort and Seq Scan Output lines, below a
+-- WindowAgg that does not output it, is the assertion.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_integ
@@ -543,6 +544,37 @@ SELECT c FROM (
                DEFINE B AS val > PREV(val))
 ) t;
 
+-- The same shape with the window function one level down, inside an
+-- expression.  The pre-pass that settles which winrefs are still live only
+-- replaces an entry whose top-level node is a WindowFunc, so this one is
+-- still standing when the live set is read and w2 is reported live; the loop
+-- after it replaces the entry all the same and w2 goes inactive anyway.
+-- "val" is therefore kept for a window that never runs, where the bare case
+-- above drops it.  Not a wrong answer -- the direction is over-retention --
+-- but the two cases should agree, and making the live set exact is left to
+-- its own commit.  The difference between this plan and the one above is the
+-- assertion.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT c FROM (
+    SELECT count(*) OVER w1 AS c, (count(*) OVER w2) + 1 AS unread, val
+    FROM rpr_integ
+    WINDOW w1 AS (ORDER BY id),
+           w2 AS (ORDER BY id
+               ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS val > PREV(val))
+) t;
+
+SELECT c FROM (
+    SELECT count(*) OVER w1 AS c, (count(*) OVER w2) + 1 AS unread, val
+    FROM rpr_integ
+    WINDOW w1 AS (ORDER BY id),
+           w2 AS (ORDER BY id
+               ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS val > PREV(val))
+) t;
+
 CREATE TABLE rpr_integ_two (id int, v1 int, v2 int);
 INSERT INTO rpr_integ_two SELECT i, i * 10, i * 100 FROM generate_series(1, 5) i;
 
@@ -593,9 +625,9 @@ SELECT sum(c) FROM (
 
 -- It still reaches a DEFINE clause without being written there: pulling up a
 -- subquery substitutes that subquery's output expressions into defineClause,
--- and one of them can be a whole-row Var (attribute number 0).  The parser's
--- junk targetlist entry carries it into the WindowAgg's input like any other
--- DEFINE column, so the pattern match sees the full row regardless of what
+-- and one of them can be a whole-row Var (attribute number 0).  The window
+-- input target takes it like any other DEFINE column, so the pattern match
+-- sees the full row regardless of what
 -- the subquery projects.  The unused scalar output "val" is therefore free to
 -- be replaced with NULL (nothing reads it), while c is kept because sum(c)
 -- reads it; the match result is unchanged.
@@ -1153,8 +1185,8 @@ ORDER BY o.id, r.id;
 
 -- A lateral outer reference can share varno and varattno with a DEFINE-only
 -- column: here o.b and y are both attribute 2 at their own query levels.
--- Only varlevelsup separates them, so the junk targetlist entry for y has to
--- be added even though a Var with the same varno and varattno is present.
+-- Only varlevelsup separates them, so the window input target has to take y
+-- even though a Var with the same varno and varattno is present.
 CREATE TABLE rpr_lat_o (a int, b int);
 CREATE TABLE rpr_lat_i (x int, y int);
 INSERT INTO rpr_lat_o VALUES (1, 10);
@@ -1328,10 +1360,10 @@ FROM rpr_integ o
 ORDER BY o.id;
 
 -- ============================================================
--- B11. RPR + Junk targetlist pruning
+-- B11. RPR + DEFINE-only column pruning
 -- ============================================================
--- Verify that the junk targetlist entry planted for a DEFINE-only
--- column does not keep an unrelated column alive.  DEFINE references
+-- Verify that carrying a DEFINE-only column to the WindowAgg's input
+-- does not keep an unrelated column alive.  DEFINE references
 -- a (rpr_over1); c (rpr_over2) carries the same attribute number but
 -- is unused, so the plan must drop it.
 CREATE TABLE rpr_over1 (a int);

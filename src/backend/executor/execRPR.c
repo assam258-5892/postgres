@@ -807,8 +807,6 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
 	if (varMatched[varId] == RPR_VAR_UNEVALUATED)
 	{
 		ExprState  *exprState = list_nth(winstate->defineClauseExprs, varId);
-		Datum		result;
-		bool		isnull;
 
 		/*
 		 * Free the previous predicate evaluation's storage.  A DEFINE
@@ -819,10 +817,10 @@ nfa_eval_var_match(WindowAggState *winstate, RPRPatternElement *elem,
 		 */
 		ResetExprContext(winstate->rprContext);
 
-		result = ExecEvalExprSwitchContext(exprState, winstate->rprContext,
-										   &isnull);
-		varMatched[varId] = (!isnull && DatumGetBool(result)) ?
-			RPR_VAR_TRUE : RPR_VAR_FALSE;
+		if (ExecQual(exprState, winstate->rprContext))
+			varMatched[varId] = RPR_VAR_TRUE;
+		else
+			varMatched[varId] = RPR_VAR_FALSE;
 	}
 
 	return (varMatched[varId] == RPR_VAR_TRUE);

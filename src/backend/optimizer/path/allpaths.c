@@ -5070,8 +5070,9 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		 * column in its DEFINE clause, don't remove it.  The DEFINE
 		 * expression needs these columns in the tuplestore slot for pattern
 		 * matching evaluation, even if the outer query doesn't reference
-		 * them.  This is the only protection: nothing downstream re-adds a
-		 * DEFINE column to the WindowAgg's input target.
+		 * them.  make_window_input_target() later asks for whatever the
+		 * DEFINE clause reads, but it can only ask for a column that still
+		 * exists.
 		 */
 		if (IsA(texpr, Var))
 		{

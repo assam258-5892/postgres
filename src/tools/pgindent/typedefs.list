@@ -666,7 +666,6 @@ DefElemAction
 DefaultACLInfo
 DefineMetadataContext
 DefinePhase
-DefinePlantCtx
 DefineStmt
 DefineWalkCtx
 DefnDumperPtr
