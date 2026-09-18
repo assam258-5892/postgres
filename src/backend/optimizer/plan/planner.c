@@ -236,6 +236,7 @@ static void optimize_window_clauses(PlannerInfo *root,
 									WindowFuncLists *wflists);
 static List *select_active_windows(PlannerInfo *root, WindowFuncLists *wflists);
 static void name_active_windows(List *activeWindows);
+static bool add_define_inputs_walker(Node *node, PathTarget *input_target);
 static PathTarget *make_window_input_target(PlannerInfo *root,
 											PathTarget *final_target,
 											List *activeWindows);
@@ -1062,9 +1063,16 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 												EXPRKIND_LIMIT);
 		wc->endOffset = preprocess_expression(root, wc->endOffset,
 											  EXPRKIND_LIMIT);
-		wc->defineClause = (List *) preprocess_expression(root,
-														  (Node *) wc->defineClause,
-														  EXPRKIND_TARGET);
+		foreach_node(TargetEntry, tle, wc->defineClause)
+		{
+			List	   *qual;
+
+			qual = (List *) preprocess_expression(root,
+												  (Node *) tle->expr,
+												  EXPRKIND_QUAL);
+
+			tle->expr = make_ands_explicit(qual);
+		}
 
 		/*
 		 * Reject volatile expressions in an RPR DEFINE clause.  This is done
@@ -6422,6 +6430,64 @@ common_prefix_cmp(const void *a, const void *b)
 }
 
 /*
+ * add_define_inputs_walker
+ *	  Add to a WindowAgg's input target whatever a DEFINE clause reads that
+ *	  the target does not offer yet.
+ *
+ * This is the window's counterpart of the HAVING handling a few functions up:
+ * build_base_rel_tlists() marks the columns needed so they reach the top of
+ * the join tree, and the node's own input target has to ask for them again
+ * because the upper planner projects through explicit targets rather than
+ * propagating attr_needed.  make_group_input_target() does the same for
+ * havingQual.
+ *
+ * The walk stops at any expression the target already computes whole, since
+ * setrefs.c resolves the DEFINE copy of it against that column.  Stopping
+ * matters rather than merely saving work: under GROUP BY the Vars underneath
+ * a grouping expression are not available on their own, so descending into
+ * one would ask the grouping step for a column it cannot produce.  This is
+ * the one rule HAVING does not need, the Agg's input target sitting below
+ * the grouping step rather than above it.
+ */
+static bool
+add_define_inputs_walker(Node *node, PathTarget *input_target)
+{
+	ListCell   *lc;
+
+	if (node == NULL)
+		return false;
+
+	foreach(lc, input_target->exprs)
+	{
+		/*
+		 * XXX this equal() match can miss a DEFINE expression that is
+		 * semantically the same as one already in input_target, producing a
+		 * redundant column below the WindowAgg.  Seen with a join-alias
+		 * expression exposed through a pulled-up subquery: flattening it
+		 * once for the target list and once for this DEFINE clause each
+		 * wraps a fresh, independently-numbered PlaceHolderVar around an
+		 * otherwise identical copy (make_placeholder_expr() never checks for
+		 * an existing equivalent one), and PlaceHolderVar's equal() compares
+		 * that number, not the wrapped expression, so the two never match.
+		 * Wasteful, not known to be incorrect.  Not specific to DEFINE --
+		 * make_group_input_target() can build the same kind of duplicate for
+		 * GROUP BY/HAVING with no RPR involved.
+		 */
+		if (equal(node, lfirst(lc)))
+			return false;
+	}
+
+	if (IsA(node, Var) || IsA(node, PlaceHolderVar))
+	{
+		add_new_column_to_pathtarget(input_target, (Expr *) node);
+		return false;
+	}
+
+	return expression_tree_walker(node, add_define_inputs_walker,
+								  input_target);
+}
+
+/*
  * make_window_input_target
  *	  Generate appropriate PathTarget for initial input to WindowAgg nodes.
  *
@@ -6553,6 +6619,23 @@ make_window_input_target(PlannerInfo *root,
 									   PVC_RECURSE_WINDOWFUNCS |
 									   PVC_INCLUDE_PLACEHOLDERS);
 	add_new_columns_to_pathtarget(input_target, flattenable_vars);
+
+	/*
+	 * A row pattern DEFINE clause is evaluated by the WindowAgg itself, so
+	 * everything it reads has to reach this target too.  Nothing above has a
+	 * reason to put it here: DEFINE is not part of the query's final target
+	 * list, and the window's own PARTITION BY/ORDER BY entries are added
+	 * whole, which does not make the Vars inside them available separately.
+	 * Add what is missing now, once the clause has the shape it will be
+	 * executed with.
+	 */
+	foreach(lc, activeWindows)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			add_define_inputs_walker((Node *) wc->defineClause, input_target);
+	}
 
 	/* clean up cruft */
 	list_free(flattenable_vars);

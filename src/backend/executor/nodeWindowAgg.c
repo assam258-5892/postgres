@@ -43,6 +43,7 @@
 #include "executor/instrument.h"
 #include "executor/nodeWindowAgg.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "optimizer/clauses.h"
@@ -3097,7 +3098,19 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		{
 			ExprState  *exprstate;
 
-			exprstate = ExecInitExpr(te->expr, (PlanState *) winstate);
+			/*
+			 * That index is established in buildRPRPattern() and consumed
+			 * here, with nothing in between checking it.  Every step that
+			 * touches the list preserves its order today, but a reorder would
+			 * evaluate one variable's search condition for another and give a
+			 * wrong answer with nothing to show for it, so check the name the
+			 * pattern holds for this position against the entry's own.
+			 */
+			Assert(foreach_current_index(te) < node->rpPattern->numVars);
+			Assert(strcmp(node->rpPattern->varNames[foreach_current_index(te)],
+						  te->resname) == 0);
+
+			exprstate = ExecInitQual(make_ands_implicit(te->expr), (PlanState *) winstate);
 
 			winstate->defineClauseExprs =
 				lappend(winstate->defineClauseExprs, exprstate);
