@@ -3097,6 +3097,18 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		{
 			ExprState  *exprstate;
 
+			/*
+			 * That index is established in buildRPRPattern() and consumed
+			 * here, with nothing in between checking it.  Every step that
+			 * touches the list preserves its order today, but a reorder would
+			 * evaluate one variable's search condition for another and give a
+			 * wrong answer with nothing to show for it, so check the name the
+			 * pattern holds for this position against the entry's own.
+			 */
+			Assert(foreach_current_index(te) < node->rpPattern->numVars);
+			Assert(strcmp(node->rpPattern->varNames[foreach_current_index(te)],
+						  te->resname) == 0);
+
 			exprstate = ExecInitExpr(te->expr, (PlanState *) winstate);
 
 			winstate->defineClauseExprs =

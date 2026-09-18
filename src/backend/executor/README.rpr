@@ -274,27 +274,17 @@ use.  After that it processes each DEFINE variable as follows:
       Boolean (coerce_to_boolean) right away, so that the steps below see
       the final expression form
   (3) Wraps in a TargetEntry with the variable name set in resname
-  (4) Ensures each bare Var the expression reads is present in the
-      query targetlist, planting any that is missing as a resjunk
-      entry (define_plant_walker), so that setrefs.c can resolve it
-      against the WindowAgg's input.  The walk stops at a subexpression
-      GROUP BY computes and plants nothing for it.
 
-      Two properties of a planted entry are load-bearing.  Each is a bare
-      Var, never a whole subexpression the target list already carries:
-      the DEFINE copy and the target list copy are preprocessed
-      independently, so eval_const_expressions() can dissolve the DEFINE
-      copy of a subexpression and leave a bare Var behind with nothing in
-      the input to resolve it against, whereas a bare Var has no shape to
-      lose.  And each is marked resjunk, which is one of the properties
-      remove_unused_subquery_outputs() keeps a column alive for (XIII-2);
-      make_window_input_target() adds nothing of its own for a DEFINE
-      clause.
+Parse analysis puts nothing in the query targetlist for a DEFINE clause.
+Getting what it reads to the WindowAgg is the planner's job, and it is done
+the way havingQual's is: build_base_rel_tlists() marks the columns needed so
+they reach the top of the join tree, and make_window_input_target() asks for
+them again in the node's own input target (XIII-2).
 
 After all variables are processed:
-  (5) Validates navigation nesting and offsets (define_walker)
+  (4) Validates navigation nesting and offsets (define_walker)
 
-Step (5) is where the shape every later phase assumes gets established.
+Step (4) is where the shape every later phase assumes gets established.
 define_walker() requires the argument of each navigation to contain at least
 one column reference, and requires each offset to be a run-time constant: an
 offset may contain neither a column reference nor another navigation.  The
@@ -2221,10 +2211,10 @@ XIII-2. Keeping a DEFINE-only Column Alive
 A column that nothing reads except a DEFINE expression still has to survive
 subquery pruning.  remove_unused_subquery_outputs() pulls the Vars out of
 every still-live DEFINE clause and refuses to replace a targetlist entry
-that one of them names, matching on varno, varattno and varlevelsup.  That
-guard stands alone: nothing downstream re-adds a DEFINE column to the
-WindowAgg's input target, so a column dropped there is one the pattern match
-can no longer read.
+that one of them names, matching on varno, varattno and varlevelsup.
+make_window_input_target() later asks for whatever the DEFINE clause reads,
+but it can only ask for a column that still exists, so a column dropped here
+is one the pattern match can no longer read.
 
 The order within that function matters.  The window function targetlist
 entries are settled first and the surviving set of active windows is read
@@ -2245,10 +2235,12 @@ matches the DEFINE copy of an expression against the targetlist copy and
 insists the two agree; a mismatch is not a wrong answer at runtime but a
 "variable not found in subplan target list" failure at plan time.
 
-This is also why the parser's Var planting (III-3) stops at a subexpression
-GROUP BY computes.  The grouping step already produces a Var for it, and
-planting underneath would offer the columns below it to the grouping logic,
-which would then reject them as ungrouped.
+This is also why make_window_input_target() stops at a subexpression the
+input target already computes whole.  The grouping step produces only that
+expression, so asking for the Vars underneath it would ask the grouping step
+for columns it cannot produce.  This is the one rule the havingQual handling
+it is modelled on does not need: make_group_input_target() builds the input
+of the grouping step, while the window input target sits above it.
 
 XIII-4. Navigation Arguments and Subquery Pull-up
 
