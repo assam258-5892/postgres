@@ -2221,10 +2221,10 @@ XIII-2. Keeping a DEFINE-only Column Alive
 A column that nothing reads except a DEFINE expression still has to survive
 subquery pruning.  remove_unused_subquery_outputs() pulls the Vars out of
 every still-live DEFINE clause and refuses to replace a targetlist entry
-that one of them names, matching on varno, varattno and varlevelsup.  That
-guard stands alone: nothing downstream re-adds a DEFINE column to the
-WindowAgg's input target, so a column dropped there is one the pattern match
-can no longer read.
+that one of them names, matching on varno, varattno and varlevelsup.
+make_window_input_target() later asks for whatever the DEFINE clause reads,
+but it can only ask for a column that still exists, so a column dropped here
+is one the pattern match can no longer read.
 
 The order within that function matters.  The window function targetlist
 entries are settled first and the surviving set of active windows is read

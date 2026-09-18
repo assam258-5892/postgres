@@ -2963,12 +2963,14 @@ transformWindowDefinitions(ParseState *pstate,
 											 windef->endOffset);
 
 		/* Process Row Pattern Recognition related clauses */
-		transformRPR(pstate, wc, windef, targetlist, groupClause);
+		transformRPR(pstate, wc, windef);
 
 		wc->winref = winref;
 
 		result = lappend(result, wc);
 	}
+
+	addDefineVarsToTargetlist(pstate, result, targetlist, groupClause);
 
 	return result;
 }

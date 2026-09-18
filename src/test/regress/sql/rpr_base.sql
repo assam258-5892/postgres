@@ -3313,8 +3313,52 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS ROW((items).*) IS NOT NULL
 );
+
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
+
+-- A composite value that reaches DEFINE by way of a subquery Var only takes
+-- its ROW(...) shape after pullup -- too late for anything to have planted
+-- its fields, and the ORDER BY copy's sortgroupref keeps it from being
+-- flattened.  make_window_input_target() adds the fields the split leaves
+-- behind.
+CREATE TABLE rpr_ordrow (a int, b int);
+INSERT INTO rpr_ordrow SELECT g, g % 4 FROM generate_series(1, 10) g;
+SELECT count(*) OVER w AS c
+FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
+WINDOW w AS (ORDER BY x
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
+-- Control: without ORDER BY, x is flattened normally and this succeeds too.
+SELECT count(*) OVER w AS c
+FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
+DROP TABLE rpr_ordrow;
+
+-- The same split by way of a pulled-up composite target, both as a plain
+-- subquery and as a view.
+CREATE TABLE rpr_partrow (a int, b int);
+INSERT INTO rpr_partrow VALUES (1, 1), (2, 2), (3, 3);
+SELECT count(*) OVER w
+FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (p q+) DEFINE q AS k IS NOT NULL);
+CREATE TYPE rpr_partrow_t AS (x int, y int);
+CREATE VIEW rpr_partrow_v AS SELECT b, row(a, 1)::rpr_partrow_t AS k FROM rpr_partrow;
+SELECT count(*) OVER w FROM rpr_partrow_v
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (p q+) DEFINE q AS k IS NOT NULL);
+-- Control: PATTERN/DEFINE aside, the same window clause runs fine.
+SELECT count(*) OVER w
+FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING);
+DROP VIEW rpr_partrow_v;
+DROP TYPE rpr_partrow_t;
+DROP TABLE rpr_partrow;
 
 -- ERROR: undefined column in DEFINE
 SELECT COUNT(*) OVER w
