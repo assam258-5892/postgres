@@ -3403,6 +3403,28 @@ fix_upper_expr_mutator(Node *node, fix_upper_expr_context *context)
 		/* XXX can we assert something about phnullingrels? */
 		return fix_upper_expr_mutator((Node *) phv->phexpr, context);
 	}
+	if (IsA(node, RPRNavExpr))
+	{
+		RPRNavExpr *nav = (RPRNavExpr *) node;
+		RPRNavExpr *newnav = makeNode(RPRNavExpr);
+
+		memcpy(newnav, nav, sizeof(RPRNavExpr));
+
+		/*
+		 * The offsets are resolved once per scan, before the outer slot is
+		 * set, so they cannot reference it the way arg does.  Same treatment
+		 * as the WindowAgg frame offsets.
+		 */
+		newnav->arg = (Expr *)
+			fix_upper_expr_mutator((Node *) nav->arg, context);
+		newnav->offset_arg = (Expr *)
+			fix_scan_expr(context->root, (Node *) nav->offset_arg,
+						  context->rtoffset, context->num_exec);
+		newnav->compound_offset_arg = (Expr *)
+			fix_scan_expr(context->root, (Node *) nav->compound_offset_arg,
+						  context->rtoffset, context->num_exec);
+		return (Node *) newnav;
+	}
 	/* Try matching more complex expressions too, if tlist has any */
 	if (context->subplan_itlist->has_non_vars)
 	{
