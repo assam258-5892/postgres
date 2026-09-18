@@ -71,6 +71,7 @@ typedef struct
 	List	   *active_fns;
 	Node	   *case_val;
 	bool		estimate;
+	bool		keep_row_nulltest;	/* don't split ROW(...) IS [NOT] NULL */
 } eval_const_expressions_context;
 
 typedef struct
@@ -2626,6 +2627,29 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
+	context.keep_row_nulltest = false;
+	return eval_const_expressions_mutator(node, &context);
+}
+
+/*
+ * eval_const_expressions_keep_row_nulltest
+ *		As eval_const_expressions(), but keeps a ROW(...) IS [NOT] NULL
+ *		test whole instead of splitting it into one test per field.
+ */
+Node *
+eval_const_expressions_keep_row_nulltest(PlannerInfo *root, Node *node)
+{
+	eval_const_expressions_context context;
+
+	if (root)
+		context.boundParams = root->glob->boundParams;
+	else
+		context.boundParams = NULL;
+	context.root = root;
+	context.active_fns = NIL;
+	context.case_val = NULL;
+	context.estimate = false;
+	context.keep_row_nulltest = true;
 	return eval_const_expressions_mutator(node, &context);
 }
 
@@ -3956,7 +3980,8 @@ eval_const_expressions_mutator(Node *node,
 
 				arg = eval_const_expressions_mutator((Node *) ntest->arg,
 													 context);
-				if (ntest->argisrow && arg && IsA(arg, RowExpr))
+				if (ntest->argisrow && arg && IsA(arg, RowExpr) &&
+					!context->keep_row_nulltest)
 				{
 					/*
 					 * We break ROW(...) IS [NOT] NULL into separate tests on

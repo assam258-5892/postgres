@@ -98,6 +98,7 @@ create_upper_paths_hook_type create_upper_paths_hook = NULL;
 #define EXPRKIND_TABLEFUNC			11
 #define EXPRKIND_TABLEFUNC_LATERAL	12
 #define EXPRKIND_GROUPEXPR			13
+#define EXPRKIND_RPR_DEFINE			14
 
 /*
  * Data specific to grouping sets
@@ -1064,7 +1065,7 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 											  EXPRKIND_LIMIT);
 		wc->defineClause = (List *) preprocess_expression(root,
 														  (Node *) wc->defineClause,
-														  EXPRKIND_TARGET);
+														  EXPRKIND_RPR_DEFINE);
 
 		/*
 		 * Reject volatile expressions in an RPR DEFINE clause.  This is done
@@ -1491,7 +1492,17 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 	 * careful to maintain AND/OR flatness --- that is, do not generate a tree
 	 * with AND directly under AND, nor OR directly under OR.
 	 */
-	if (kind != EXPRKIND_RTFUNC)
+	if (kind == EXPRKIND_RPR_DEFINE)
+	{
+		/*
+		 * Don't split a ROW(...) IS [NOT] NULL in DEFINE into per-field
+		 * tests: the fields it would split into are never planted (see
+		 * transformDefineClause()), and DEFINE gets no benefit from the split
+		 * anyway since it's evaluated per row, not via an index.
+		 */
+		expr = eval_const_expressions_keep_row_nulltest(root, expr);
+	}
+	else if (kind != EXPRKIND_RTFUNC)
 		expr = eval_const_expressions(root, expr);
 
 	/*
@@ -1512,7 +1523,8 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 	 * hashfuncid of any that might execute more quickly by using hash lookups
 	 * instead of a linear search.
 	 */
-	if (kind == EXPRKIND_QUAL || kind == EXPRKIND_TARGET)
+	if (kind == EXPRKIND_QUAL || kind == EXPRKIND_TARGET ||
+		kind == EXPRKIND_RPR_DEFINE)
 	{
 		convert_saop_to_hashed_saop(expr);
 	}
