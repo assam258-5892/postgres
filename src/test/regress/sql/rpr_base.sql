@@ -1611,6 +1611,40 @@ DROP FUNCTION rpr_nav_dflt(int, int);
 DROP FUNCTION rpr_nav_named(int, int);
 DROP TABLE rpr_nav_txt;
 
+-- A navigation offset is resolved once at the top of the scan, before any
+-- input row has been read, so it must not be matched to the window input the
+-- way the navigated argument is.  These two spell the offset the same as a
+-- window ORDER BY key and as a GROUP BY expression, which is what makes the
+-- match available.
+CREATE TABLE rpr_navoff (id int, val int);
+INSERT INTO rpr_navoff VALUES (1, 10), (2, 20), (3, 15), (4, 30), (5, 5);
+
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_navoff
+WINDOW w AS (ORDER BY (extract(hour from localtimestamp)::int * 0 + 1), id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+)
+             DEFINE B AS val > PREV(val, (extract(hour from localtimestamp)::int * 0 + 1)));
+
+-- Control: an offset that matches nothing in the window input.
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_navoff
+WINDOW w AS (ORDER BY (extract(hour from localtimestamp)::int * 0 + 1), id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+)
+             DEFINE B AS val > PREV(val, (extract(hour from localtimestamp)::int * 0 + 2)));
+
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_navoff
+GROUP BY GROUPING SETS ((id, val, ((random() * 0)::bigint + 1)),
+                        (id,      ((random() * 0)::bigint + 1)))
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+)
+             DEFINE B AS val > PREV(val, (random() * 0)::bigint + 1))
+ORDER BY id, val;
+
+DROP TABLE rpr_navoff;
+
 -- PREV function - reference previous row in pattern
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
