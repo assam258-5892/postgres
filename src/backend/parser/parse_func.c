@@ -231,7 +231,7 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	 * ordinary function of one of these names.
 	 */
 	if (!is_column && !proc_call &&
-		pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE &&
+		pstate->p_rpr_define &&
 		list_length(funcname) == 1)
 	{
 		const char *name = strVal(linitial(funcname));
