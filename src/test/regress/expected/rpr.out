@@ -1911,6 +1911,131 @@ WINDOW w AS (
  company2 | 07-03-2023 |   0
 (3 rows)
 
+-- A restriction on a DEFINE condition covers the whole condition, including a
+-- clause nested inside it that carries an expression kind of its own.  FILTER
+-- and an aggregate's ORDER BY are the two such clauses a condition can reach,
+-- and each case below is preceded by the same reference written directly in
+-- the condition, which is the rejection the nested one has to keep.
+CREATE TEMP TABLE rpr_nest_i (i int, v int);
+CREATE TEMP TABLE rpr_nest_o (v int);
+-- an outer query column:
+SELECT o.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
+             WINDOW w AS (
+                 ORDER BY inn.i
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+)
+                 DEFINE A AS o.v > 0)
+             LIMIT 1)
+FROM rpr_nest_o o GROUP BY o.v;
+ERROR:  cannot use outer query column in DEFINE clause
+LINE 6:                  DEFINE A AS o.v > 0)
+                                     ^
+SELECT o.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
+             WINDOW w AS (
+                 ORDER BY inn.i
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+)
+                 DEFINE A AS count(*) FILTER (WHERE o.v > 0) > 0)
+             LIMIT 1)
+FROM rpr_nest_o o GROUP BY o.v;
+ERROR:  cannot use outer query column in DEFINE clause
+LINE 6: ...               DEFINE A AS count(*) FILTER (WHERE o.v > 0) >...
+                                                             ^
+SELECT o.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
+             WINDOW w AS (
+                 ORDER BY inn.i
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+)
+                 DEFINE A AS v > count(1 ORDER BY o.v))
+             LIMIT 1)
+FROM rpr_nest_o o GROUP BY o.v;
+ERROR:  cannot use outer query column in DEFINE clause
+LINE 6:                  DEFINE A AS v > count(1 ORDER BY o.v))
+                                                          ^
+-- a pattern variable qualifier, where an outer alias answers to the same
+-- name, so letting it through would silently read the outer column instead:
+SELECT count(*) OVER w FROM rpr_nest_i A
+WINDOW w AS (
+    ORDER BY A.i
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS A.v > 0
+);
+ERROR:  pattern variable qualified expression "a.v" is not supported in DEFINE clause
+LINE 6:     DEFINE A AS A.v > 0
+                        ^
+SELECT A.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
+             WINDOW w AS (
+                 ORDER BY inn.i
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+)
+                 DEFINE A AS percentile_disc(0.5)
+                             WITHIN GROUP (ORDER BY A.v) > 0)
+             LIMIT 1)
+FROM rpr_nest_i A GROUP BY A.v;
+ERROR:  pattern variable qualified expression "a.v" is not supported in DEFINE clause
+LINE 7: ...                            WITHIN GROUP (ORDER BY A.v) > 0)
+                                                              ^
+-- a whole-row reference, which a row constructor would expand by RTE:
+SELECT (SELECT count(*) OVER w FROM rpr_nest_i inn
+        WINDOW w AS (
+            ORDER BY inn.i
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+            PATTERN (A+)
+            DEFINE A AS ROW(o.*)::text IS NOT NULL)
+        LIMIT 1)
+FROM rpr_nest_o o;
+ERROR:  whole-row reference is not allowed in DEFINE clause
+LINE 6:             DEFINE A AS ROW(o.*)::text IS NOT NULL)
+                                    ^
+HINT:  A DEFINE condition may reference individual columns only.
+SELECT (SELECT count(*) OVER w FROM rpr_nest_i inn
+        WINDOW w AS (
+            ORDER BY inn.i
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+            PATTERN (A+)
+            DEFINE A AS percentile_disc(0.5)
+                        WITHIN GROUP (ORDER BY ROW(o.*)::text) IS NOT NULL)
+        LIMIT 1)
+FROM rpr_nest_o o GROUP BY o.v;
+ERROR:  whole-row reference is not allowed in DEFINE clause
+LINE 7: ...                       WITHIN GROUP (ORDER BY ROW(o.*)::text...
+                                                             ^
+HINT:  A DEFINE condition may reference individual columns only.
+-- a subquery:
+SELECT count(*) OVER w FROM rpr_nest_i inn
+WINDOW w AS (
+    ORDER BY inn.i
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS v > (SELECT 1)
+);
+ERROR:  cannot use subquery in DEFINE expression
+LINE 6:     DEFINE A AS v > (SELECT 1)
+                            ^
+SELECT count(*) OVER w FROM rpr_nest_i inn
+WINDOW w AS (
+    ORDER BY inn.i
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS count(*) FILTER (WHERE (SELECT 1) = 1) > 0
+);
+ERROR:  cannot use subquery in DEFINE expression
+LINE 6:     DEFINE A AS count(*) FILTER (WHERE (SELECT 1) = 1) > 0
+                                               ^
+-- The nesting itself is not what is rejected: with nothing forbidden inside
+-- it, the aggregate carrying the FILTER is what the condition trips over.
+SELECT count(*) OVER w FROM rpr_nest_i inn
+WINDOW w AS (
+    ORDER BY inn.i
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS count(*) FILTER (WHERE v > 0) > 0
+);
+ERROR:  aggregate functions are not allowed in DEFINE
+LINE 6:     DEFINE A AS count(*) FILTER (WHERE v > 0) > 0
+                        ^
+DROP TABLE rpr_nest_i, rpr_nest_o;
 --
 -- 2-arg PREV/NEXT: functional tests
 --

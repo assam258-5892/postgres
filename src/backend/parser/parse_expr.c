@@ -642,7 +642,7 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	 * traversal.
 	 *----------
 	 */
-	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE &&
+	if (pstate->p_rpr_define &&
 		list_length(cref->fields) != 1)
 	{
 		char	   *qualifier = strVal(linitial(cref->fields));
@@ -723,11 +723,11 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 					if (nsitem)
 					{
 						/*
-						 * A lone name that resolves as a range variable is
-						 * a whole-row reference without the star, which the
+						 * A lone name that resolves as a range variable is a
+						 * whole-row reference without the star, which the
 						 * rule above has no A_Star to match on.
 						 */
-						if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
+						if (pstate->p_rpr_define)
 							ereport(ERROR,
 									errcode(ERRCODE_SYNTAX_ERROR),
 									errmsg("whole-row reference is not allowed in DEFINE clause"),
@@ -941,7 +941,7 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				 * relation only moves the reference to the range variable
 				 * rejection below.
 				 */
-				if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
+				if (pstate->p_rpr_define)
 					ereport(ERROR,
 							errcode(ERRCODE_SYNTAX_ERROR),
 							errmsg("qualified expression \"%s\" is not allowed in DEFINE clause",
@@ -980,7 +980,7 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	 * implementation does not, ERRCODE_SYNTAX_ERROR for every other rejected
 	 * spelling, whether the standard forbids it or never gave it at all.
 	 */
-	if (pstate->p_expr_kind == EXPR_KIND_RPR_DEFINE)
+	if (pstate->p_rpr_define)
 	{
 		ParseNamespaceItem *qual_nsitem = NULL;
 		int			qual_levels_up = 0;
@@ -1961,9 +1961,13 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 	 * Check to see if the sublink is in an invalid place within the query. We
 	 * allow sublinks everywhere in SELECT/INSERT/UPDATE/DELETE/MERGE, but
 	 * generally not in utility statements.
+	 *
+	 * A row pattern DEFINE condition rejects a sublink wherever in the
+	 * condition it stands, so its scope is asked about ahead of p_expr_kind,
+	 * which by here may name a clause nested in the condition instead.
 	 */
 	err = NULL;
-	switch (pstate->p_expr_kind)
+	switch (pstate->p_rpr_define ? EXPR_KIND_RPR_DEFINE : pstate->p_expr_kind)
 	{
 		case EXPR_KIND_NONE:
 			Assert(false);		/* can't happen */

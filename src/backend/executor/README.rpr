@@ -23,6 +23,7 @@
       - src/include/parser/parse_rpr.h             (parser entry points)
       - src/backend/parser/parse_func.c            (navigation name binding)
       - src/backend/parser/parse_expr.c            (DEFINE column restrictions)
+      - src/backend/parser/parse_target.c          (DEFINE star expansion)
       - src/backend/parser/parse_cte.c             (WITH RECURSIVE rejection)
       - src/backend/parser/parse_agg.c             (grouping participation)
 
@@ -299,17 +300,36 @@ PREV/NEXT, 0 for FIRST/LAST, and 1 for a compound outer offset.
 Variables that are used in PATTERN but not defined in DEFINE are implicitly
 evaluated as TRUE (matching all rows).
 
+The restrictions the sections below put a DEFINE condition under are keyed on
+p_rpr_define, a parse state flag transformDefineClause() holds up for the
+whole of step (2), rather than on p_expr_kind.  p_expr_kind names the
+innermost clause, and a condition can reach two clauses that set a kind of
+their own: an aggregate's FILTER, and its ORDER BY, which is also what WITHIN
+GROUP writes.  Keyed on the kind, every rule below would stop applying inside
+those, and what they hid would be resolved and kept.  A sub-select gets a
+parse state of its own and does not inherit the flag, which is right: the
+restrictions end at the query boundary.
+
+Three rules are left keyed on the kind -- the ones that reject an aggregate,
+a window function and a set-returning function -- because a DEFINE condition
+reaches those clauses only underneath an aggregate, and an aggregate in a
+DEFINE condition is rejected at its own node.  That holds as long as the
+aggregate belongs to this query level, and the two ways its level can be
+lifted out of the clause, an outer column reference and a sublink, are both
+rejected on the way down.  Relaxing either of those puts this back in play.
+
 III-4. Column References in a DEFINE Condition
 
 A name written in a DEFINE condition must be unqualified: ISO/IEC 19075-5
 6.5 reserves the qualifier slot for a row pattern variable, so nothing else
-may occupy it.  transformColumnRef() (parse_expr.c) enforces this under
-EXPR_KIND_RPR_DEFINE, rejecting a reference that resolves to an outer
-query's column, a two-part name qualified by a FROM-clause range variable,
-and every other qualified name -- including one that p_post_columnref_hook
-resolves, such as a SQL function's parameter or a PL/pgSQL variable spelled
-with its routine name or block label.  Unqualified, those remain readable;
-it is the spelling that is refused, not the value.
+may occupy it.  transformColumnRef() (parse_expr.c) enforces this wherever in
+a DEFINE condition the name stands, rejecting a reference that resolves to
+an outer query's column, a two-part name qualified by a FROM-clause range
+variable, and every other qualified name -- including one that
+p_post_columnref_hook resolves, such as a SQL function's parameter or a
+PL/pgSQL variable spelled with its routine name or block label.
+Unqualified, those remain readable; it is the spelling that is refused, not
+the value.
 
 A pattern variable qualifier such as A.price is the one case decided before
 name resolution, by matching the qualifier against the PATTERN variable
@@ -345,9 +365,11 @@ a clause of one statement is not the place to carve an exception out of a
 function-wide pragma.
 
 A whole-row reference is rejected the same way, and expression list
-expansion (parse_target.c) deliberately does not expand "something.*" under
-EXPR_KIND_RPR_DEFINE: expanding binds by RTE rather than by name, so
-ROW(t.*) would slip past both checks instead of reaching them.
+expansion (parse_target.c) deliberately does not expand "something.*" in a
+DEFINE condition: expanding binds by RTE rather than by name, so ROW(t.*)
+would slip past both checks instead of reaching them.  That one reads the
+DEFINE scope off the parse state rather than off the exprKind it is handed,
+since a clause nested in the condition hands it a kind of its own.
 
 Parentheses turn a qualified name into field selection on a value, and that
 form stays available: "(x).f" and ROW((x).*) reach a composite parameter or
@@ -361,8 +383,8 @@ III-5. Navigation Name Resolution
 Inside a DEFINE clause the names PREV, NEXT, FIRST and LAST denote row
 pattern navigation rather than functions.  ParseFuncOrColumn()
 (parse_func.c) recognizes them before any catalog lookup, and only for an
-unqualified call written in function syntax while the expression kind is
-EXPR_KIND_RPR_DEFINE; column syntax and CALL are excluded.  Once the name
+unqualified call written in function syntax somewhere in a DEFINE
+condition; column syntax and CALL are excluded.  Once the name
 matches there is no fallback to function resolution, so an ordinary function
 of one of these names is reachable only through a schema-qualified call.
 That is also why the deparser has to force-qualify such a function name
