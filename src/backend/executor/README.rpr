@@ -364,12 +364,24 @@ too, which is why the default is to raise an ambiguity error instead -- and
 a clause of one statement is not the place to carve an exception out of a
 function-wide pragma.
 
-A whole-row reference is rejected the same way, and expression list
-expansion (parse_target.c) deliberately does not expand "something.*" in a
-DEFINE condition: expanding binds by RTE rather than by name, so ROW(t.*)
-would slip past both checks instead of reaching them.  That one reads the
-DEFINE scope off the parse state rather than off the exprKind it is handed,
-since a clause nested in the condition hands it a kind of its own.
+A whole-row reference is rejected the same way, and ExpandColumnRefStar()
+(parse_target.c) deliberately declines to expand "something.*" in a DEFINE
+condition: expanding binds by RTE rather than by name, so ROW(t.*) would
+slip past both checks instead of reaching them.  It declines by reporting
+that it did not expand, and the caller then hands the whole reference to
+transformExpr(), which is where the rejection comes from; NIL would not
+say that, being also what expanding a relation with no columns returns.
+
+Where it declines is after both ref hooks have had their shot, and that is
+the point of deciding there.  A name a hook owns is not a reference to a
+FROM-clause relation and keeps the expansion it has everywhere else.
+Withholding it would not reject such a name -- none of the rules above has
+anything to say about one the query parser never resolves -- it would leave
+transformColumnRef() to read "rec.*" as the single whole value "rec", which
+is a different condition rather than a refused one, and differs silently
+wherever a row constructor is not counting its entries.  The DEFINE scope
+is read off the parse state, not off any exprKind, since a clause nested in
+the condition carries a kind of its own.
 
 Parentheses turn a qualified name into field selection on a value, and that
 form stays available: "(x).f" and ROW((x).*) reach a composite parameter or

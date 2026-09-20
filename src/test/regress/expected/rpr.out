@@ -1602,6 +1602,132 @@ SELECT rpr_conflictfn();
 (1 row)
 
 DROP FUNCTION rpr_conflictfn();
+-- A star on a name a ref hook owns is not a reference to a FROM-clause
+-- relation, so it expands in a DEFINE condition as it does anywhere else.
+-- Withholding the expansion would not reject such a name; it would read
+-- "rec.*" as the single whole value "rec", which is a different condition,
+-- and one that differs silently wherever a row constructor is not counting
+-- its entries.  Each function below matches every row when the record holds
+-- (1,2) and none when it does not, so a reading that is off returns the
+-- wrong count rather than an error.
+CREATE TYPE rpr_pair AS (a int, b int);
+CREATE TEMP TABLE rpr_rec (id int);
+INSERT INTO rpr_rec VALUES (1), (2), (3);
+-- under the default resolution the post hook answers the name:
+CREATE FUNCTION rpr_recstar(x int, y int) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+    rec rpr_pair;
+    n bigint;
+BEGIN
+    rec := ROW(x, y);
+    SELECT count(*) OVER w INTO n FROM rpr_rec
+    WINDOW w AS (
+        ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS ROW(rec.*)::text = '(1,2)')
+    LIMIT 1;
+    RETURN n;
+END
+$$;
+SELECT rpr_recstar(1, 2);
+ rpr_recstar 
+-------------
+           3
+(1 row)
+
+SELECT rpr_recstar(1, 3);
+ rpr_recstar 
+-------------
+           0
+(1 row)
+
+DROP FUNCTION rpr_recstar(int, int);
+-- under use_variable the pre hook answers it instead:
+CREATE FUNCTION rpr_recstar_var(x int, y int) RETURNS bigint
+LANGUAGE plpgsql AS $$
+#variable_conflict use_variable
+DECLARE
+    rec rpr_pair;
+    n bigint;
+BEGIN
+    rec := ROW(x, y);
+    SELECT count(*) OVER w INTO n FROM rpr_rec
+    WINDOW w AS (
+        ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS ROW(rec.*)::text = '(1,2)')
+    LIMIT 1;
+    RETURN n;
+END
+$$;
+SELECT rpr_recstar_var(1, 2);
+ rpr_recstar_var 
+-----------------
+               3
+(1 row)
+
+SELECT rpr_recstar_var(1, 3);
+ rpr_recstar_var 
+-----------------
+               0
+(1 row)
+
+DROP FUNCTION rpr_recstar_var(int, int);
+-- the same spelling outside a DEFINE condition, which is what the two above
+-- have to agree with:
+CREATE FUNCTION rpr_recstar_plain(x int, y int) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+    rec rpr_pair;
+BEGIN
+    rec := ROW(x, y);
+    RETURN (SELECT ROW(rec.*)::text FROM rpr_rec LIMIT 1);
+END
+$$;
+SELECT rpr_recstar_plain(1, 2);
+ rpr_recstar_plain 
+-------------------
+ (1,2)
+(1 row)
+
+DROP FUNCTION rpr_recstar_plain(int, int);
+-- A FROM-clause relation is not such a name, inside such a function or out.
+CREATE FUNCTION rpr_relstar() RETURNS bigint
+LANGUAGE plpgsql AS $$
+#variable_conflict use_variable
+DECLARE
+    rec rpr_pair := ROW(1, 2);
+    n bigint;
+BEGIN
+    SELECT count(*) OVER w INTO n FROM rpr_rec
+    WINDOW w AS (
+        ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS ROW(rpr_rec.*)::text IS NOT NULL)
+    LIMIT 1;
+    RETURN n;
+END
+$$;
+SELECT rpr_relstar();
+ERROR:  whole-row reference is not allowed in DEFINE clause
+LINE 6:         DEFINE A AS ROW(rpr_rec.*)::text IS NOT NULL)
+                                ^
+HINT:  A DEFINE condition may reference individual columns only.
+QUERY:  SELECT count(*) OVER w        FROM rpr_rec
+    WINDOW w AS (
+        ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS ROW(rpr_rec.*)::text IS NOT NULL)
+    LIMIT 1
+CONTEXT:  PL/pgSQL function rpr_relstar() line 7 at SQL statement
+DROP FUNCTION rpr_relstar();
+DROP TABLE rpr_rec;
+DROP TYPE rpr_pair;
 -- An outer range variable used as a function-call qualifier reaches DEFINE as
 -- a FuncExpr rather than a Var, so the level the qualifier resolved at, not
 -- the shape of the resulting node, is what identifies the outer reference.
