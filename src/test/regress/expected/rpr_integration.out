@@ -2259,6 +2259,101 @@ SELECT cnt FROM (
 (15 rows)
 
 DROP TABLE rpr_over1, rpr_over2;
+-- A DEFINE clause can hold a Var, or a PlaceHolderVar, of an outer query
+-- level by the time this pruning runs, although none may be written in one:
+-- inlining a SQL function substitutes the call's actual arguments into the
+-- body and raises the level of what it plants there, and subquery pull-up may
+-- wrap that in a PlaceHolderVar.  Reading the clause has to pass those by.
+-- Each query below prunes an output, and is followed by the same query
+-- reading that output, which prunes nothing and so never meets them.
+CREATE TABLE rpr_up (p int, x int);
+INSERT INTO rpr_up SELECT g, 100 + g FROM generate_series(1, 6) g;
+CREATE TABLE rpr_drv (k int);
+INSERT INTO rpr_drv VALUES (2), (4);
+-- an outer Var, in a clause that does not read the pruned column:
+CREATE FUNCTION rpr_up_f(th int) RETURNS TABLE (cnt bigint, x int)
+LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w, x FROM rpr_up
+  WINDOW w AS (ORDER BY p ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS p > th)
+$$;
+SELECT d.k, max(g.cnt) FROM rpr_drv d, LATERAL rpr_up_f(d.k) g
+GROUP BY d.k ORDER BY 1;
+ k | max 
+---+-----
+ 2 |   4
+ 4 |   2
+(2 rows)
+
+SELECT d.k, max(g.cnt), max(g.x) FROM rpr_drv d, LATERAL rpr_up_f(d.k) g
+GROUP BY d.k ORDER BY 1;
+ k | max | max 
+---+-----+-----
+ 2 |   4 | 106
+ 4 |   2 | 106
+(2 rows)
+
+-- the same, in a clause that does read it: the column has to be held for the
+-- window even though nothing above the subquery reads it.
+CREATE FUNCTION rpr_up_h(th int) RETURNS TABLE (cnt bigint, x int)
+LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w, x FROM rpr_up
+  WINDOW w AS (ORDER BY p ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS x > th + 100)
+$$;
+SELECT d.k, max(g.cnt) FROM rpr_drv d, LATERAL rpr_up_h(d.k) g
+GROUP BY d.k ORDER BY 1;
+ k | max 
+---+-----
+ 2 |   4
+ 4 |   2
+(2 rows)
+
+SELECT d.k, max(g.cnt), max(g.x) FROM rpr_drv d, LATERAL rpr_up_h(d.k) g
+GROUP BY d.k ORDER BY 1;
+ k | max | max 
+---+-----+-----
+ 2 |   4 | 106
+ 4 |   2 | 106
+(2 rows)
+
+-- and with a constant argument, where no outer reference arises at all:
+SELECT max(cnt) FROM rpr_up_h(2);
+ max 
+-----
+   4
+(1 row)
+
+SELECT max(cnt) FROM rpr_up_h(4);
+ max 
+-----
+   2
+(1 row)
+
+-- an outer PlaceHolderVar, which pulling up the subquery that supplies the
+-- argument puts there in place of the Var:
+CREATE FUNCTION rpr_up_n(int) RETURNS TABLE (cnt bigint, x int)
+LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w, x FROM rpr_up
+  WINDOW w AS (ORDER BY p ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               INITIAL PATTERN (A+) DEFINE A AS PREV(p + $1) > 0)
+$$;
+SELECT s.k, max(g.cnt) FROM (SELECT 3 AS k FROM rpr_drv) s,
+     LATERAL rpr_up_n(s.k) g GROUP BY s.k;
+ k | max 
+---+-----
+ 3 |   5
+(1 row)
+
+SELECT s.k, max(g.cnt), max(g.x) FROM (SELECT 3 AS k FROM rpr_drv) s,
+     LATERAL rpr_up_n(s.k) g GROUP BY s.k;
+ k | max | max 
+---+-----+-----
+ 3 |   5 | 106
+(1 row)
+
+DROP FUNCTION rpr_up_f(int), rpr_up_h(int), rpr_up_n(int);
+DROP TABLE rpr_up, rpr_drv;
 -- ============================================================
 -- B12. RPR + Correlated navigation offsets
 -- ============================================================

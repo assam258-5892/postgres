@@ -4890,6 +4890,40 @@ define_live_winrefs_walker(Node *node, Bitmapset **winrefs)
 }
 
 /*
+ * define_reads_var_walker
+ *		Does this DEFINE clause read the subquery output column "target"?
+ *
+ * pull_var_clause() cannot serve here.  It refuses a Var, and a
+ * PlaceHolderVar, belonging to an outer query level, and a DEFINE clause can
+ * hold either by the time this runs.  The parser rejects an outer reference
+ * written in a DEFINE condition, but that is not the only way one arrives:
+ * inlining a SQL function substitutes the call's actual arguments into the
+ * body and raises the level of the Vars it plants there, and subquery pull-up
+ * may wrap what it substitutes in a PlaceHolderVar.  Neither can be the
+ * column asked about, which belongs to this level, but both have to be walked
+ * past rather than tripped over.
+ *
+ * varno and varattno alone do not settle it: varattno can collide with an
+ * unrelated column of another relation, and a Var of an outer level can carry
+ * the same pair as one of ours.  All three have to agree.
+ */
+static bool
+define_reads_var_walker(Node *node, Var *target)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
+
+		return (var->varno == target->varno &&
+				var->varattno == target->varattno &&
+				var->varlevelsup == target->varlevelsup);
+	}
+	return expression_tree_walker(node, define_reads_var_walker, target);
+}
+
+/*
  * remove_unused_subquery_outputs
  *		Remove subquery targetlist items we don't need
  *
@@ -4995,10 +5029,10 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		 * and not off the targetlist as a whole: an entry that loop replaces
 		 * with a null Const carries no reference to its window clause once it
 		 * has.  Asking subquery_output_is_unneeded() per entry is what makes
-		 * this exact.  Testing the entry's top-level node instead would miss a
-		 * window function nested in a larger expression and report its clause
-		 * live, leaving the clause's DEFINE columns held for a window that
-		 * then goes inactive anyway.
+		 * this exact.  Testing the entry's top-level node instead would miss
+		 * a window function nested in a larger expression and report its
+		 * clause live, leaving the clause's DEFINE columns held for a window
+		 * that then goes inactive anyway.
 		 */
 		foreach(lc, subquery->targetList)
 		{
@@ -5084,34 +5118,11 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 				 * DEFINE clause at this point; the loop above emptied the
 				 * others.
 				 */
-				if (wc->defineClause != NIL)
+				if (wc->defineClause != NIL &&
+					define_reads_var_walker((Node *) wc->defineClause, var))
 				{
-					/*
-					 * flags == 0 is safe: DEFINE rejects aggregates, window
-					 * functions and subqueries at parse time, and this runs
-					 * before any PlaceHolderVar could be planted.
-					 */
-					List	   *vars = pull_var_clause((Node *) wc->defineClause, 0);
-
-					foreach_node(Var, dvar, vars)
-					{
-						/*
-						 * Match varno too: varattno alone can collide with an
-						 * unrelated column of another relation. varlevelsup
-						 * is paranoia, since DEFINE rejects outer references
-						 * at parse time.
-						 */
-						if (dvar->varno == var->varno &&
-							dvar->varattno == var->varattno &&
-							dvar->varlevelsup == var->varlevelsup)
-						{
-							needed_by_define = true;
-							break;
-						}
-					}
-					list_free(vars);
-					if (needed_by_define)
-						break;
+					needed_by_define = true;
+					break;
 				}
 			}
 			if (needed_by_define)
