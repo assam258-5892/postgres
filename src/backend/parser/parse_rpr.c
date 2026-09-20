@@ -256,6 +256,15 @@ transformDefineClause(ParseState *pstate, WindowDef *windef)
 	pstate->p_rpr_pattern_vars = patternVarNames;
 
 	/*
+	 * Open the DEFINE scope.  The restrictions a DEFINE condition is under
+	 * hold for the whole condition, so they are keyed on this rather than on
+	 * p_expr_kind, which names only the innermost clause and is replaced by
+	 * anything nested in the condition that has a kind of its own.  It is
+	 * closed below, once every DEFINE expression has been transformed.
+	 */
+	pstate->p_rpr_define = true;
+
+	/*
 	 * Reject any DEFINE variable whose name does not appear in PATTERN.  This
 	 * cross-check only needs to run once, so it lives here in the caller
 	 * rather than in the recursive validateRPRPatternVarCount().
@@ -325,6 +334,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef)
 		/* build transformed DEFINE clause (list of TargetEntry) */
 		defineClause = lappend(defineClause, teDefine);
 	}
+	pstate->p_rpr_define = false;
 	pstate->p_rpr_pattern_vars = NIL;
 
 	/*

@@ -243,9 +243,14 @@ transformExpressionList(ParseState *pstate, List *exprlist,
 			 * transformWholeRowRef().  Fall through instead and let
 			 * transformExpr() reach them, so that ROW(t.*) is rejected the
 			 * same way (t.*) already is.
+			 *
+			 * The DEFINE scope is read from the ParseState, not from
+			 * exprKind: a construct nested in the condition, such as an
+			 * aggregate's ORDER BY, passes a kind of its own down to here
+			 * while still being part of the DEFINE condition.
 			 */
 			if (IsA(llast(cref->fields), A_Star) &&
-				exprKind != EXPR_KIND_RPR_DEFINE)
+				!pstate->p_rpr_define)
 			{
 				result = list_concat(result,
 									 ExpandColumnRefStar(pstate, cref,
