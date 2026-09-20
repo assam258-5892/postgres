@@ -4991,24 +4991,22 @@ remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel,
 		Bitmapset  *live_winrefs = NULL;
 
 		/*
-		 * A window function entry the upper query does not read is replaced
-		 * with a null Const, exactly as the loop below would replace it.  Its
-		 * window clause keeps whatever references survive that.
+		 * Read the live set off the entries that will survive the loop below,
+		 * and not off the targetlist as a whole: an entry that loop replaces
+		 * with a null Const carries no reference to its window clause once it
+		 * has.  Asking subquery_output_is_unneeded() per entry is what makes
+		 * this exact.  Testing the entry's top-level node instead would miss a
+		 * window function nested in a larger expression and report its clause
+		 * live, leaving the clause's DEFINE columns held for a window that
+		 * then goes inactive anyway.
 		 */
 		foreach(lc, subquery->targetList)
 		{
 			TargetEntry *tle = (TargetEntry *) lfirst(lc);
-			Node	   *texpr = (Node *) tle->expr;
 
-			if (IsA(texpr, WindowFunc) &&
-				subquery_output_is_unneeded(subquery, tle, attrs_used))
-				tle->expr = (Expr *) makeNullConst(exprType(texpr),
-												   exprTypmod(texpr),
-												   exprCollation(texpr));
+			if (!subquery_output_is_unneeded(subquery, tle, attrs_used))
+				define_live_winrefs_walker((Node *) tle->expr, &live_winrefs);
 		}
-
-		define_live_winrefs_walker((Node *) subquery->targetList,
-								   &live_winrefs);
 
 		/*
 		 * Withdraw the DEFINE clause of every window clause no window

@@ -545,15 +545,11 @@ SELECT c FROM (
 ) t;
 
 -- The same shape with the window function one level down, inside an
--- expression.  The pre-pass that settles which winrefs are still live only
--- replaces an entry whose top-level node is a WindowFunc, so this one is
--- still standing when the live set is read and w2 is reported live; the loop
--- after it replaces the entry all the same and w2 goes inactive anyway.
--- "val" is therefore kept for a window that never runs, where the bare case
--- above drops it.  Not a wrong answer -- the direction is over-retention --
--- but the two cases should agree, and making the live set exact is left to
--- its own commit.  The difference between this plan and the one above is the
--- assertion.
+-- expression.  The live set is read off the entries that survive, so a
+-- window function nested in one of them is seen and one in an entry about to
+-- be replaced is not; reading it from the entries' top-level nodes instead
+-- would report w2 live here and hold "val" for a window that goes inactive
+-- anyway.  This plan matching the one above is the assertion.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT c FROM (
     SELECT count(*) OVER w1 AS c, (count(*) OVER w2) + 1 AS unread, val
