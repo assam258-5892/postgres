@@ -5183,13 +5183,11 @@ WINDOW w AS (ORDER BY j.tdate
 
 DROP TABLE rpr_phv_src, rpr_phv_dim, rpr_phv_out;
 
--- A WINDOW clause no window function names is never executed, but what its
--- DEFINE reads is marked needed at relation 0 all the same, and an outer join
--- is not removable while something above still needs the inner side.
--- remove_unused_subquery_outputs() empties defineClause for a dead window,
--- but it only runs for a subquery; at the top level nothing does.  The three
--- plans below isolate it: no WINDOW clause and a plain one both lose the
--- join, and only the row pattern one keeps it.
+-- A WINDOW clause no window function names is never executed, so its DEFINE
+-- clause is emptied before build_base_rel_tlists() could mark what it reads
+-- as needed at relation 0, which would keep the outer join from being
+-- removed.  The three plans below are the assertion: no WINDOW clause, a
+-- plain one and a row pattern one all lose the join alike.
 CREATE TABLE rpr_jr (id int, v int);
 CREATE TABLE rpr_jr_u (id int PRIMARY KEY, uval int);
 INSERT INTO rpr_jr SELECT g, g * 10 FROM generate_series(1, 5) g;
