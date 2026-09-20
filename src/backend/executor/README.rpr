@@ -2243,12 +2243,29 @@ duplicate of a plain window.
 XIII-2. Keeping a DEFINE-only Column Alive
 
 A column that nothing reads except a DEFINE expression still has to survive
-subquery pruning.  remove_unused_subquery_outputs() pulls the Vars out of
-every still-live DEFINE clause and refuses to replace a targetlist entry
-that one of them names, matching on varno, varattno and varlevelsup.
+subquery pruning.  remove_unused_subquery_outputs() reads the Vars of every
+still-live DEFINE clause and refuses to replace a targetlist entry that one
+of them names, matching on varno, varattno and varlevelsup.
 make_window_input_target() later asks for whatever the DEFINE clause reads,
 but it can only ask for a column that still exists, so a column dropped here
 is one the pattern match can no longer read.
+
+Reading them is what define_reads_var_walker() is for, in place of
+pull_var_clause().  A DEFINE clause may hold a Var, or a PlaceHolderVar, of
+an outer query level by the time this runs, and pull_var_clause() treats
+either as a can't-happen and throws.  The parser does reject an outer
+reference written in a DEFINE condition, but that is not the only way one
+arrives: inlining a SQL function substitutes the call's actual arguments
+into the body and raises the level of the Vars it plants there, and pulling
+up the subquery that supplies such an argument may wrap it in a
+PlaceHolderVar.  Neither can name a column of this level, which is why
+varlevelsup is part of the match and not merely a cross-check, but both have
+to be walked past rather than tripped over.
+
+What those substituted expressions mean is settled outside the pattern
+match: each is fixed for the outer row the function is called for, so it
+reads the same on every row of the partition, and the pattern match is not
+the thing that has to be taught about them.
 
 The order within that function matters.  The window function targetlist
 entries are settled first and the surviving set of active windows is read
