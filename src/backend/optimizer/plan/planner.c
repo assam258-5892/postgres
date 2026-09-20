@@ -1900,6 +1900,28 @@ grouping_planner(PlannerInfo *root, double tuple_fraction,
 		}
 
 		/*
+		 * Empty the DEFINE clause of every window clause that will not be
+		 * executed.  Whoever settles that a window clause is not executed is
+		 * responsible for this: build_base_rel_tlists() marks what a DEFINE
+		 * clause reads as needed at relation 0, and a column needed by
+		 * nothing that runs keeps an outer join from being removed.  Only
+		 * defineClause is cleared, for the reasons remove_unused_subquery_
+		 * outputs() sets out; that function does the same for a window in a
+		 * subquery, and this is the counterpart for one at this level, where
+		 * it never runs.
+		 *
+		 * This covers a window clause no window function names, and equally a
+		 * query whose window functions were all folded away above, where
+		 * activeWindows stays empty.
+		 */
+		foreach_node(WindowClause, wc, parse->windowClause)
+		{
+			if (wc->defineClause != NIL &&
+				!list_member_ptr(activeWindows, wc))
+				wc->defineClause = NIL;
+		}
+
+		/*
 		 * Preprocess MIN/MAX aggregates, if any.  Note: be careful about
 		 * adding logic between here and the query_planner() call.  Anything
 		 * that is needed in MIN/MAX-optimizable cases will have to be
