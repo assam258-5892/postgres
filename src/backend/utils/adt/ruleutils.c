@@ -408,6 +408,12 @@ static bool tablefunc_fixes_colname(Node *jtnode, deparse_namespace *dpns,
 									int varno, const char *colname, bool hidden);
 static void reserve_colname(deparse_namespace *dpns, char *colname);
 static List *function_rte_late_colnames(RangeTblEntry *rte);
+static void collapse_define_join_vars(Query *query);
+static Node *collapse_define_join_vars_mutator(Node *node, List *rtable);
+static Var *find_merged_join_var(Node *node, List *rtable,
+								 bool ignore_nullingrels);
+static Node *strip_nullingrels(Node *node);
+static Node *strip_nullingrels_mutator(Node *node, void *context);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -4061,6 +4067,138 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 }
 
 /*
+ * collapse_define_join_vars: put an expanded merged join column back together
+ *
+ * Expanding the GROUP Vars of a DEFINE clause above leaves it holding whatever
+ * the grouping expression was written over, and over a column merged by USING
+ * that is the expression the parser built for the merge -- a COALESCE of the
+ * two inputs, where the join is a FULL one.  Printing that is wrong twice.  A
+ * DEFINE clause carries no qualifiers, so both arms come out spelled the same,
+ * COALESCE(id, id), and which column each came from is gone from the text; and
+ * re-parsing what is printed nests one merged column inside another, so even
+ * the shape no longer matches what the grouping step offers.
+ *
+ * The join RTE still holds the expression it built, so an expanded one can be
+ * recognised there and folded back into a Var naming the merged column itself.
+ * That is what the user wrote, and it re-parses.
+ */
+static void
+collapse_define_join_vars(Query *query)
+{
+	ListCell   *lc;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			wc->defineClause = (List *)
+				collapse_define_join_vars_mutator((Node *) wc->defineClause,
+												  query->rtable);
+	}
+}
+
+static Node *
+collapse_define_join_vars_mutator(Node *node, List *rtable)
+{
+	if (node == NULL)
+		return NULL;
+
+	/*
+	 * A Var already names one column, so there is nothing to put back
+	 * together; only an expanded expression is a candidate.
+	 */
+	if (!IsA(node, Var))
+	{
+		Var		   *merged = find_merged_join_var(node, rtable, false);
+
+		/*
+		 * Failing that, look again without the nulling bitmapsets.  An outer
+		 * join above the one that merged the column marks the copy the
+		 * grouping expression carries and not the copy the join RTE keeps,
+		 * and neither mark reaches the printed text.  The exact match is
+		 * tried first, so that a query merging the same columns twice still
+		 * names the merge its expression actually came from.
+		 */
+		if (merged == NULL)
+			merged = find_merged_join_var(node, rtable, true);
+
+		if (merged != NULL)
+			return (Node *) merged;
+	}
+
+	return expression_tree_mutator(node, collapse_define_join_vars_mutator,
+								   rtable);
+}
+
+/*
+ * find_merged_join_var: the column some JOIN USING of this query merged by
+ * evaluating this expression, or NULL if no join did
+ */
+static Var *
+find_merged_join_var(Node *node, List *rtable, bool ignore_nullingrels)
+{
+	ListCell   *lc;
+	int			rtindex = 0;
+
+	if (ignore_nullingrels)
+		node = strip_nullingrels(node);
+
+	foreach(lc, rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+		ListCell   *lc2;
+		AttrNumber	attno = 0;
+
+		rtindex++;
+		if (rte->rtekind != RTE_JOIN)
+			continue;
+
+		foreach(lc2, rte->joinaliasvars)
+		{
+			Node	   *aliasvar = (Node *) lfirst(lc2);
+
+			/* Only a merged column has an expression of its own */
+			if (++attno > rte->joinmergedcols)
+				break;
+
+			if (ignore_nullingrels)
+				aliasvar = strip_nullingrels(aliasvar);
+
+			if (equal(node, aliasvar))
+				return makeVar(rtindex, attno, exprType(node),
+							   exprTypmod(node), exprCollation(node), 0);
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * strip_nullingrels: a copy of the expression with the nulling marks cleared
+ */
+static Node *
+strip_nullingrels(Node *node)
+{
+	return strip_nullingrels_mutator(node, NULL);
+}
+
+static Node *
+strip_nullingrels_mutator(Node *node, void *context)
+{
+	if (node == NULL)
+		return NULL;
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) copyObject(node);
+
+		var->varnullingrels = NULL;
+		return (Node *) var;
+	}
+	return expression_tree_mutator(node, strip_nullingrels_mutator, context);
+}
+
+/*
  * set_deparse_for_query: set up deparse_namespace for deparsing a Query tree
  *
  * For convenience, this is defined to initialize the deparse_namespace struct
@@ -6304,6 +6442,8 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 				wc->defineClause = (List *)
 					flatten_group_exprs(NULL, query, (Node *) wc->defineClause);
 		}
+
+		collapse_define_join_vars(query);
 	}
 
 	/*
