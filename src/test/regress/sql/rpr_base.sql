@@ -3001,6 +3001,68 @@ DROP FUNCTION rpr_res_fct();
 DROP TYPE rpr_res_ct;
 DROP TABLE rpr_res_sys;
 
+-- A TABLEFUNC RTE writes its column names into the clause that produces them,
+-- so there is nowhere to print a rename of one and none is made.  That makes
+-- such a name taken for good, and a DEFINE clause whose column comes to answer
+-- to the same name is the side that has to move: the clause is printed from
+-- the column's alias, so it follows the column and goes on naming it alone.
+CREATE TABLE rpr_res_tf (id INT, s INT);
+INSERT INTO rpr_res_tf VALUES (1, 1), (2, 2);
+
+CREATE VIEW rpr_res_tf_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_tf,
+     JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jx
+WINDOW w AS (ORDER BY rpr_res_tf.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS s > 0);
+
+-- the collision arrives only now
+ALTER TABLE rpr_res_tf RENAME COLUMN s TO c1;
+
+SELECT pg_get_viewdef('rpr_res_tf_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tf_rt AS '
+       || pg_get_viewdef('rpr_res_tf_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tf_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tf_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_tf_v;
+SELECT * FROM rpr_res_tf_rt;
+
+DROP VIEW rpr_res_tf_rt, rpr_res_tf_v;
+DROP TABLE rpr_res_tf;
+
+-- An aliased join answers for its inputs and hides them, so a column of a
+-- TABLEFUNC underneath one is out of reach of an unqualified reference and
+-- takes no name away from anybody.  The DEFINE clause keeps its own spelling
+-- here, and the TABLEFUNC column keeps the one its clause gives it -- which it
+-- can only do because a column of such an RTE is never renamed.
+CREATE TABLE rpr_res_hid (id INT, v INT);
+CREATE TABLE rpr_res_hu (m INT);
+INSERT INTO rpr_res_hid VALUES (1, 1), (2, 2), (3, 3);
+INSERT INTO rpr_res_hu VALUES (9);
+
+CREATE VIEW rpr_res_hid_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_hid,
+     (JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (x int PATH '$')) AS jt
+      JOIN rpr_res_hu ON jt.x > 0) j
+WINDOW w AS (ORDER BY rpr_res_hid.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x > 0);
+
+SELECT pg_get_viewdef('rpr_res_hid_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_hid_rt AS '
+       || pg_get_viewdef('rpr_res_hid_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_hid_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_hid_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_hid_v;
+SELECT * FROM rpr_res_hid_rt;
+
+DROP VIEW rpr_res_hid_rt, rpr_res_hid_v;
+DROP TABLE rpr_res_hid, rpr_res_hu;
+
 -- The same query written fresh is rejected, since nothing pins the name for
 -- it.  Pinning is what lets the stored definition above still reparse.
 SELECT j1.id, count(*) OVER w AS cnt

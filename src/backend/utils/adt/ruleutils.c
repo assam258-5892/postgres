@@ -403,7 +403,9 @@ static char *define_colname(deparse_namespace *dpns, Var *var, int *p_varno,
 static void reserve_define_colname(define_names_context *context, Var *var);
 static bool define_colname_is_merged(Node *jtnode, int varno,
 									 const char *colname, bool merged);
-static void pin_define_colname(deparse_namespace *dpns, Var *var);
+static void pin_define_colname(define_names_context *context, Var *var);
+static bool tablefunc_fixes_colname(Node *jtnode, deparse_namespace *dpns,
+									int varno, const char *colname, bool hidden);
 static void reserve_colname(deparse_namespace *dpns, char *colname);
 static List *function_rte_late_colnames(RangeTblEntry *rte);
 static void set_relation_column_names(deparse_namespace *dpns,
@@ -4534,7 +4536,7 @@ set_define_names_walker(Node *node, define_names_context *context)
 	if (IsA(node, Var))
 	{
 		if (context->pin)
-			pin_define_colname(context->dpns, (Var *) node);
+			pin_define_colname(context, (Var *) node);
 		else
 			reserve_define_colname(context, (Var *) node);
 		return false;
@@ -4747,8 +4749,9 @@ define_colname_is_merged(Node *jtnode, int varno, const char *colname,
  * pin_define_colname: settle the printed name of one DEFINE-referenced column
  */
 static void
-pin_define_colname(deparse_namespace *dpns, Var *var)
+pin_define_colname(define_names_context *context, Var *var)
 {
+	deparse_namespace *dpns = context->dpns;
 	deparse_columns *colinfo;
 	int			varno;
 	AttrNumber	attno;
@@ -4760,6 +4763,20 @@ pin_define_colname(deparse_namespace *dpns, Var *var)
 
 	/* A system column has no colnames entry to store; just hold the name */
 	if (attno < 0)
+	{
+		reserve_colname(dpns, colname);
+		return;
+	}
+
+	/*
+	 * Where a column that cannot be renamed answers to this name already,
+	 * this is the column that has to give way instead.  Hold the name for the
+	 * other one and leave this one to be renamed like any intruder would be:
+	 * a DEFINE reference is printed from colinfo, so the clause follows the
+	 * column to whatever it ends up called, and goes on naming it alone.
+	 */
+	if (tablefunc_fixes_colname(context->jointree, dpns, varno, colname,
+								false))
 	{
 		reserve_colname(dpns, colname);
 		return;
@@ -4798,6 +4815,75 @@ pin_define_colname(deparse_namespace *dpns, Var *var)
 	colinfo->colnames[attno - 1] = colname;
 
 	reserve_colname(dpns, colname);
+}
+
+/*
+ * tablefunc_fixes_colname: does a column no rename can reach answer to this
+ * name?
+ *
+ * A TABLEFUNC RTE writes its column names into the clause that produces them,
+ * so there is nowhere to print a rename of one and set_relation_column_names()
+ * leaves them alone.  A name one of them carries is therefore taken for good,
+ * and whatever else would print the same name has to move instead.
+ *
+ * Only a TABLEFUNC that the query can name without a qualifier counts, which
+ * is why this walks the jointree rather than the range table: an aliased join
+ * answers for its inputs and hides them, so a column of one is out of reach of
+ * an unqualified reference and collides with nothing.  "hidden" reports
+ * whether such a join has been entered already.  varno is the RTE the DEFINE
+ * reference resolves to, and is not itself an answer.
+ */
+static bool
+tablefunc_fixes_colname(Node *jtnode, deparse_namespace *dpns, int varno,
+						const char *colname, bool hidden)
+{
+	if (jtnode == NULL)
+		return false;
+	if (IsA(jtnode, RangeTblRef))
+	{
+		int			rtindex = ((RangeTblRef *) jtnode)->rtindex;
+		RangeTblEntry *rte;
+		ListCell   *lc;
+
+		if (hidden || rtindex == varno)
+			return false;
+		rte = rt_fetch(rtindex, dpns->rtable);
+		if (rte->rtekind != RTE_TABLEFUNC)
+			return false;
+
+		foreach(lc, rte->eref->colnames)
+		{
+			if (strcmp(strVal(lfirst(lc)), colname) == 0)
+				return true;
+		}
+		return false;
+	}
+	else if (IsA(jtnode, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) jtnode;
+		ListCell   *lc;
+
+		foreach(lc, f->fromlist)
+		{
+			if (tablefunc_fixes_colname((Node *) lfirst(lc), dpns, varno,
+										colname, hidden))
+				return true;
+		}
+		return false;
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
+
+		if (j->alias != NULL)
+			hidden = true;
+		return tablefunc_fixes_colname(j->larg, dpns, varno, colname,
+									   hidden) ||
+			tablefunc_fixes_colname(j->rarg, dpns, varno, colname, hidden);
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d", (int) nodeTag(jtnode));
+	return false;				/* keep compiler quiet */
 }
 
 /*
