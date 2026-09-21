@@ -971,6 +971,102 @@ select pg_get_viewdef('view_of_joins_2d', true);
       JOIN tbl1a USING (a) AS x) y;
 (1 row)
 
+-- An RTE with nowhere to carry a column alias list has to keep the column
+-- names it has.  A renamed one would reach the output only where it is
+-- referenced -- here the ON clause -- and not where the clause that produces
+-- it names it, so the view would no longer reparse.  The anonymous FULL JOIN
+-- is what forces USING names to be unique query-wide, which is what would
+-- otherwise push the JSON_TABLE column aside.
+create table tblnr (m int);
+create table tblnu (x int, m int);
+create table tblnl (x int);
+create table tblnm (x int);
+create view view_of_unrenamable as
+select j.m
+from (tblnl full join tblnm using (x)),
+     (json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+      join tblnr on jt.x > 0) j;
+select pg_get_viewdef('view_of_unrenamable', true);
+                      pg_get_viewdef                      
+----------------------------------------------------------
+  SELECT j.m                                             +
+    FROM tblnl                                           +
+      FULL JOIN tblnm USING (x),                         +
+     (JSON_TABLE(                                        +
+             '[1, 2]'::jsonb, '$[*]' AS json_table_path_0+
+             COLUMNS (                                   +
+                 x integer PATH '$'                      +
+             )                                           +
+         ) jt                                            +
+      JOIN tblnr ON jt.x > 0) j(x_1, m);
+(1 row)
+
+-- and that text is what has to reparse
+select 'create view view_of_unrenamable_2 as '
+       || pg_get_viewdef('view_of_unrenamable', true) \gexec
+create view view_of_unrenamable_2 as  SELECT j.m
+   FROM tblnl
+     FULL JOIN tblnm USING (x),
+    (JSON_TABLE(
+            '[1, 2]'::jsonb, '$[*]' AS json_table_path_0
+            COLUMNS (
+                x integer PATH '$'
+            )
+        ) jt
+     JOIN tblnr ON jt.x > 0) j(x_1, m);
+select pg_get_viewdef('view_of_unrenamable', true)
+     = pg_get_viewdef('view_of_unrenamable_2', true) as round_trips;
+ round_trips 
+-------------
+ t
+(1 row)
+
+-- The name of a merged column is the other place a rename lands, and it lands
+-- on both sides at once: whatever is picked, each input has to answer to it.
+-- So an input that cannot be renamed settles the name for the whole merge, and
+-- neither an output alias nor a uniqueness adjustment can be honored.
+create view view_of_unrenamable_using as
+select j.m
+from (tblnl full join tblnm using (x)),
+     (json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+      join tblnu using (x)) j;
+select pg_get_viewdef('view_of_unrenamable_using', true);
+                      pg_get_viewdef                      
+----------------------------------------------------------
+  SELECT j.m                                             +
+    FROM tblnl                                           +
+      FULL JOIN tblnm USING (x),                         +
+     (JSON_TABLE(                                        +
+             '[1, 2]'::jsonb, '$[*]' AS json_table_path_0+
+             COLUMNS (                                   +
+                 x integer PATH '$'                      +
+             )                                           +
+         ) jt                                            +
+      JOIN tblnu USING (x)) j;
+(1 row)
+
+select 'create view view_of_unrenamable_using_2 as '
+       || pg_get_viewdef('view_of_unrenamable_using', true) \gexec
+create view view_of_unrenamable_using_2 as  SELECT j.m
+   FROM tblnl
+     FULL JOIN tblnm USING (x),
+    (JSON_TABLE(
+            '[1, 2]'::jsonb, '$[*]' AS json_table_path_0
+            COLUMNS (
+                x integer PATH '$'
+            )
+        ) jt
+     JOIN tblnu USING (x)) j;
+select pg_get_viewdef('view_of_unrenamable_using', true)
+     = pg_get_viewdef('view_of_unrenamable_using_2', true) as round_trips;
+ round_trips 
+-------------
+ t
+(1 row)
+
+drop view view_of_unrenamable_using_2, view_of_unrenamable_using;
+drop view view_of_unrenamable_2, view_of_unrenamable;
+drop table tblnr, tblnu, tblnl, tblnm;
 -- Test view decompilation in the face of column addition/deletion/renaming
 create table tt2 (a int, b int, c int);
 create table tt3 (ax int8, b int2, c numeric);

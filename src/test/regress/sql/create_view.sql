@@ -409,6 +409,52 @@ select pg_get_viewdef('view_of_joins_2b', true);
 select pg_get_viewdef('view_of_joins_2c', true);
 select pg_get_viewdef('view_of_joins_2d', true);
 
+-- An RTE with nowhere to carry a column alias list has to keep the column
+-- names it has.  A renamed one would reach the output only where it is
+-- referenced -- here the ON clause -- and not where the clause that produces
+-- it names it, so the view would no longer reparse.  The anonymous FULL JOIN
+-- is what forces USING names to be unique query-wide, which is what would
+-- otherwise push the JSON_TABLE column aside.
+create table tblnr (m int);
+create table tblnu (x int, m int);
+create table tblnl (x int);
+create table tblnm (x int);
+
+create view view_of_unrenamable as
+select j.m
+from (tblnl full join tblnm using (x)),
+     (json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+      join tblnr on jt.x > 0) j;
+
+select pg_get_viewdef('view_of_unrenamable', true);
+
+-- and that text is what has to reparse
+select 'create view view_of_unrenamable_2 as '
+       || pg_get_viewdef('view_of_unrenamable', true) \gexec
+select pg_get_viewdef('view_of_unrenamable', true)
+     = pg_get_viewdef('view_of_unrenamable_2', true) as round_trips;
+
+-- The name of a merged column is the other place a rename lands, and it lands
+-- on both sides at once: whatever is picked, each input has to answer to it.
+-- So an input that cannot be renamed settles the name for the whole merge, and
+-- neither an output alias nor a uniqueness adjustment can be honored.
+create view view_of_unrenamable_using as
+select j.m
+from (tblnl full join tblnm using (x)),
+     (json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+      join tblnu using (x)) j;
+
+select pg_get_viewdef('view_of_unrenamable_using', true);
+
+select 'create view view_of_unrenamable_using_2 as '
+       || pg_get_viewdef('view_of_unrenamable_using', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_using', true)
+     = pg_get_viewdef('view_of_unrenamable_using_2', true) as round_trips;
+
+drop view view_of_unrenamable_using_2, view_of_unrenamable_using;
+drop view view_of_unrenamable_2, view_of_unrenamable;
+drop table tblnr, tblnu, tblnl, tblnm;
+
 -- Test view decompilation in the face of column addition/deletion/renaming
 
 create table tt2 (a int, b int, c int);

@@ -382,6 +382,8 @@ static void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
+static bool colname_is_fixed(deparse_namespace *dpns, int varno,
+							 AttrNumber attno);
 static void set_define_names(deparse_namespace *dpns, Query *query);
 static bool set_define_names_walker(Node *node, deparse_namespace *dpns);
 static void pin_define_colname(deparse_namespace *dpns, Var *var);
@@ -4341,11 +4343,29 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 					colname = colinfo->colnames[i];
 				else
 				{
-					/* Prefer user-written output alias if any */
-					if (rte->alias && i < list_length(rte->alias->colnames))
-						colname = strVal(list_nth(rte->alias->colnames, i));
-					/* Make it appropriately unique */
-					colname = make_colname_unique(colname, dpns, colinfo);
+					bool		fixed;
+
+					/*
+					 * A merged column has to be named the same on both sides,
+					 * so an input whose columns cannot be renamed settles the
+					 * name for all of it.  Neither the output alias nor a
+					 * uniqueness adjustment can be honored then: either would
+					 * name a column that the input does not have, and the
+					 * USING clause would not reparse.
+					 */
+					fixed = (colname_is_fixed(dpns, colinfo->leftrti,
+											  leftattnos[i]) ||
+							 colname_is_fixed(dpns, colinfo->rightrti,
+											  rightattnos[i]));
+
+					if (!fixed)
+					{
+						/* Prefer user-written output alias if any */
+						if (rte->alias && i < list_length(rte->alias->colnames))
+							colname = strVal(list_nth(rte->alias->colnames, i));
+						/* Make it appropriately unique */
+						colname = make_colname_unique(colname, dpns, colinfo);
+					}
 					if (dpns->unique_using)
 						dpns->using_names = lappend(dpns->using_names,
 													colname);
@@ -4386,6 +4406,46 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 	else
 		elog(ERROR, "unrecognized node type: %d",
 			 (int) nodeTag(jtnode));
+}
+
+/*
+ * colname_is_fixed: is this column one that no rename can reach?
+ *
+ * A TABLEFUNC RTE writes its column names into the clause that produces them
+ * and carries no column alias list, so a renamed column of one would reach the
+ * output only where it is referenced.  A join answers for whatever its inputs
+ * put in the column, so it is followed down to them.
+ */
+static bool
+colname_is_fixed(deparse_namespace *dpns, int varno, AttrNumber attno)
+{
+	RangeTblEntry *rte;
+
+	if (varno < 1 || varno > list_length(dpns->rtable) || attno <= 0)
+		return false;
+
+	rte = rt_fetch(varno, dpns->rtable);
+
+	if (rte->rtekind == RTE_TABLEFUNC)
+		return true;
+
+	if (rte->rtekind == RTE_JOIN &&
+		attno <= list_length(rte->joinaliasvars))
+	{
+		Node	   *aliasvar = (Node *) list_nth(rte->joinaliasvars, attno - 1);
+		List	   *vars = pull_var_clause(aliasvar, 0);
+		ListCell   *lc;
+
+		foreach(lc, vars)
+		{
+			Var		   *var = (Var *) lfirst(lc);
+
+			if (colname_is_fixed(dpns, var->varno, var->varattno))
+				return true;
+		}
+	}
+
+	return false;
 }
 
 /*
@@ -4677,8 +4737,16 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			else
 				colname = real_colname;
 
-			/* Unique-ify and insert into colinfo */
-			colname = make_colname_unique(colname, dpns, colinfo);
+			/*
+			 * Unique-ify and insert into colinfo, unless this RTE has nowhere
+			 * to carry a column alias list: a renamed column would then reach
+			 * the output only where it is referenced, naming a column that no
+			 * longer exists.  A TABLEFUNC RTE is such a one -- its column
+			 * names are written into the clause that produces them, which is
+			 * why printaliases is forced off for it below.
+			 */
+			if (rte->rtekind != RTE_TABLEFUNC)
+				colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
 			add_to_names_hash(colinfo, colname);
