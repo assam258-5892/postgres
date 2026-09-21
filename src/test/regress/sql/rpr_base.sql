@@ -2926,6 +2926,81 @@ DROP VIEW rpr_res_nat_rt, rpr_res_nat_v;
 DROP VIEW rpr_res_alias_rt, rpr_res_alias_v;
 DROP TABLE rpr_res_ja, rpr_res_jb, rpr_res_m1, rpr_res_m2, rpr_res_ordj;
 
+-- A column a function's result type grows after the view is made is one the
+-- deparser does not see at all: expandRTE() stops at the column count the
+-- query was parsed with.  A column it cannot see is one it cannot rename out
+-- of the way, and the name it collides with here is the one a DEFINE clause
+-- has to resolve to as printed.  So the grown columns are looked up and named
+-- too -- as far as a renamed one reaches, and no further.
+CREATE TABLE rpr_res_fn (id INT, val INT);
+INSERT INTO rpr_res_fn VALUES (1, 1), (2, 2), (3, 3);
+CREATE TABLE rpr_res_cfg (a INT);
+INSERT INTO rpr_res_cfg VALUES (1);
+CREATE FUNCTION rpr_res_fcfg() RETURNS SETOF rpr_res_cfg LANGUAGE sql
+  AS $$ SELECT * FROM rpr_res_cfg $$;
+
+CREATE VIEW rpr_res_fn_v AS
+SELECT rpr_res_fn.id, count(*) OVER w AS cnt
+FROM rpr_res_fn, rpr_res_fcfg() f
+WINDOW w AS (ORDER BY rpr_res_fn.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS val > 0);
+
+-- nothing to keep off yet
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
+
+ALTER TABLE rpr_res_cfg ADD COLUMN val INT;
+
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_fn_rt AS '
+       || pg_get_viewdef('rpr_res_fn_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_fn_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_fn_v;
+SELECT * FROM rpr_res_fn_rt;
+
+-- a grown column that collides with nothing stays off the list
+ALTER TABLE rpr_res_cfg ADD COLUMN spare INT;
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
+
+DROP VIEW rpr_res_fn_rt, rpr_res_fn_v;
+DROP FUNCTION rpr_res_fcfg();
+DROP TABLE rpr_res_fn, rpr_res_cfg;
+
+-- A system column is named from the catalog, not from the deparser's own
+-- choice, so there is no alias to pick for it and nothing to exempt from
+-- renaming.  Its name still has to be held against the rest of the query, or
+-- a column that turns up later answers to it as well.
+CREATE TABLE rpr_res_sys (id INT, v INT);
+INSERT INTO rpr_res_sys VALUES (1, 1), (2, 2);
+CREATE TYPE rpr_res_ct AS (a INT);
+CREATE FUNCTION rpr_res_fct() RETURNS SETOF rpr_res_ct LANGUAGE sql
+  AS $$ SELECT ROW(1)::rpr_res_ct $$;
+
+CREATE VIEW rpr_res_sys_v AS
+SELECT rpr_res_sys.id, count(*) OVER w AS cnt
+FROM rpr_res_sys, rpr_res_fct() f
+WINDOW w AS (ORDER BY rpr_res_sys.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS ctid IS NOT NULL);
+
+ALTER TYPE rpr_res_ct ADD ATTRIBUTE ctid INT;
+
+SELECT pg_get_viewdef('rpr_res_sys_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_sys_rt AS '
+       || pg_get_viewdef('rpr_res_sys_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_sys_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_sys_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_sys_v;
+SELECT * FROM rpr_res_sys_rt;
+
+DROP VIEW rpr_res_sys_rt, rpr_res_sys_v;
+DROP FUNCTION rpr_res_fct();
+DROP TYPE rpr_res_ct;
+DROP TABLE rpr_res_sys;
+
 -- The same query written fresh is rejected, since nothing pins the name for
 -- it.  Pinning is what lets the stored definition above still reparse.
 SELECT j1.id, count(*) OVER w AS cnt

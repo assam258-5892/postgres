@@ -405,6 +405,7 @@ static bool define_colname_is_merged(Node *jtnode, int varno,
 									 const char *colname, bool merged);
 static void pin_define_colname(deparse_namespace *dpns, Var *var);
 static void reserve_colname(deparse_namespace *dpns, char *colname);
+static List *function_rte_late_colnames(RangeTblEntry *rte);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -4579,14 +4580,33 @@ define_colname(deparse_namespace *dpns, Var *var, int *p_varno,
 		attno = var->varattno;
 	}
 
-	/* Only ordinary columns of this query level have a name to settle */
-	if (var->varlevelsup != 0 || attno <= 0)
+	/* An outer-level reference is no column of ours to settle */
+	if (var->varlevelsup != 0)
 		return NULL;
 	if (varno < 1 || varno > list_length(dpns->rtable))
+		return NULL;
+	/* A whole-row reference is rejected in a DEFINE clause, but be safe */
+	if (attno == InvalidAttrNumber)
 		return NULL;
 
 	rte = rt_fetch(varno, dpns->rtable);
 	colinfo = deparse_columns_fetch(varno, dpns);
+
+	/*
+	 * A system column's name is fixed: get_variable() reads it from the
+	 * catalog rather than from colinfo, so there is no alias to choose and
+	 * nothing about the column itself to protect.  The name still has to be
+	 * held against the rest of the query, so it is returned like any other
+	 * and the caller tells the two apart by the sign of *p_attno.
+	 */
+	if (attno < 0)
+	{
+		if (rte->rtekind != RTE_RELATION)
+			return NULL;
+		*p_varno = varno;
+		*p_attno = attno;
+		return get_rte_attribute_name(rte, attno);
+	}
 
 	/*
 	 * Find the name this column is going to be printed with.  If a name was
@@ -4738,6 +4758,13 @@ pin_define_colname(deparse_namespace *dpns, Var *var)
 	if (colname == NULL)
 		return;
 
+	/* A system column has no colnames entry to store; just hold the name */
+	if (attno < 0)
+	{
+		reserve_colname(dpns, colname);
+		return;
+	}
+
 	/*
 	 * Store the name into the owning RTE's colnames entry, which is what
 	 * exempts this column from being renamed for some other name's sake.
@@ -4790,6 +4817,60 @@ reserve_colname(deparse_namespace *dpns, char *colname)
 }
 
 /*
+ * function_rte_late_colnames: the names of the columns a function RTE's result
+ * type has grown since the query was parsed
+ *
+ * expandRTE() stops at the column count recorded at parse time, so a column
+ * the type has gained since then is not in the list the deparser works from --
+ * and a column the deparser cannot see is one it cannot rename out of the way
+ * of a name that has to resolve exactly as printed.  A DEFINE clause is what
+ * has such a name; everything else the deparser prints carries a qualifier.
+ *
+ * Returns NIL unless there is one function and no WITH ORDINALITY, those being
+ * the cases where the grown columns land at the end of the RTE.  Anywhere else
+ * they land in the middle, shifting the attnos this query was parsed with.
+ */
+static List *
+function_rte_late_colnames(RangeTblEntry *rte)
+{
+	RangeTblFunction *rtfunc;
+	TypeFuncClass functypclass;
+	Oid			funcrettype;
+	TupleDesc	tupdesc;
+	List	   *result = NIL;
+	int			i;
+
+	if (rte->funcordinality || list_length(rte->functions) != 1)
+		return NIL;
+
+	rtfunc = (RangeTblFunction *) linitial(rte->functions);
+
+	/* A coldeflist fixes the column set, and pins the return type at RECORD */
+	if (rtfunc->funccolnames != NIL)
+		return NIL;
+
+	functypclass = get_expr_result_type(rtfunc->funcexpr, &funcrettype,
+										&tupdesc);
+	if (functypclass != TYPEFUNC_COMPOSITE &&
+		functypclass != TYPEFUNC_COMPOSITE_DOMAIN)
+		return NIL;
+
+	for (i = rtfunc->funccolcount; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+		/* Spell a dropped column the way expandRTE() does */
+		if (attr->attisdropped)
+			result = lappend(result, makeString(pstrdup("")));
+		else
+			result = lappend(result,
+							 makeString(pstrdup(NameStr(attr->attname))));
+	}
+
+	return result;
+}
+
+/*
  * set_relation_column_names: select column aliases for a non-join RTE
  *
  * Column alias info is saved in *colinfo, which is assumed to be pre-zeroed.
@@ -4804,6 +4885,9 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	char	  **real_colnames;
 	bool		changed_any;
 	int			noldcolumns;
+	int			nparsecols = -1;
+	int			nbasenew = -1;
+	int			lastlate = -1;
 	int			i;
 	int			j;
 
@@ -4861,6 +4945,19 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			/* Since we're not creating Vars, rtindex etc. don't matter */
 			expandRTE(rte, 1, 0, VAR_RETURNING_DEFAULT, -1,
 					  true /* include dropped */ , &colnames, NULL);
+
+			/*
+			 * Take the columns the result type has grown since parse time as
+			 * well, but only where there is a name to keep them off of.  The
+			 * loop below leaves them off the printed alias list again unless
+			 * one of them turns out to need renaming.
+			 */
+			if (dpns->using_names != NIL)
+			{
+				nparsecols = list_length(colnames);
+				colnames = list_concat(colnames,
+									   function_rte_late_colnames(rte));
+			}
 		}
 		else
 			colnames = rte->eref->colnames;
@@ -4895,6 +4992,10 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	expand_colnames_array_to(colinfo, ncolumns);
 	Assert(colinfo->num_cols == ncolumns);
 
+	/* Without grown columns, every column is one the query was parsed with */
+	if (nparsecols < 0)
+		nparsecols = ncolumns;
+
 	/*
 	 * Make sufficiently large new_colnames and is_new_col arrays, too.
 	 *
@@ -4922,6 +5023,10 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	{
 		char	   *real_colname = real_colnames[i];
 		char	   *colname = colinfo->colnames[i];
+
+		/* Remember where the columns the query was parsed with leave off */
+		if (i == nparsecols)
+			nbasenew = j;
 
 		/* Skip dropped columns */
 		if (real_colname == NULL)
@@ -4963,6 +5068,10 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 		/* Remember if any assigned aliases differ from "real" name */
 		if (!changed_any && strcmp(colname, real_colname) != 0)
 			changed_any = true;
+
+		/* And how far into the grown columns a renamed one reaches */
+		if (i >= nparsecols && strcmp(colname, real_colname) != 0)
+			lastlate = j - 1;
 	}
 
 	/* We're now done needing the colinfo's names_hash */
@@ -4975,6 +5084,15 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	 * they won't affect varattnos of pre-existing columns.)
 	 */
 	colinfo->num_new_cols = j;
+
+	/*
+	 * Print the grown columns only as far as a renamed one reaches.  The
+	 * alias list is positional, so a renamed column has to be counted up to;
+	 * the ones past it were never on the list before and are better left off
+	 * it.
+	 */
+	if (nparsecols < ncolumns)
+		colinfo->num_new_cols = (lastlate >= 0) ? lastlate + 1 : nbasenew;
 
 	/*
 	 * For a relation RTE, we need only print the alias column names if any
