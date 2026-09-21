@@ -3729,6 +3729,7 @@ datetkn
 dce_uuid_t
 dclist_head
 decimal
+define_names_context
 deparse_columns
 deparse_context
 deparse_expr_cxt
