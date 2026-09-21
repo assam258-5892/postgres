@@ -3139,6 +3139,74 @@ DROP VIEW rpr_cds_null_rt, rpr_cds_null_v;
 DROP VIEW rpr_cds_rt, rpr_cds_v;
 DROP TABLE rpr_cds_l, rpr_cds_r, rpr_cds_o;
 
+-- A rule deparses with varprefix on no matter what its action query looks
+-- like, the range table always holding *OLD* and *NEW*, so a DEFINE clause in
+-- one would be printed with qualifiers that the parser rejects outright.
+-- get_rule_define() turns the prefix off for the clause, and without that a
+-- rule holding a row pattern query could not be restored at all -- not even a
+-- single-table one, which is what makes this its own case and not the view's.
+CREATE TABLE rpr_rule_t (id INT, val INT);
+CREATE TABLE rpr_rule_log (id INT, cnt BIGINT);
+
+CREATE RULE rpr_rule_r AS ON INSERT TO rpr_rule_t DO ALSO
+  INSERT INTO rpr_rule_log
+    SELECT id, count(*) OVER w FROM rpr_rule_t
+    WINDOW w AS (ORDER BY id
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+)
+                 DEFINE A AS val > 0);
+
+SELECT pg_get_ruledef(oid, true) FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
+
+-- and that text is what has to reparse
+CREATE TABLE rpr_rule_saved AS
+  SELECT pg_get_ruledef(oid, true) AS def
+    FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
+DROP RULE rpr_rule_r ON rpr_rule_t;
+SELECT def FROM rpr_rule_saved \gexec
+SELECT (SELECT def FROM rpr_rule_saved) = pg_get_ruledef(oid, true) AS round_trips
+  FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
+
+-- the restored rule still fires.  A rule action is run against the rows the
+-- statement supplies as well as the table, so a two-row INSERT gives the
+-- window four rows to order by two distinct ids; sort the result on both
+-- columns, the pairs within an id being interchangeable.
+INSERT INTO rpr_rule_t VALUES (1, 1), (2, 2);
+SELECT * FROM rpr_rule_log ORDER BY id, cnt;
+
+DROP TABLE rpr_rule_saved;
+DROP TABLE rpr_rule_t, rpr_rule_log;
+
+-- A relation alias that happens to spell a pattern variable is the other way
+-- the prefix goes wrong.  Printed as up.price it does not come back as a
+-- range variable qualifier, which is merely rejected, but as a pattern
+-- variable one, which is rejected by a different rule and with a different
+-- message.  Two RTEs are what turns the prefix on.
+CREATE TABLE rpr_pvar_a (id INT, price INT);
+CREATE TABLE rpr_pvar_b (id INT);
+INSERT INTO rpr_pvar_a VALUES (1, 10), (2, 20), (3, 5);
+INSERT INTO rpr_pvar_b VALUES (1), (2), (3);
+
+CREATE VIEW rpr_pvar_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_pvar_a up, rpr_pvar_b
+WHERE up.id = rpr_pvar_b.id
+WINDOW w AS (ORDER BY up.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (up+)
+             DEFINE up AS price > 0);
+
+SELECT pg_get_viewdef('rpr_pvar_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_pvar_rt AS '
+       || pg_get_viewdef('rpr_pvar_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_pvar_v'::regclass, true)
+       = pg_get_viewdef('rpr_pvar_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_pvar_v;
+SELECT * FROM rpr_pvar_rt;
+
+DROP VIEW rpr_pvar_rt, rpr_pvar_v;
+DROP TABLE rpr_pvar_a, rpr_pvar_b;
+
 -- The same query written fresh is rejected, since nothing pins the name for
 -- it.  Pinning is what lets the stored definition above still reparse.
 SELECT j1.id, count(*) OVER w AS cnt
