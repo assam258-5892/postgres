@@ -148,7 +148,10 @@ typedef struct
  * In some cases we need to make names of merged JOIN USING columns unique
  * across the whole query, not only per-RTE.  If so, unique_using is true
  * and using_names is a list of C strings representing names already assigned
- * to USING columns.
+ * to USING columns.  using_names also holds the names row pattern DEFINE
+ * clauses read, which are printed without a qualifier and so have to be
+ * unique across the query level whatever unique_using says; see
+ * mark_define_columns().
  *
  * When deparsing plan trees, there is always just a single item in the
  * deparse_namespace list (since a plan tree never contains Vars with
@@ -172,7 +175,7 @@ typedef struct
 	char	   *ret_new_alias;	/* alias for NEW in RETURNING list */
 	/* Workspace for column alias assignment: */
 	bool		unique_using;	/* Are we making USING names globally unique */
-	List	   *using_names;	/* List of assigned names for USING columns */
+	List	   *using_names;	/* Names reserved across the query level */
 	/* Remaining fields are used only when deparsing a Plan tree: */
 	Plan	   *plan;			/* immediate parent of current expression */
 	List	   *ancestors;		/* ancestors of plan */
@@ -322,6 +325,16 @@ typedef struct
 	int			counter;		/* Largest addition used so far for name */
 } NameHashEntry;
 
+/*
+ * The merged join columns of a query that have an expression of their own,
+ * for collapse_define_join_vars()
+ */
+typedef struct
+{
+	List	   *exprs;			/* merge expressions, nulling marks cleared */
+	List	   *vars;			/* the Var naming each merged column */
+} collapse_define_context;
+
 /* Callback signature for resolve_special_varno() */
 typedef void (*rsv_callback) (Node *node, deparse_context *context,
 							  void *callback_arg);
@@ -382,9 +395,19 @@ static void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
-static void set_define_names(deparse_namespace *dpns, Query *query);
-static bool set_define_names_walker(Node *node, deparse_namespace *dpns);
-static void pin_define_colname(deparse_namespace *dpns, Var *var);
+static bool colname_is_fixed(RangeTblEntry *rte, AttrNumber attno);
+static void mark_define_columns(deparse_namespace *dpns, Query *query);
+static bool mark_define_columns_walker(Node *node, deparse_namespace *dpns);
+static void mark_define_column(deparse_namespace *dpns, Var *var);
+static char *preset_input_colname(deparse_namespace *dpns, int varno,
+								  AttrNumber attno);
+static void reserve_colname(deparse_namespace *dpns, char *colname);
+static List *function_rte_late_colnames(RangeTblEntry *rte);
+static void collapse_define_join_vars(Query *query);
+static Node *collapse_define_join_vars_mutator(Node *node,
+											   collapse_define_context *context);
+static Node *strip_nullingrels(Node *node);
+static Node *strip_nullingrels_mutator(Node *node, void *context);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -4038,6 +4061,140 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 }
 
 /*
+ * collapse_define_join_vars: put an expanded merged join column back together
+ *
+ * Expanding the GROUP Vars of a DEFINE clause above leaves it holding whatever
+ * the grouping expression was written over, and over a column merged by USING
+ * that is the expression the parser built for the merge -- a COALESCE of the
+ * two inputs, where the join is a FULL one.  Printing that is wrong twice.  A
+ * DEFINE clause carries no qualifiers, so both arms come out spelled the same,
+ * COALESCE(id, id), and which column each came from is gone from the text; and
+ * re-parsing what is printed nests one merged column inside another, so even
+ * the shape no longer matches what the grouping step offers.
+ *
+ * The join RTE still holds the expression it built, so an expanded one can be
+ * recognised there and folded back into a Var naming the merged column itself.
+ * That is what the user wrote, and it re-parses.  The inputs of a node are
+ * folded before the node is looked at, so that a merge built over another
+ * merge -- a USING join above a USING join -- is seen whole once its inner
+ * merge has become a Var again.
+ */
+static void
+collapse_define_join_vars(Query *query)
+{
+	collapse_define_context context;
+	ListCell   *lc;
+	int			rtindex = 0;
+
+	/* Collect the merge expressions once; most queries have none */
+	context.exprs = NIL;
+	context.vars = NIL;
+	foreach(lc, query->rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+		ListCell   *lc2;
+		AttrNumber	attno = 0;
+
+		rtindex++;
+		if (rte->rtekind != RTE_JOIN)
+			continue;
+
+		foreach(lc2, rte->joinaliasvars)
+		{
+			Node	   *aliasvar = (Node *) lfirst(lc2);
+
+			if (++attno > rte->joinmergedcols)
+				break;
+
+			/* Only a merge whose value is not just an input has one */
+			if (aliasvar == NULL || IsA(aliasvar, Var))
+				continue;
+
+			context.exprs = lappend(context.exprs, strip_nullingrels(aliasvar));
+			context.vars = lappend(context.vars,
+								   makeVar(rtindex, attno, exprType(aliasvar),
+										   exprTypmod(aliasvar),
+										   exprCollation(aliasvar), 0));
+		}
+	}
+
+	if (context.exprs == NIL)
+		return;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			wc->defineClause = (List *)
+				collapse_define_join_vars_mutator((Node *) wc->defineClause,
+												  &context);
+	}
+}
+
+static Node *
+collapse_define_join_vars_mutator(Node *node, collapse_define_context *context)
+{
+	if (node == NULL)
+		return NULL;
+
+	/* Fold the inputs first, so that a merge over a merge is seen whole */
+	node = expression_tree_mutator(node, collapse_define_join_vars_mutator,
+								   context);
+
+	/*
+	 * Only what buildMergedJoinVar() builds can be a merge expression: a
+	 * COALESCE of the two inputs, or one input coerced to the common type.
+	 * Anything else is left alone without a comparison.
+	 */
+	if (IsA(node, CoalesceExpr) || IsA(node, FuncExpr) ||
+		IsA(node, RelabelType) || IsA(node, CoerceViaIO) ||
+		IsA(node, ArrayCoerceExpr) || IsA(node, CoerceToDomain))
+	{
+		/*
+		 * An outer join above the one that merged the column marks the copy
+		 * the grouping expression carries and not the copy the join RTE
+		 * keeps, and neither mark reaches the printed text.
+		 */
+		Node	   *stripped = strip_nullingrels(node);
+		ListCell   *lc;
+		ListCell   *lc2;
+
+		forboth(lc, context->exprs, lc2, context->vars)
+		{
+			if (equal(stripped, (Node *) lfirst(lc)))
+				return (Node *) copyObject((Var *) lfirst(lc2));
+		}
+	}
+
+	return node;
+}
+
+/*
+ * strip_nullingrels: a copy of the expression with the nulling marks cleared
+ */
+static Node *
+strip_nullingrels(Node *node)
+{
+	return strip_nullingrels_mutator(node, NULL);
+}
+
+static Node *
+strip_nullingrels_mutator(Node *node, void *context)
+{
+	if (node == NULL)
+		return NULL;
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) copyObject(node);
+
+		var->varnullingrels = NULL;
+		return (Node *) var;
+	}
+	return expression_tree_mutator(node, strip_nullingrels_mutator, context);
+}
+
+/*
  * set_deparse_for_query: set up deparse_namespace for deparsing a Query tree
  *
  * For convenience, this is defined to initialize the deparse_namespace struct
@@ -4076,16 +4233,18 @@ set_deparse_for_query(deparse_namespace *dpns, Query *query,
 			has_dangerous_join_using(dpns, (Node *) query->jointree);
 
 		/*
+		 * Settle the column names that DEFINE clauses reference, so that the
+		 * USING names chosen next are chosen around them rather than over
+		 * them, and so that they still resolve as written when the query is
+		 * re-parsed.
+		 */
+		mark_define_columns(dpns, query);
+
+		/*
 		 * Select names for columns merged by USING, via a recursive pass over
 		 * the query jointree.
 		 */
 		set_using_names(dpns, (Node *) query->jointree, NIL);
-
-		/*
-		 * Pin the column names that DEFINE clauses reference, so that they
-		 * still resolve as written when the query is re-parsed.
-		 */
-		set_define_names(dpns, query);
 	}
 
 	/*
@@ -4284,6 +4443,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (leftattnos[i] > 0)
 				{
 					expand_colnames_array_to(leftcolinfo, leftattnos[i]);
+					Assert(leftcolinfo->colnames[leftattnos[i] - 1] == NULL ||
+						   strcmp(leftcolinfo->colnames[leftattnos[i] - 1],
+								  colname) == 0);
 					leftcolinfo->colnames[leftattnos[i] - 1] = colname;
 				}
 
@@ -4291,6 +4453,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (rightattnos[i] > 0)
 				{
 					expand_colnames_array_to(rightcolinfo, rightattnos[i]);
+					Assert(rightcolinfo->colnames[rightattnos[i] - 1] == NULL ||
+						   strcmp(rightcolinfo->colnames[rightattnos[i] - 1],
+								  colname) == 0);
 					rightcolinfo->colnames[rightattnos[i] - 1] = colname;
 				}
 			}
@@ -4319,7 +4484,10 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 		 *
 		 * Though significantly different in results, these two strategies are
 		 * implemented by the same code, with only the difference of whether
-		 * to put assigned names into dpns->using_names.
+		 * to put assigned names into dpns->using_names.  Either way a new
+		 * name steers clear of what is in dpns->using_names already, which
+		 * includes the names mark_define_columns() settled; and a merged
+		 * column a DEFINE clause reads takes the name settled for it there.
 		 */
 		if (j->usingClause)
 		{
@@ -4332,6 +4500,7 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 			foreach(lc, j->usingClause)
 			{
 				char	   *colname = strVal(lfirst(lc));
+				char	   *preset;
 
 				/* Assert it's a merged column */
 				Assert(leftattnos[i] != 0 && rightattnos[i] != 0);
@@ -4339,6 +4508,19 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				/* Adopt passed-down name if any, else select unique name */
 				if (colinfo->colnames[i] != NULL)
 					colname = colinfo->colnames[i];
+				else if ((preset = preset_input_colname(dpns, colinfo->leftrti,
+														leftattnos[i])) != NULL ||
+						 (preset = preset_input_colname(dpns, colinfo->rightrti,
+														rightattnos[i])) != NULL)
+				{
+					/*
+					 * A name settled below by mark_define_columns() is the
+					 * name the merged column carries: a DEFINE clause prints
+					 * it as is.  It is unique already, and reserved.
+					 */
+					colname = preset;
+					colinfo->colnames[i] = colname;
+				}
 				else
 				{
 					/* Prefer user-written output alias if any */
@@ -4361,6 +4543,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (leftattnos[i] > 0)
 				{
 					expand_colnames_array_to(leftcolinfo, leftattnos[i]);
+					Assert(leftcolinfo->colnames[leftattnos[i] - 1] == NULL ||
+						   strcmp(leftcolinfo->colnames[leftattnos[i] - 1],
+								  colname) == 0);
 					leftcolinfo->colnames[leftattnos[i] - 1] = colname;
 				}
 
@@ -4368,6 +4553,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (rightattnos[i] > 0)
 				{
 					expand_colnames_array_to(rightcolinfo, rightattnos[i]);
+					Assert(rightcolinfo->colnames[rightattnos[i] - 1] == NULL ||
+						   strcmp(rightcolinfo->colnames[rightattnos[i] - 1],
+								  colname) == 0);
 					rightcolinfo->colnames[rightattnos[i] - 1] = colname;
 				}
 
@@ -4389,24 +4577,44 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 }
 
 /*
- * set_define_names: pin the column names that DEFINE clauses reference
+ * colname_is_fixed: is this a column that no rename can reach?
+ *
+ * A system column is named by the catalog.  A relation RTE outside the FROM
+ * clause -- a rule's NEW or OLD, or the target of an UPDATE or DELETE -- has
+ * nowhere to print a column alias list, so a renamed column of one would
+ * reach the output only where it is referenced, naming a column that does
+ * not exist.  set_relation_column_names() leaves such columns alone, and
+ * whatever has to hold their names against the rest of the query does so
+ * without renaming them.
+ */
+static bool
+colname_is_fixed(RangeTblEntry *rte, AttrNumber attno)
+{
+	if (attno < 0)
+		return true;
+	return rte->rtekind == RTE_RELATION && !rte->inFromCl;
+}
+
+/*
+ * mark_define_columns: settle the names of the columns DEFINE clauses read
  *
  * Within a DEFINE clause a column can only be named without a qualifier,
  * since the qualifier slot names a pattern variable; get_rule_define()
  * deparses with varprefix off for that reason.  So an unqualified reference
- * there has to resolve exactly as printed, much like a column merged by
- * USING.  If another relation of the same query later acquires a column of
- * that name, re-parsing the deparsed query would find the name ambiguous.
+ * there has to resolve exactly as printed, and its name has to be one that
+ * no other RTE of the query prints.
  *
- * We therefore treat such a name the way set_using_names() treats a merged
- * USING name: register it in dpns->using_names, so that no other RTE can be
- * given that name, and store it into the owning RTE's colnames entry, which
- * exempts the column itself from being renamed.  set_relation_column_names()
- * then does the rest, uniquifying the intruding column to name_1 and printing
- * a column alias list for its RTE.
+ * We settle such a name before set_using_names() invents any: choose it
+ * unique within its RTE and against the names reserved so far, store it into
+ * the RTE's colnames entry, which exempts the column from being renamed for
+ * some other name's sake, and reserve it in dpns->using_names so that no
+ * other RTE is given it.  A USING clause that merges the column adopts the
+ * settled name instead of inventing one (see set_using_names), and
+ * everything else falls to the ordinary machinery.  A column that cannot be
+ * renamed keeps its name and is only reserved.
  */
 static void
-set_define_names(deparse_namespace *dpns, Query *query)
+mark_define_columns(deparse_namespace *dpns, Query *query)
 {
 	ListCell   *lc;
 
@@ -4415,45 +4623,42 @@ set_define_names(deparse_namespace *dpns, Query *query)
 		WindowClause *wc = lfirst_node(WindowClause, lc);
 
 		if (wc->defineClause != NIL)
-			(void) set_define_names_walker((Node *) wc->defineClause, dpns);
+			(void) mark_define_columns_walker((Node *) wc->defineClause,
+											  dpns);
 	}
 }
 
-/*
- * Walk a DEFINE clause, pinning the name of every column it references.
- */
 static bool
-set_define_names_walker(Node *node, deparse_namespace *dpns)
+mark_define_columns_walker(Node *node, deparse_namespace *dpns)
 {
 	if (node == NULL)
 		return false;
 	if (IsA(node, Var))
 	{
-		pin_define_colname(dpns, (Var *) node);
+		mark_define_column(dpns, (Var *) node);
 		return false;
 	}
 	/* Sub-selects are not allowed here, but be safe: they have own namespace */
 	if (IsA(node, Query))
 		return false;
-	return expression_tree_walker(node, set_define_names_walker, dpns);
+	return expression_tree_walker(node, mark_define_columns_walker, dpns);
 }
 
 /*
- * pin_define_colname: reserve the printed name of one DEFINE-referenced column
+ * Settle the printed name of one DEFINE-referenced column.
  */
 static void
-pin_define_colname(deparse_namespace *dpns, Var *var)
+mark_define_column(deparse_namespace *dpns, Var *var)
 {
 	RangeTblEntry *rte;
 	deparse_columns *colinfo;
 	int			varno;
 	AttrNumber	attno;
 	char	   *colname;
-	ListCell   *lc;
 
 	/*
 	 * Resolve the reference the way get_variable() will when it prints this
-	 * Var, or the name reserved here is not the name that reaches the output.
+	 * Var, or the name settled here is not the name that reaches the output.
 	 * A Var that reads a join column carries the child relation in varno and
 	 * the join RTE in varnosyn, and it is the latter that gets printed.
 	 */
@@ -4468,63 +4673,195 @@ pin_define_colname(deparse_namespace *dpns, Var *var)
 		attno = var->varattno;
 	}
 
-	/* Only ordinary columns of this query level have a name to pin */
-	if (var->varlevelsup != 0 || attno <= 0)
+	/* An outer-level reference is no column of ours to settle */
+	if (var->varlevelsup != 0)
 		return;
 	if (varno < 1 || varno > list_length(dpns->rtable))
+		return;
+	/* A whole-row reference is rejected in a DEFINE clause, but be safe */
+	if (attno == InvalidAttrNumber)
 		return;
 
 	rte = rt_fetch(varno, dpns->rtable);
 	colinfo = deparse_columns_fetch(varno, dpns);
 
 	/*
-	 * Find the name this column is going to be printed with.  If a name was
-	 * assigned already, that is the one to protect; set_using_names() does
-	 * that both for a join's merged column and for the input columns it was
-	 * merged from.
+	 * A system column's name is fixed and get_variable() reads it from the
+	 * catalog, so there is no alias to choose; just hold the name.
 	 */
+	if (attno < 0)
+	{
+		if (rte->rtekind == RTE_RELATION)
+			reserve_colname(dpns, get_rte_attribute_name(rte, attno));
+		return;
+	}
+
+	/* Settled already, by an earlier reference to the same column */
 	if (attno <= colinfo->num_cols && colinfo->colnames[attno - 1] != NULL)
-		colname = colinfo->colnames[attno - 1];
-	else if (rte->rtekind == RTE_RELATION)
+		return;
+
+	/*
+	 * Find the name this column would be printed with.  Resolve as
+	 * set_relation_column_names() will: a column alias the user wrote is what
+	 * gets printed, and the catalog name only stands in where there is none.
+	 */
+	if (rte->rtekind == RTE_RELATION)
 	{
 		char	   *real_colname = get_attname(rte->relid, attno, true);
 
 		if (real_colname == NULL)
 			return;				/* dropped column */
 
-		/*
-		 * Resolve as set_relation_column_names() will: a column alias the
-		 * user wrote is what gets printed, and the catalog name only stands
-		 * in where there is none.  Reserving the catalog name instead would
-		 * protect a name that never reaches the output, and would replace the
-		 * alias in the printed text besides.
-		 */
 		if (rte->alias && attno <= list_length(rte->alias->colnames))
 			colname = strVal(list_nth(rte->alias->colnames, attno - 1));
 		else
 			colname = real_colname;
-
-		expand_colnames_array_to(colinfo, attno);
-		colinfo->colnames[attno - 1] = colname;
 	}
 	else if (attno <= list_length(rte->eref->colnames))
 	{
 		colname = strVal(list_nth(rte->eref->colnames, attno - 1));
 		if (colname[0] == '\0')
 			return;				/* dropped column */
-		expand_colnames_array_to(colinfo, attno);
-		colinfo->colnames[attno - 1] = colname;
 	}
 	else
 		return;
 
-	/* Reserve the name query-wide, unless it is reserved already */
+	/* A column that cannot be renamed keeps its name; just hold it */
+	if (colname_is_fixed(rte, attno))
+	{
+		reserve_colname(dpns, colname);
+		return;
+	}
+
+	/*
+	 * Choose the name unique within the RTE and against what is reserved,
+	 * store it, and reserve it.  A later reference to another column of the
+	 * same RTE that carries the same name -- possible once a column has been
+	 * renamed under the view -- gets name_N here, and the DEFINE clause
+	 * follows it, being printed from colinfo.
+	 */
+	expand_colnames_array_to(colinfo, attno);
+	colname = make_colname_unique(colname, dpns, colinfo);
+	colinfo->colnames[attno - 1] = colname;
+	reserve_colname(dpns, colname);
+}
+
+/*
+ * preset_input_colname: the name settled below a join for one of its columns
+ *
+ * mark_define_columns() stores a name into the colnames entry of the RTE a
+ * DEFINE reference resolves to, and for a column merged by an unaliased
+ * INNER or LEFT JOIN that is an input of the join rather than the join
+ * itself.  A merged column has to be named the same on both sides, so
+ * set_using_names() asks here, before inventing a name, whether one of the
+ * inputs has settled it already.  A join input is followed down the way the
+ * parser built the merged column, through joinaliasvars.
+ */
+static char *
+preset_input_colname(deparse_namespace *dpns, int varno, AttrNumber attno)
+{
+	RangeTblEntry *rte;
+	deparse_columns *colinfo;
+
+	if (varno < 1 || attno <= 0)
+		return NULL;
+
+	colinfo = deparse_columns_fetch(varno, dpns);
+	if (attno <= colinfo->num_cols && colinfo->colnames[attno - 1] != NULL)
+		return colinfo->colnames[attno - 1];
+
+	rte = rt_fetch(varno, dpns->rtable);
+	if (rte->rtekind == RTE_JOIN &&
+		attno <= list_length(rte->joinaliasvars))
+	{
+		Node	   *aliasvar = (Node *) list_nth(rte->joinaliasvars, attno - 1);
+		List	   *vars = pull_var_clause(aliasvar, 0);
+		ListCell   *lc;
+
+		foreach(lc, vars)
+		{
+			Var		   *var = (Var *) lfirst(lc);
+			char	   *colname;
+
+			colname = preset_input_colname(dpns, var->varno, var->varattno);
+			if (colname != NULL)
+				return colname;
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * reserve_colname: keep any other RTE from being given this column name
+ */
+static void
+reserve_colname(deparse_namespace *dpns, char *colname)
+{
+	ListCell   *lc;
+
 	foreach(lc, dpns->using_names)
 	{
 		if (strcmp((char *) lfirst(lc), colname) == 0)
 			return;
 	}
 	dpns->using_names = lappend(dpns->using_names, colname);
+}
+
+/*
+ * function_rte_late_colnames: the names of the columns a function RTE's result
+ * type has grown since the query was parsed
+ *
+ * expandRTE() stops at the column count recorded at parse time, so a column
+ * the type has gained since then is not in the list the deparser works from.
+ * Yet it is a column the RTE has now: a name that has to resolve exactly as
+ * printed -- a globally unique USING name, or one a DEFINE clause reads --
+ * must be kept off it, and the column alias list being positional, an
+ * aliased join above lays its own list over this one end to end, so the
+ * grown columns have to be counted in.
+ *
+ * Returns NIL unless there is one function and no WITH ORDINALITY, those being
+ * the cases where the grown columns land at the end of the RTE.  Anywhere else
+ * they land in the middle, shifting the attnos this query was parsed with.
+ */
+static List *
+function_rte_late_colnames(RangeTblEntry *rte)
+{
+	RangeTblFunction *rtfunc;
+	TypeFuncClass functypclass;
+	Oid			funcrettype;
+	TupleDesc	tupdesc;
+	List	   *result = NIL;
+	int			i;
+
+	if (rte->funcordinality || list_length(rte->functions) != 1)
+		return NIL;
+
+	rtfunc = (RangeTblFunction *) linitial(rte->functions);
+
+	/* A coldeflist fixes the column set, and pins the return type at RECORD */
+	if (rtfunc->funccolnames != NIL)
+		return NIL;
+
+	functypclass = get_expr_result_type(rtfunc->funcexpr, &funcrettype,
+										&tupdesc);
+	if (functypclass != TYPEFUNC_COMPOSITE &&
+		functypclass != TYPEFUNC_COMPOSITE_DOMAIN)
+		return NIL;
+
+	for (i = rtfunc->funccolcount; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+		/* Spell a dropped column the way expandRTE() does */
+		if (attr->attisdropped)
+			result = lappend(result, makeString(pstrdup("")));
+		else
+			result = lappend(result,
+							 makeString(pstrdup(NameStr(attr->attname))));
+	}
+
+	return result;
 }
 
 /*
@@ -4599,6 +4936,15 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			/* Since we're not creating Vars, rtindex etc. don't matter */
 			expandRTE(rte, 1, 0, VAR_RETURNING_DEFAULT, -1,
 					  true /* include dropped */ , &colnames, NULL);
+
+			/*
+			 * Take the columns the result type has grown since parse time as
+			 * well: they are columns the RTE has now, so a name that has to
+			 * resolve exactly as printed must be kept off of them too, and
+			 * the alias list is positional, so they are printed in full.
+			 */
+			colnames = list_concat(colnames,
+								   function_rte_late_colnames(rte));
 		}
 		else
 			colnames = rte->eref->colnames;
@@ -4632,6 +4978,8 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	 */
 	expand_colnames_array_to(colinfo, ncolumns);
 	Assert(colinfo->num_cols == ncolumns);
+
+	/* Without grown columns, every column is one the query was parsed with */
 
 	/*
 	 * Make sufficiently large new_colnames and is_new_col arrays, too.
@@ -4677,8 +5025,17 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			else
 				colname = real_colname;
 
-			/* Unique-ify and insert into colinfo */
-			colname = make_colname_unique(colname, dpns, colinfo);
+			/*
+			 * Unique-ify and insert into colinfo, unless this is a column no
+			 * rename can reach: a relation RTE outside the FROM clause has
+			 * nowhere to carry a column alias list, so a renamed column would
+			 * reach the output only where it is referenced, naming a column
+			 * that does not exist.  Other kinds reach here with inFromCl
+			 * clear and still get printed, the subquery an INSERT ... SELECT
+			 * reads from among them, so those are renamed as before.
+			 */
+			if (!colname_is_fixed(rte, i + 1))
+				colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
 			add_to_names_hash(colinfo, colname);
@@ -4711,17 +5068,17 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	 * are different from the underlying "real" names.  For a function RTE,
 	 * always emit a complete column alias list; this is to protect against
 	 * possible instability of the default column names (eg, from altering
-	 * parameter names).  For tablefunc RTEs, we never print aliases, because
-	 * the column names are part of the clause itself.  For other RTE types,
-	 * print if we changed anything OR if there were user-written column
-	 * aliases (since the latter would be part of the underlying "reality").
+	 * parameter names).  For other RTE types, print if we changed anything OR
+	 * if there were user-written column aliases (since the latter would be
+	 * part of the underlying "reality").  A tablefunc RTE is among those: its
+	 * clause names the columns it produces, but it accepts a column alias
+	 * list like any other, and one is needed once a column has had to be
+	 * renamed.
 	 */
 	if (rte->rtekind == RTE_RELATION)
 		colinfo->printaliases = changed_any;
 	else if (rte->rtekind == RTE_FUNCTION)
 		colinfo->printaliases = true;
-	else if (rte->rtekind == RTE_TABLEFUNC)
-		colinfo->printaliases = false;
 	else if (rte->alias && rte->alias->colnames != NIL)
 		colinfo->printaliases = true;
 	else
@@ -5063,8 +5420,9 @@ colname_is_unique(const char *colname, deparse_namespace *dpns,
 	}
 
 	/*
-	 * Also check against USING-column names that must be globally unique.
-	 * These are not hashed, but there should be few of them.
+	 * Also check against the names reserved across the query level: USING
+	 * column names that must be globally unique, and the names DEFINE clauses
+	 * read.  These are not hashed, as they are expected to be few.
 	 */
 	foreach(lc, dpns->using_names)
 	{
@@ -5830,6 +6188,8 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 				wc->defineClause = (List *)
 					flatten_group_exprs(NULL, query, (Node *) wc->defineClause);
 		}
+
+		collapse_define_join_vars(query);
 	}
 
 	/*

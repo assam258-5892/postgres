@@ -3696,6 +3696,7 @@ child_process_kind
 chr
 cmpEntriesArg
 codes_t
+collapse_define_context
 collation_cache_entry
 collation_cache_hash
 color
