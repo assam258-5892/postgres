@@ -2720,6 +2720,886 @@ SELECT * FROM rpr_pin_rel_v;
 DROP VIEW rpr_pin_rel_v;
 DROP TABLE rpr_pin_d, rpr_pin_e;
 
+-- A name a DEFINE clause reads is the one name in the query that cannot be
+-- spelled any other way, the qualifier slot being reserved for a pattern
+-- variable.  set_using_names() picks the name of every column merged by USING
+-- before it, and is free to pick any name at all, renaming the merged inputs
+-- to match.  So the DEFINE names that are settled already are reserved first
+-- and the merged names are chosen around them.  Here the second USING would
+-- otherwise reach for x_1, the very column the DEFINE clause reads: the
+-- anonymous FULL JOIN forces USING names to be unique query-wide, which takes
+-- plain x, and x_1 is what the next one counts up to.
+CREATE TABLE rpr_res_t (x_1 INT, id INT);
+CREATE TABLE rpr_res_l1 (x INT);
+CREATE TABLE rpr_res_r1 (x INT);
+CREATE TABLE rpr_res_l2 (x INT);
+CREATE TABLE rpr_res_r2 (x INT);
+INSERT INTO rpr_res_t VALUES (1, 1), (2, 2);
+INSERT INTO rpr_res_l1 VALUES (1);
+INSERT INTO rpr_res_r1 VALUES (1);
+INSERT INTO rpr_res_l2 VALUES (1);
+INSERT INTO rpr_res_r2 VALUES (1);
+
+CREATE VIEW rpr_res_using_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_t,
+     (rpr_res_l1 FULL JOIN rpr_res_r1 USING (x)),
+     (rpr_res_l2 JOIN rpr_res_r2 USING (x))
+WINDOW w AS (ORDER BY rpr_res_t.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x_1 > 0);
+
+SELECT pg_get_viewdef('rpr_res_using_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_using_rt AS '
+       || pg_get_viewdef('rpr_res_using_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_using_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_using_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_using_v;
+SELECT * FROM rpr_res_using_rt;
+
+DROP VIEW rpr_res_using_rt, rpr_res_using_v;
+DROP TABLE rpr_res_t, rpr_res_l1, rpr_res_r1, rpr_res_l2, rpr_res_r2;
+
+-- A merged column keeps its natural name and collides all the same.  This one
+-- is the column set_relation_column_names() cannot push aside afterwards: its
+-- name was settled and handed to both inputs before that function ran, so the
+-- loop there passes over it.  An ordinary column in its place does move aside,
+-- which is what the rpr_pin views above cover.
+CREATE TABLE rpr_res_a (j INT, p INT);
+CREATE TABLE rpr_res_b (j INT, q INT);
+CREATE TABLE rpr_res_c (r INT, s INT);
+INSERT INTO rpr_res_a VALUES (1, 10);
+INSERT INTO rpr_res_b VALUES (1, 30);
+INSERT INTO rpr_res_c VALUES (1, 10), (2, 20), (3, 15);
+
+CREATE VIEW rpr_res_merged_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_a JOIN rpr_res_b USING (j) CROSS JOIN rpr_res_c
+WINDOW w AS (ORDER BY rpr_res_c.s
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (X Y+)
+             DEFINE X AS true, Y AS s > PREV(s));
+
+-- the collision arrives only now: the merged column has been named j all along
+ALTER TABLE rpr_res_c RENAME COLUMN s TO j;
+
+SELECT pg_get_viewdef('rpr_res_merged_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_merged_rt AS '
+       || pg_get_viewdef('rpr_res_merged_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_merged_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_merged_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_merged_v;
+SELECT * FROM rpr_res_merged_rt;
+
+DROP VIEW rpr_res_merged_rt, rpr_res_merged_v;
+DROP TABLE rpr_res_a, rpr_res_b, rpr_res_c;
+
+-- Naming a merged column renames the columns it merges, and the name can land
+-- in an RTE that has a real column of that name already.  The column the
+-- DEFINE clause reads is the one that cannot move, so the merge counts past it
+-- instead and the RTE prints two distinct aliases.
+CREATE TABLE rpr_res_fa (k INT);
+CREATE TABLE rpr_res_fb (k INT);
+CREATE TABLE rpr_res_ga (k INT, k_1 INT);
+CREATE TABLE rpr_res_gb (k INT);
+CREATE TABLE rpr_res_ord (id INT);
+INSERT INTO rpr_res_fa VALUES (1);
+INSERT INTO rpr_res_fb VALUES (1);
+INSERT INTO rpr_res_ga VALUES (1, 5);
+INSERT INTO rpr_res_gb VALUES (1);
+INSERT INTO rpr_res_ord VALUES (1), (2);
+
+CREATE VIEW rpr_res_dup_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_fa FULL JOIN rpr_res_fb USING (k),
+     rpr_res_ga JOIN rpr_res_gb USING (k),
+     rpr_res_ord
+WINDOW w AS (ORDER BY rpr_res_ord.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS k_1 > 0);
+
+SELECT pg_get_viewdef('rpr_res_dup_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_dup_rt AS '
+       || pg_get_viewdef('rpr_res_dup_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_dup_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_dup_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_dup_v;
+SELECT * FROM rpr_res_dup_rt;
+
+DROP VIEW rpr_res_dup_rt, rpr_res_dup_v;
+DROP TABLE rpr_res_fa, rpr_res_fb, rpr_res_ga, rpr_res_gb, rpr_res_ord;
+
+-- A merged column a DEFINE clause reads is named by the DEFINE clause: its
+-- name is settled before set_using_names() runs, and the USING clause adopts
+-- it rather than inventing one.  The merged name therefore stays id here,
+-- and the newcomer is the one that moves aside.
+CREATE TABLE rpr_res_p (id INT, v INT);
+CREATE TABLE rpr_res_q (id INT, w INT);
+CREATE TABLE rpr_res_s (n INT);
+INSERT INTO rpr_res_p VALUES (1, 10), (2, 20);
+INSERT INTO rpr_res_q VALUES (1, 30), (3, 40);
+INSERT INTO rpr_res_s VALUES (7);
+
+CREATE VIEW rpr_res_full_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_p FULL JOIN rpr_res_q USING (id), rpr_res_s
+WINDOW w AS (ORDER BY id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS id > 0);
+
+ALTER TABLE rpr_res_s ADD COLUMN id INT;
+
+SELECT pg_get_viewdef('rpr_res_full_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_full_rt AS '
+       || pg_get_viewdef('rpr_res_full_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_full_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_full_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_full_v;
+SELECT * FROM rpr_res_full_rt;
+
+DROP VIEW rpr_res_full_rt, rpr_res_full_v;
+DROP TABLE rpr_res_p, rpr_res_q, rpr_res_s;
+
+-- An aliased join answers for its inputs.  The parser gives every column of
+-- such a join the join's own varnosyn, so a DEFINE clause reading a column the
+-- inputs brought in names the join and not the relation it came from.  The
+-- name is settled all the same, the join's USING clause not being the thing
+-- that produced it, and so it is reserved: a column of a join that its own
+-- USING clause does not name is no more merged than a relation's would be.
+-- Left unreserved, the merged name counts up onto it and the join prints the
+-- one alias twice, which reparses as an ambiguous column.
+CREATE TABLE rpr_res_ja (x INT, x_1 INT);
+CREATE TABLE rpr_res_jb (x INT, z INT);
+CREATE TABLE rpr_res_m1 (x INT);
+CREATE TABLE rpr_res_m2 (x INT);
+CREATE TABLE rpr_res_ordj (id INT);
+INSERT INTO rpr_res_ja VALUES (1, 7);
+INSERT INTO rpr_res_jb VALUES (1, 9);
+INSERT INTO rpr_res_m1 VALUES (1);
+INSERT INTO rpr_res_m2 VALUES (1);
+INSERT INTO rpr_res_ordj VALUES (1), (2);
+
+CREATE VIEW rpr_res_alias_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_res_m1 FULL JOIN rpr_res_m2 USING (x)),
+     (rpr_res_ja JOIN rpr_res_jb USING (x)) AS jx,
+     rpr_res_ordj
+WINDOW w AS (ORDER BY rpr_res_ordj.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x_1 > 0);
+
+SELECT pg_get_viewdef('rpr_res_alias_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_alias_rt AS '
+       || pg_get_viewdef('rpr_res_alias_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_alias_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_alias_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_alias_v;
+SELECT * FROM rpr_res_alias_rt;
+
+
+-- The same through NATURAL JOIN, which names no column in the query text.  The
+-- test above reads a join's USING clause to tell a merged column from one that
+-- only passes through, and the analyzed tree is where it reads it: the parser
+-- works out which columns NATURAL merges and files them there.
+CREATE VIEW rpr_res_nat_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_res_m1 FULL JOIN rpr_res_m2 USING (x)),
+     (rpr_res_ja NATURAL JOIN rpr_res_jb) AS jx,
+     rpr_res_ordj
+WINDOW w AS (ORDER BY rpr_res_ordj.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x_1 > 0);
+
+SELECT pg_get_viewdef('rpr_res_nat_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_nat_rt AS '
+       || pg_get_viewdef('rpr_res_nat_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_nat_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_nat_rt'::regclass, true) AS round_trips;
+
+DROP VIEW rpr_res_nat_rt, rpr_res_nat_v;
+DROP VIEW rpr_res_alias_rt, rpr_res_alias_v;
+DROP TABLE rpr_res_ja, rpr_res_jb, rpr_res_m1, rpr_res_m2, rpr_res_ordj;
+
+-- A column a function's result type grows after the view is made is one the
+-- deparser does not see at all: expandRTE() stops at the column count the
+-- query was parsed with.  A column it cannot see is one it cannot rename out
+-- of the way, and the name it collides with here is the one a DEFINE clause
+-- has to resolve to as printed.  So the grown columns are looked up and named
+-- too, and printed in full, the alias list being positional.
+CREATE TABLE rpr_res_fn (id INT, val INT);
+INSERT INTO rpr_res_fn VALUES (1, 1), (2, 2), (3, 3);
+CREATE TABLE rpr_res_cfg (a INT);
+INSERT INTO rpr_res_cfg VALUES (1);
+CREATE FUNCTION rpr_res_fcfg() RETURNS SETOF rpr_res_cfg LANGUAGE sql
+  AS $$ SELECT * FROM rpr_res_cfg $$;
+
+CREATE VIEW rpr_res_fn_v AS
+SELECT rpr_res_fn.id, count(*) OVER w AS cnt
+FROM rpr_res_fn, rpr_res_fcfg() f
+WINDOW w AS (ORDER BY rpr_res_fn.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS val > 0);
+
+-- nothing to keep off yet
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
+
+ALTER TABLE rpr_res_cfg ADD COLUMN val INT;
+
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_fn_rt AS '
+       || pg_get_viewdef('rpr_res_fn_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_fn_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_fn_v;
+SELECT * FROM rpr_res_fn_rt;
+
+-- a grown column that collides with nothing is still on the list
+ALTER TABLE rpr_res_cfg ADD COLUMN spare INT;
+SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
+
+DROP VIEW rpr_res_fn_rt, rpr_res_fn_v;
+DROP FUNCTION rpr_res_fcfg();
+DROP TABLE rpr_res_fn, rpr_res_cfg;
+
+-- A system column is named from the catalog, not from the deparser's own
+-- choice, so there is no alias to pick for it and nothing to exempt from
+-- renaming.  Its name still has to be held against the rest of the query, or
+-- a column that turns up later answers to it as well.
+CREATE TABLE rpr_res_sys (id INT, v INT);
+INSERT INTO rpr_res_sys VALUES (1, 1), (2, 2);
+CREATE TYPE rpr_res_ct AS (a INT);
+CREATE FUNCTION rpr_res_fct() RETURNS SETOF rpr_res_ct LANGUAGE sql
+  AS $$ SELECT ROW(1)::rpr_res_ct $$;
+
+CREATE VIEW rpr_res_sys_v AS
+SELECT rpr_res_sys.id, count(*) OVER w AS cnt
+FROM rpr_res_sys, rpr_res_fct() f
+WINDOW w AS (ORDER BY rpr_res_sys.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS ctid IS NOT NULL);
+
+ALTER TYPE rpr_res_ct ADD ATTRIBUTE ctid INT;
+
+SELECT pg_get_viewdef('rpr_res_sys_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_sys_rt AS '
+       || pg_get_viewdef('rpr_res_sys_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_sys_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_sys_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_sys_v;
+SELECT * FROM rpr_res_sys_rt;
+
+DROP VIEW rpr_res_sys_rt, rpr_res_sys_v;
+DROP FUNCTION rpr_res_fct();
+DROP TYPE rpr_res_ct;
+DROP TABLE rpr_res_sys;
+
+-- A TABLEFUNC RTE writes its column names into the clause that produces them,
+-- but it accepts a column alias list like any other RTE, and a rename of one
+-- of its columns is printed there.  So a TABLEFUNC column that comes to
+-- answer to the name a DEFINE clause reads is renamed like any other column
+-- would be, and the DEFINE clause keeps its spelling.
+CREATE TABLE rpr_res_tf (id INT, s INT);
+INSERT INTO rpr_res_tf VALUES (1, 1), (2, 2);
+
+CREATE VIEW rpr_res_tf_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_tf,
+     JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jx
+WINDOW w AS (ORDER BY rpr_res_tf.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS s > 0);
+
+-- the collision arrives only now
+ALTER TABLE rpr_res_tf RENAME COLUMN s TO c1;
+
+SELECT pg_get_viewdef('rpr_res_tf_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tf_rt AS '
+       || pg_get_viewdef('rpr_res_tf_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tf_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tf_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_tf_v;
+SELECT * FROM rpr_res_tf_rt;
+
+DROP VIEW rpr_res_tf_rt, rpr_res_tf_v;
+DROP TABLE rpr_res_tf;
+
+-- An aliased join answers for its inputs and hides them, so the DEFINE
+-- clause here reads the join's own column x.  That name is reserved across
+-- the query level, which reaches the TABLEFUNC column underneath as well:
+-- it is renamed on its own alias list, and the join prints x on its list to
+-- keep the name the query sees.  Out of reach of an unqualified reference,
+-- the TABLEFUNC column would not have collided, but a reserved name is kept
+-- off every RTE of the level, as a globally unique USING name is.
+CREATE TABLE rpr_res_hid (id INT, v INT);
+CREATE TABLE rpr_res_hu (m INT);
+INSERT INTO rpr_res_hid VALUES (1, 1), (2, 2), (3, 3);
+INSERT INTO rpr_res_hu VALUES (9);
+
+CREATE VIEW rpr_res_hid_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_hid,
+     (JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (x int PATH '$')) AS jt
+      JOIN rpr_res_hu ON jt.x > 0) j
+WINDOW w AS (ORDER BY rpr_res_hid.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x > 0);
+
+SELECT pg_get_viewdef('rpr_res_hid_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_hid_rt AS '
+       || pg_get_viewdef('rpr_res_hid_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_hid_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_hid_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_hid_v;
+SELECT * FROM rpr_res_hid_rt;
+
+DROP VIEW rpr_res_hid_rt, rpr_res_hid_v;
+DROP TABLE rpr_res_hid, rpr_res_hu;
+
+-- A column can come to carry the name a DEFINE clause reads only after the
+-- view is made, by being renamed, and from then on the two have to be told
+-- apart in the printed text.  The DEFINE column keeps its spelling, being
+-- settled first, and the newcomer gets name_N -- whether it sits in the same
+-- RTE, is the one a USING clause merges, or is not merged but carries the
+-- USING clause's spelling, which is no business of the deparser's to guess
+-- from.  A USING clause elsewhere that spells the newcomer's new name moves
+-- out of the way as well.
+CREATE TABLE rpr_res_ren (c INT, d INT);
+INSERT INTO rpr_res_ren VALUES (1, 1), (2, 2);
+CREATE TABLE rpr_res_ren2 (a INT, e INT);
+INSERT INTO rpr_res_ren2 VALUES (1, 0), (2, 0);
+CREATE TABLE rpr_res_renl (a_1 INT);
+CREATE TABLE rpr_res_renr (a_1 INT);
+INSERT INTO rpr_res_renl VALUES (1);
+INSERT INTO rpr_res_renr VALUES (1);
+CREATE TABLE rpr_res_rs (x INT);
+CREATE TABLE rpr_res_rr (x INT, y INT);
+INSERT INTO rpr_res_rs VALUES (1), (2);
+INSERT INTO rpr_res_rr VALUES (1, 5), (2, 6);
+
+-- the same RTE, its alias list shorter than the table
+CREATE VIEW rpr_res_ren_v AS
+SELECT x.a, x.d, count(*) OVER w AS cnt
+FROM rpr_res_ren AS x(a)
+WINDOW w AS (ORDER BY x.a
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (P Q*)
+             DEFINE P AS a > 0, Q AS d > 0);
+
+-- the column a USING clause merges
+CREATE VIEW rpr_res_renu_v AS
+SELECT a, x.d, count(*) OVER w AS cnt
+FROM rpr_res_ren AS x(a) JOIN rpr_res_ren2 USING (a)
+WINDOW w AS (ORDER BY a
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (P Q*)
+             DEFINE P AS d > 0);
+
+-- a USING clause elsewhere that spells the name the newcomer is going to get
+CREATE VIEW rpr_res_renx_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_ren AS x(a), rpr_res_renl JOIN rpr_res_renr USING (a_1)
+WINDOW w AS (ORDER BY x.a
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (P Q*)
+             DEFINE P AS a > 0, Q AS d > 0);
+
+-- a merged column that is renamed away, and a DEFINE column renamed onto
+-- the USING clause's spelling
+CREATE VIEW rpr_res_renm_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_rs JOIN rpr_res_rr USING (x)
+WINDOW w AS (ORDER BY y
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS y > 0);
+
+-- the collisions arrive only now
+ALTER TABLE rpr_res_ren RENAME d TO a;
+ALTER TABLE rpr_res_rr RENAME x TO z;
+ALTER TABLE rpr_res_rr RENAME y TO x;
+
+SELECT pg_get_viewdef('rpr_res_ren_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_ren_rt AS '
+       || pg_get_viewdef('rpr_res_ren_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_ren_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_ren_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_ren_v;
+SELECT * FROM rpr_res_ren_rt;
+
+SELECT pg_get_viewdef('rpr_res_renu_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_renu_rt AS '
+       || pg_get_viewdef('rpr_res_renu_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_renu_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_renu_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_renu_v;
+SELECT * FROM rpr_res_renu_rt;
+
+SELECT pg_get_viewdef('rpr_res_renx_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_renx_rt AS '
+       || pg_get_viewdef('rpr_res_renx_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_renx_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_renx_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_renx_v;
+SELECT * FROM rpr_res_renx_rt;
+
+SELECT pg_get_viewdef('rpr_res_renm_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_renm_rt AS '
+       || pg_get_viewdef('rpr_res_renm_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_renm_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_renm_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_renm_v;
+SELECT * FROM rpr_res_renm_rt;
+
+DROP VIEW rpr_res_renm_rt, rpr_res_renm_v;
+DROP VIEW rpr_res_renx_rt, rpr_res_renx_v;
+DROP VIEW rpr_res_renu_rt, rpr_res_renu_v;
+DROP VIEW rpr_res_ren_rt, rpr_res_ren_v;
+DROP TABLE rpr_res_ren, rpr_res_ren2, rpr_res_renl, rpr_res_renr;
+DROP TABLE rpr_res_rs, rpr_res_rr;
+
+-- A merged column an aliased join carries can spell the DEFINE name from the
+-- start, and a TABLEFUNC among the join's inputs changes nothing about that:
+-- the join's own alias list names the merged column, the inputs answer to
+-- it, and the DEFINE column is left alone.  Nor does the order of the FROM
+-- list matter.
+CREATE TABLE rpr_res_tj (id INT, c1 INT);
+INSERT INTO rpr_res_tj VALUES (1, 1), (2, 2);
+CREATE TABLE rpr_res_tb (c1 INT, y INT);
+INSERT INTO rpr_res_tb VALUES (1, 10), (2, 20);
+CREATE TABLE rpr_res_ti (id INT);
+INSERT INTO rpr_res_ti VALUES (1), (2);
+
+CREATE VIEW rpr_res_tj_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_tj,
+     (JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jt
+      JOIN rpr_res_tb USING (c1)) AS j(k, m)
+WINDOW w AS (ORDER BY rpr_res_tj.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS c1 > 0);
+
+CREATE VIEW rpr_res_tjr_v AS
+SELECT count(*) OVER w AS cnt
+FROM (JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jt
+      JOIN rpr_res_tb USING (c1)) AS j(k, m),
+     rpr_res_tj
+WINDOW w AS (ORDER BY rpr_res_tj.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS c1 > 0);
+
+-- the join's alias list puts the USING spelling on a column it does not
+-- merge, and that column is the one the DEFINE clause reads
+CREATE VIEW rpr_res_tja_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_ti,
+     (JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jt
+      JOIN rpr_res_tb USING (c1)) AS j(k, c1)
+WINDOW w AS (ORDER BY rpr_res_ti.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS c1 > 0);
+
+-- the same with the TABLEFUNC on the right
+CREATE VIEW rpr_res_tjb_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_res_tb JOIN JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jt
+      USING (c1)) AS j(a, c1)
+WINDOW w AS (ORDER BY j.a
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS c1 > 0);
+
+SELECT pg_get_viewdef('rpr_res_tj_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tj_rt AS '
+       || pg_get_viewdef('rpr_res_tj_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tj_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tj_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_tj_v;
+SELECT * FROM rpr_res_tj_rt;
+
+SELECT pg_get_viewdef('rpr_res_tjr_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tjr_rt AS '
+       || pg_get_viewdef('rpr_res_tjr_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tjr_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tjr_rt'::regclass, true) AS round_trips;
+
+SELECT pg_get_viewdef('rpr_res_tja_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tja_rt AS '
+       || pg_get_viewdef('rpr_res_tja_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tja_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tja_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_tja_v;
+SELECT * FROM rpr_res_tja_rt;
+
+SELECT pg_get_viewdef('rpr_res_tjb_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tjb_rt AS '
+       || pg_get_viewdef('rpr_res_tjb_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tjb_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tjb_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_tjb_v;
+SELECT * FROM rpr_res_tjb_rt;
+
+DROP VIEW rpr_res_tjb_rt, rpr_res_tjb_v;
+DROP VIEW rpr_res_tja_rt, rpr_res_tja_v;
+DROP VIEW rpr_res_tjr_rt, rpr_res_tjr_v;
+DROP VIEW rpr_res_tj_rt, rpr_res_tj_v;
+DROP TABLE rpr_res_tj, rpr_res_tb, rpr_res_ti;
+
+-- The name a USING clause is given for an aliased join has to stay clear of
+-- the names the join's alias list already carries, and of what a DEFINE
+-- clause reads among them.  The anonymous FULL JOIN takes the plain spelling
+-- first, so the second USING has to move past both.
+CREATE TABLE rpr_res_fa (x INT);
+CREATE TABLE rpr_res_fb (x INT);
+CREATE TABLE rpr_res_fc (x INT, y INT);
+INSERT INTO rpr_res_fa VALUES (1);
+INSERT INTO rpr_res_fb VALUES (1);
+INSERT INTO rpr_res_fc VALUES (1, 3);
+
+CREATE VIEW rpr_res_fa_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_res_fa FULL JOIN rpr_res_fb USING (x)),
+     ((rpr_res_fc JOIN rpr_res_fa t4 USING (x)) AS j(x, x_1)
+      JOIN rpr_res_fb t5 USING (x))
+WINDOW w AS (ORDER BY j.x
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x_1 > 0);
+
+SELECT pg_get_viewdef('rpr_res_fa_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_fa_rt AS '
+       || pg_get_viewdef('rpr_res_fa_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_fa_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_fa_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_fa_v;
+SELECT * FROM rpr_res_fa_rt;
+
+DROP VIEW rpr_res_fa_rt, rpr_res_fa_v;
+DROP TABLE rpr_res_fa, rpr_res_fb, rpr_res_fc;
+
+-- A TABLEFUNC that merges through an anonymous join, or that carries a
+-- column alias list of its own, is no different: when a relation column is
+-- renamed onto the TABLEFUNC's name, it is the TABLEFUNC column that moves,
+-- and a third RTE that already spells the name it would have moved to is
+-- kept clear as well.
+CREATE TABLE rpr_res_tk (id INT, y INT);
+INSERT INTO rpr_res_tk VALUES (1, 1), (2, 2);
+CREATE TABLE rpr_res_th (x INT, z INT);
+INSERT INTO rpr_res_th VALUES (1, 1), (2, 2);
+CREATE TABLE rpr_res_ta (id INT, c1 INT);
+INSERT INTO rpr_res_ta VALUES (1, 1), (2, 2);
+CREATE TABLE rpr_res_ts (id INT, s INT);
+INSERT INTO rpr_res_ts VALUES (1, 1), (2, 2);
+CREATE TABLE rpr_res_to (c1_1 INT);
+INSERT INTO rpr_res_to VALUES (9);
+
+CREATE VIEW rpr_res_tk_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_tk,
+     (JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (x int PATH '$')) AS jt
+      JOIN rpr_res_th USING (x)) j
+WINDOW w AS (ORDER BY rpr_res_tk.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS y > 0);
+
+CREATE VIEW rpr_res_ta_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_ta,
+     JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jx(a)
+WINDOW w AS (ORDER BY rpr_res_ta.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS c1 > 0);
+
+CREATE VIEW rpr_res_ts_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_ts, rpr_res_to,
+     JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jx
+WINDOW w AS (ORDER BY rpr_res_ts.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS s > 0);
+
+ALTER TABLE rpr_res_tk RENAME y TO x;
+ALTER TABLE rpr_res_ts RENAME s TO c1;
+
+SELECT pg_get_viewdef('rpr_res_tk_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_tk_rt AS '
+       || pg_get_viewdef('rpr_res_tk_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_tk_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_tk_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_tk_v;
+SELECT * FROM rpr_res_tk_rt;
+
+SELECT pg_get_viewdef('rpr_res_ta_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_ta_rt AS '
+       || pg_get_viewdef('rpr_res_ta_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_ta_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_ta_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_ta_v;
+SELECT * FROM rpr_res_ta_rt;
+
+SELECT pg_get_viewdef('rpr_res_ts_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_ts_rt AS '
+       || pg_get_viewdef('rpr_res_ts_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_ts_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_ts_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_ts_v;
+SELECT * FROM rpr_res_ts_rt;
+
+DROP VIEW rpr_res_ts_rt, rpr_res_ts_v;
+DROP VIEW rpr_res_ta_rt, rpr_res_ta_v;
+DROP VIEW rpr_res_tk_rt, rpr_res_tk_v;
+DROP TABLE rpr_res_tk, rpr_res_th, rpr_res_ta, rpr_res_ts, rpr_res_to;
+
+-- A merged column the DEFINE clause reads is named by the DEFINE clause, not
+-- by the USING clause: the name settled for it is the one the merge adopts.
+-- So a join whose alias list renames the merged column prints the same text
+-- with the DEFINE clause as without it, and a merge two joins deep is reached
+-- through the input the reference resolves to.  A column that turns up later
+-- under the same name elsewhere is the one that moves.
+CREATE TABLE rpr_res_ma (x INT, y INT);
+CREATE TABLE rpr_res_mb (x INT, z INT);
+CREATE TABLE rpr_res_mc (x INT, r INT);
+CREATE TABLE rpr_res_mo (xx INT);
+INSERT INTO rpr_res_ma VALUES (1, 1), (2, 2);
+INSERT INTO rpr_res_mb VALUES (1, 1), (2, 2);
+INSERT INTO rpr_res_mc VALUES (1, 1), (2, 2);
+INSERT INTO rpr_res_mo VALUES (1);
+
+CREATE VIEW rpr_res_ma_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_res_ma JOIN rpr_res_mb USING (x)) AS j(x1, y, z)
+WINDOW w AS (ORDER BY j.y
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x1 > 0);
+
+CREATE VIEW rpr_res_ma_nodef AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_res_ma JOIN rpr_res_mb USING (x)) AS j(x1, y, z)
+WINDOW w AS (ORDER BY j.y
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING);
+
+CREATE VIEW rpr_res_mm_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_res_mo, (rpr_res_ma JOIN rpr_res_mb USING (x)) JOIN rpr_res_mc USING (x)
+WINDOW w AS (ORDER BY rpr_res_ma.y
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS x > 0);
+
+SELECT pg_get_viewdef('rpr_res_ma_v'::regclass, true);
+SELECT pg_get_viewdef('rpr_res_ma_nodef'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_ma_rt AS '
+       || pg_get_viewdef('rpr_res_ma_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_ma_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_ma_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_ma_v;
+SELECT * FROM rpr_res_ma_rt;
+
+SELECT pg_get_viewdef('rpr_res_mm_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_mm_rt AS '
+       || pg_get_viewdef('rpr_res_mm_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_mm_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_mm_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_mm_v;
+SELECT * FROM rpr_res_mm_rt;
+
+-- the name turns up elsewhere only now
+DROP VIEW rpr_res_mm_rt;
+ALTER TABLE rpr_res_mo RENAME xx TO x;
+
+SELECT pg_get_viewdef('rpr_res_mm_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_mm_rt AS '
+       || pg_get_viewdef('rpr_res_mm_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_mm_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_mm_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_mm_v;
+SELECT * FROM rpr_res_mm_rt;
+
+DROP VIEW rpr_res_mm_rt, rpr_res_mm_v;
+DROP VIEW rpr_res_ma_rt, rpr_res_ma_nodef, rpr_res_ma_v;
+DROP TABLE rpr_res_ma, rpr_res_mb, rpr_res_mc, rpr_res_mo;
+
+-- Deparsing a query whose DEFINE clause reads the grouping step expands the
+-- clause's GROUP Vars into the grouping expressions, and over a column merged
+-- by a FULL JOIN USING that expands to the COALESCE the parser built for the
+-- merge.  Printed, both arms come out spelled the same -- a DEFINE clause
+-- carries no qualifier -- so COALESCE(id, id) says nothing about where either
+-- came from, and re-parsing nests one merged column inside another.  The join
+-- RTE still holds what it built, so the expansion is folded back into the
+-- merged column itself.
+CREATE TABLE rpr_cds_l (id INT PRIMARY KEY, val INT);
+CREATE TABLE rpr_cds_r (id INT, val INT);
+CREATE TABLE rpr_cds_o (k INT);
+INSERT INTO rpr_cds_l VALUES (1, 1), (2, 2);
+INSERT INTO rpr_cds_r VALUES (1, 1), (3, 3);
+INSERT INTO rpr_cds_o VALUES (1), (2);
+
+CREATE VIEW rpr_cds_v AS
+SELECT COALESCE(rpr_cds_l.id, rpr_cds_r.id) + 1 AS idp1, count(*) OVER w AS cnt
+FROM rpr_cds_l FULL JOIN rpr_cds_r USING (id)
+GROUP BY COALESCE(rpr_cds_l.id, rpr_cds_r.id) + 1
+WINDOW w AS (ORDER BY COALESCE(rpr_cds_l.id, rpr_cds_r.id) + 1
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS id + 1 > 0);
+
+SELECT pg_get_viewdef('rpr_cds_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_cds_rt AS '
+       || pg_get_viewdef('rpr_cds_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_cds_v'::regclass, true)
+       = pg_get_viewdef('rpr_cds_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_cds_v ORDER BY idp1;
+SELECT * FROM rpr_cds_rt ORDER BY idp1;
+
+-- An outer join above the merge marks the copy the grouping expression
+-- carries and not the copy the join RTE keeps.  Neither mark reaches the
+-- printed text, so the two still name one column.
+CREATE VIEW rpr_cds_null_v AS
+SELECT COALESCE(l.id, r.id) + 1 AS idp1, count(*) OVER w AS cnt
+FROM rpr_cds_o LEFT JOIN (rpr_cds_l l FULL JOIN rpr_cds_r r USING (id)) ON true
+GROUP BY COALESCE(l.id, r.id) + 1
+WINDOW w AS (ORDER BY COALESCE(l.id, r.id) + 1
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS id + 1 > 0);
+
+SELECT pg_get_viewdef('rpr_cds_null_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_cds_null_rt AS '
+       || pg_get_viewdef('rpr_cds_null_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_cds_null_v'::regclass, true)
+       = pg_get_viewdef('rpr_cds_null_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_cds_null_v ORDER BY idp1;
+SELECT * FROM rpr_cds_null_rt ORDER BY idp1;
+
+-- and the same nesting where the join above nulls nothing, which the exact
+-- match takes
+CREATE VIEW rpr_cds_inner_v AS
+SELECT COALESCE(l.id, r.id) + 1 AS idp1, count(*) OVER w AS cnt
+FROM (rpr_cds_l l FULL JOIN rpr_cds_r r USING (id)) JOIN rpr_cds_o ON true
+GROUP BY COALESCE(l.id, r.id) + 1
+WINDOW w AS (ORDER BY COALESCE(l.id, r.id) + 1
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS id + 1 > 0);
+
+SELECT pg_get_viewdef('rpr_cds_inner_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_cds_inner_rt AS '
+       || pg_get_viewdef('rpr_cds_inner_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_cds_inner_v'::regclass, true)
+       = pg_get_viewdef('rpr_cds_inner_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_cds_inner_v ORDER BY idp1;
+SELECT * FROM rpr_cds_inner_rt ORDER BY idp1;
+
+-- A merge built over another merge -- a FULL JOIN USING above a FULL JOIN
+-- USING -- expands to a COALESCE over a COALESCE.  The inner one is folded
+-- first, so that the outer one is seen whole and folds in turn; folded
+-- inside out, it re-parses to itself rather than to twice the nesting.
+CREATE VIEW rpr_cds_nest_v AS
+SELECT count(*) OVER w AS cnt
+FROM (rpr_cds_l FULL JOIN rpr_cds_r USING (id)) FULL JOIN rpr_cds_r t USING (id)
+GROUP BY rpr_cds_l.id, rpr_cds_r.id, t.id
+WINDOW w AS (ORDER BY rpr_cds_l.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+)
+             DEFINE A AS id > 0);
+
+SELECT pg_get_viewdef('rpr_cds_nest_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_cds_nest_rt AS '
+       || pg_get_viewdef('rpr_cds_nest_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_cds_nest_v'::regclass, true)
+       = pg_get_viewdef('rpr_cds_nest_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_cds_nest_v;
+SELECT * FROM rpr_cds_nest_rt;
+
+DROP VIEW rpr_cds_nest_rt, rpr_cds_nest_v;
+DROP VIEW rpr_cds_inner_rt, rpr_cds_inner_v;
+DROP VIEW rpr_cds_null_rt, rpr_cds_null_v;
+DROP VIEW rpr_cds_rt, rpr_cds_v;
+DROP TABLE rpr_cds_l, rpr_cds_r, rpr_cds_o;
+
+-- A rule deparses with varprefix on no matter what its action query looks
+-- like, the range table always holding *OLD* and *NEW*, so a DEFINE clause in
+-- one would be printed with qualifiers that the parser rejects outright.
+-- get_rule_define() turns the prefix off for the clause, and without that a
+-- rule holding a row pattern query could not be restored at all -- not even a
+-- single-table one, which is what makes this its own case and not the view's.
+CREATE TABLE rpr_rule_t (id INT, val INT);
+CREATE TABLE rpr_rule_log (id INT, cnt BIGINT);
+
+CREATE RULE rpr_rule_r AS ON INSERT TO rpr_rule_t DO ALSO
+  INSERT INTO rpr_rule_log
+    SELECT id, count(*) OVER w FROM rpr_rule_t
+    WINDOW w AS (ORDER BY id
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+)
+                 DEFINE A AS val > 0);
+
+SELECT pg_get_ruledef(oid, true) FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
+
+-- and that text is what has to reparse
+CREATE TABLE rpr_rule_saved AS
+  SELECT pg_get_ruledef(oid, true) AS def
+    FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
+DROP RULE rpr_rule_r ON rpr_rule_t;
+SELECT def FROM rpr_rule_saved \gexec
+SELECT (SELECT def FROM rpr_rule_saved) = pg_get_ruledef(oid, true) AS round_trips
+  FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
+
+-- the restored rule still fires.  A rule action is run against the rows the
+-- statement supplies as well as the table, so a two-row INSERT gives the
+-- window four rows to order by two distinct ids; sort the result on both
+-- columns, the pairs within an id being interchangeable.
+INSERT INTO rpr_rule_t VALUES (1, 1), (2, 2);
+SELECT * FROM rpr_rule_log ORDER BY id, cnt;
+
+DROP TABLE rpr_rule_saved;
+DROP TABLE rpr_rule_t, rpr_rule_log;
+
+-- A relation alias that happens to spell a pattern variable is the other way
+-- the prefix goes wrong.  Printed as up.price it does not come back as a
+-- range variable qualifier, which is merely rejected, but as a pattern
+-- variable one, which is rejected by a different rule and with a different
+-- message.  Two RTEs are what turns the prefix on.
+CREATE TABLE rpr_pvar_a (id INT, price INT);
+CREATE TABLE rpr_pvar_b (id INT);
+INSERT INTO rpr_pvar_a VALUES (1, 10), (2, 20), (3, 5);
+INSERT INTO rpr_pvar_b VALUES (1), (2), (3);
+
+CREATE VIEW rpr_pvar_v AS
+SELECT count(*) OVER w AS cnt
+FROM rpr_pvar_a up, rpr_pvar_b
+WHERE up.id = rpr_pvar_b.id
+WINDOW w AS (ORDER BY up.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (up+)
+             DEFINE up AS price > 0);
+
+SELECT pg_get_viewdef('rpr_pvar_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_pvar_rt AS '
+       || pg_get_viewdef('rpr_pvar_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_pvar_v'::regclass, true)
+       = pg_get_viewdef('rpr_pvar_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_pvar_v;
+SELECT * FROM rpr_pvar_rt;
+
+DROP VIEW rpr_pvar_rt, rpr_pvar_v;
+DROP TABLE rpr_pvar_a, rpr_pvar_b;
+
 -- The same query written fresh is rejected, since nothing pins the name for
 -- it.  Pinning is what lets the stored definition above still reparse.
 SELECT j1.id, count(*) OVER w AS cnt
