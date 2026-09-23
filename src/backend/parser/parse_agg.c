@@ -592,6 +592,10 @@ check_agglevels_and_constraints(ParseState *pstate, Node *expr)
 
 			break;
 
+		case EXPR_KIND_RPR_DEFINE:
+			errkind = true;
+			break;
+
 			/*
 			 * There is intentionally no default: case here, so that the
 			 * compiler will warn if we add a new ParseExprKind without
@@ -1034,6 +1038,9 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 		case EXPR_KIND_FOR_PORTION:
 			err = _("window functions are not allowed in FOR PORTION OF expressions");
 			break;
+		case EXPR_KIND_RPR_DEFINE:
+			errkind = true;
+			break;
 
 			/*
 			 * There is intentionally no default: case here, so that the
@@ -1114,7 +1121,8 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 				equal(refwin->orderClause, windef->orderClause) &&
 				refwin->frameOptions == windef->frameOptions &&
 				equal(refwin->startOffset, windef->startOffset) &&
-				equal(refwin->endOffset, windef->endOffset))
+				equal(refwin->endOffset, windef->endOffset) &&
+				equal(refwin->rpCommonSyntax, windef->rpCommonSyntax))
 			{
 				/* found a duplicate window specification */
 				wfunc->winref = winref;
@@ -1332,6 +1340,38 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 								   gset_common,
 								   have_non_var_grouping,
 								   &func_grouped_rels);
+
+	/*
+	 * A row pattern DEFINE clause is the one part of a WindowClause holding
+	 * an expression tree of its own, so it needs the substitution too:
+	 * partitionClause and orderClause carry just a sortgroupref into the
+	 * target list, and the frame offsets are checked to be Var-free.  Without
+	 * this its Vars would stay plain relation Vars while the target list
+	 * copies of the same columns become Vars of the RTE_GROUP RTE, and a
+	 * grouping set that nulls one of those columns would make the two copies
+	 * disagree in varnullingrels, which setrefs.c reports as an internal
+	 * error.
+	 *
+	 * No finalize_grouping_exprs() goes with it.  That call finalizes
+	 * GROUPING expressions, and a DEFINE clause cannot hold one --
+	 * transformExpr() rejects a GroupingFunc under EXPR_KIND_RPR_DEFINE
+	 * before we get here.
+	 */
+	foreach_node(WindowClause, wc, qry->windowClause)
+	{
+		if (wc->defineClause == NIL)
+			continue;
+
+		clause = (Node *) wc->defineClause;
+		if (hasJoinRTEs)
+			clause = flatten_join_alias_for_parser(qry, clause, 0);
+		wc->defineClause = (List *)
+			substitute_grouped_columns(clause, pstate, qry,
+									   groupClauses, groupClauseCommonVars,
+									   gset_common,
+									   have_non_var_grouping,
+									   &func_grouped_rels);
+	}
 
 	/*
 	 * Per spec, aggregates can't appear in a recursive term.
