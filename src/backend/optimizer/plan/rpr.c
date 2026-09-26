@@ -1326,13 +1326,15 @@ fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
  * Element layout for (A B){2,3}:
  *
  *   [BEGIN]  [A]  [B]  [END]  [next element...]
- *     |                  |          ^
- *     |                  +-- jump --+ (loop back to first child)
- *     +---- jump -------------------+ (skip to after END)
+ *     |       ^           | |       ^
+ *     |       +-- jump ---+ +-next--+ (END.jump: loop back to first child)
+ *     +------- jump ------^           (BEGIN.jump: this group's END)
  *
- * BEGIN.jump points past END (the skip path taken when min == 0; a count is
- * only tested at END, so a BEGIN never takes it for reaching max).
- * END.jump points to the first child (loop-back path).
+ * BEGIN.jump points at the group's own END, so either marker finds the other
+ * in one step.  The skip path taken when min == 0 leaves through END.next
+ * without arriving at the END: a count is only tested there, so a BEGIN
+ * never takes the skip for reaching max.  END.jump points to the first child
+ * (loop-back path).
  * BEGIN.next and END.next are set later by finalizeRPRPattern().
  *
  * Returns the group's empty-match flags.  RPR_ELEM_EMPTY_LOOP is set when the
@@ -1396,10 +1398,10 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		/* The END carries the body's bits, not the group's; see README IV-4b */
 		endElem->flags |= bodyFlags;
 
-		(*idx)++;
+		/* Set BEGIN's link to its END (next is set by finalize) */
+		beginElem->jump = *idx;
 
-		/* Set BEGIN skip pointer (next is set by finalize) */
-		beginElem->jump = *idx; /* skip: go to after END */
+		(*idx)++;
 	}
 
 	result = bodyFlags;
@@ -1421,7 +1423,7 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
  * terminating every alternative (including the last) with a SEP
  * branch-separator marker.  The branch link runs from ALT through the SEP
  * chain, never through the branch content: a branch's first element may
- * itself be a group BEGIN, whose jump is that group's skip-past-END path.
+ * itself be a group BEGIN, whose jump is that group's END.
  *
  *   ALT.next  -> first branch content      SEP.next -> next branch content
  *   ALT.jump  -> first SEP                            (post-ALT on the last)
@@ -1547,16 +1549,6 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 			pat->elements[endPos].next = afterAltIdx;
 		}
 
-		/*
-		 * A branch-terminal group's BEGIN skip-past-END path points at the
-		 * element following the group, which is this branch's SEP; redirect
-		 * it past the alternation too so the skip never lands on a SEP.
-		 */
-		for (elemIdx = branchStart; elemIdx <= endPos; elemIdx++)
-		{
-			if (pat->elements[elemIdx].jump == sepIdx)
-				pat->elements[elemIdx].jump = afterAltIdx;
-		}
 	}
 
 	list_free(altBranchStarts);

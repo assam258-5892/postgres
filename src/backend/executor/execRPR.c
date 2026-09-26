@@ -53,6 +53,27 @@ nfa_mark_visited(WindowAggState *winstate, int16 elemIdx)
 	winstate->nfaVisitedMaxWord = Max(winstate->nfaVisitedMaxWord, w);
 }
 
+/*
+ * A group entered through its BEGIN has consumed nothing yet in this
+ * iteration, and the DFS that follows takes only epsilon transitions, so any
+ * arrival at the group's END within it is an empty iteration.  Mark the END
+ * now: its arrival-time mark comes too late for the first arrival, and the
+ * cycle guard would otherwise let an empty first iteration at count >= min
+ * loop back (TR 19075-5 7.2.8).  A loop-back arrives at the END first, so
+ * only entry through BEGIN needs this.
+ */
+static inline void
+nfa_mark_group_entered(WindowAggState *winstate, RPRPatternElement *begin)
+{
+	RPRPatternElement *end = &winstate->rpPattern->elements[begin->jump];
+
+	Assert(RPRElemIsBegin(begin));
+	Assert(RPRElemIsEnd(end) && end->depth == begin->depth);
+
+	if (RPRElemCanEmptyLoop(end))
+		nfa_mark_visited(winstate, begin->jump);
+}
+
 /* Forward declarations */
 static RPRNFAState *nfa_state_make(WindowAggState *winstate);
 static void nfa_state_free(WindowAggState *winstate, RPRNFAState *state);
@@ -1147,6 +1168,9 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	RPRPatternElement *elements = pattern->elements;
 	RPRNFAState *skipState = NULL;
 
+	/* The skip leaves through the END's exit without arriving at the END */
+	RPRElemIdx	skipIdx = elements[elem->jump].next;
+
 	/*
 	 * Entry-side check of the count-clear policy: the group's own count slot
 	 * is already zero here.  BEGIN is only visited at initial group entry,
@@ -1159,14 +1183,14 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	{
 		RPRPatternElement *landElem;
 
-		skipState = nfa_state_clone(winstate, elem->jump,
+		skipState = nfa_state_clone(winstate, skipIdx,
 									state->counts, state->isAbsorbable);
 
 		/*
 		 * As in nfa_route_to_elem, a skip that lands directly on an outer END
 		 * still counts as an iteration of that END's group.
 		 */
-		landElem = &elements[elem->jump];
+		landElem = &elements[skipIdx];
 		if (RPRElemIsEnd(landElem))
 			RPRCountIncrement(skipState->counts[landElem->depth]);
 	}
@@ -1175,7 +1199,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	{
 		/* Reluctant: skip first (prefer fewer iterations), enter second */
 		nfa_route_to_elem(winstate, ctx, skipState,
-						  &elements[elem->jump], currentPos);
+						  &elements[skipIdx], currentPos);
 
 		/* The skip matched: do not enter the group over it */
 		if (ctx->matchUpdated)
@@ -1184,6 +1208,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 			return;
 		}
 
+		nfa_mark_group_entered(winstate, elem);
 		state->elemIdx = elem->next;
 		nfa_route_to_elem(winstate, ctx, state,
 						  &elements[state->elemIdx], currentPos);
@@ -1196,6 +1221,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 		 * skip path; for non-nullable groups (skipState == NULL, min>0) the
 		 * skip-path action is suppressed by the guard below.
 		 */
+		nfa_mark_group_entered(winstate, elem);
 		state->elemIdx = elem->next;
 		nfa_route_to_elem(winstate, ctx, state,
 						  &elements[state->elemIdx], currentPos);
@@ -1211,7 +1237,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 		if (skipState != NULL)
 		{
 			nfa_route_to_elem(winstate, ctx, skipState,
-							  &elements[elem->jump], currentPos);
+							  &elements[skipIdx], currentPos);
 		}
 	}
 }
