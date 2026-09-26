@@ -1282,8 +1282,8 @@ typedef struct RPRPatternElement
 	RPRQuantity min;			/* quantifier minimum */
 	RPRQuantity max;			/* quantifier maximum */
 	RPRElemIdx	next;			/* next element index */
-	RPRElemIdx	jump;			/* ALT/SEP branch link, or GROUP
-								 * skip/loop-back */
+	RPRElemIdx	jump;			/* ALT/SEP branch link; BEGIN: its END; END:
+								 * loop-back to first child */
 } RPRPatternElement;
 
 /*

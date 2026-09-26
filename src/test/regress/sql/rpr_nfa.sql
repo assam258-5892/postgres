@@ -5242,6 +5242,137 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
+-- (A? | B){1,2} C over the same rows: the lower bound is met by the first
+-- iteration, so an empty first iteration via A? stops the loop at once;
+-- C fails at row 1 and backtracking takes B, then A, C = rows 1-3, as Perl's
+-- (?:a?|b){1,2}c does.  This is the first arrival at the group's END, which
+-- the cycle guard has to recognize as empty although it has not seen that
+-- END before; an engine that misses it keeps the empty iteration and
+-- returns rows 1-2 through empty, B, C.
+WITH test_728_stop_first_iteration AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_stop_first_iteration
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B){1,2} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- The same with a lower bound of zero, which the standard groups with one.
+WITH test_728_stop_first_iteration_min0 AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_stop_first_iteration_min0
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A? | B){0,2} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- The same under SKIP PAST LAST ROW: rows 2 and 3 fall inside the match.
+WITH test_728_stop_first_iteration_past AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_stop_first_iteration_past
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A? | B){1,2} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (B?? | B*){0,2} C: the reluctant first branch goes empty first, which at
+-- min 0 stops the loop, and C fails at row 1.  Backtracking lets B?? take
+-- row 1, the second iteration goes empty and stops, C fails at row 2, so
+-- B?? takes row 2 as well and C matches row 3: rows 1-3, as in Perl.
+-- Missing the empty first iteration instead lets the loop run again after
+-- it, and the match becomes the longer rows 1-4 (empty, then B* over rows
+-- 1-3, then C) -- a derivation 7.2.8 excludes.
+WITH test_728_stop_first_iteration_reluctant AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['B']),
+        (3, ARRAY['B','C']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_stop_first_iteration_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((B?? | B*){0,2} C)
+    DEFINE
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- (A?? | B*){0,2} C: the reluctant empty iteration stops the loop, and
+-- backtracking reaches B* over rows 1-2, then A?? taking row 3 in the
+-- second iteration and C on row 4: rows 1-4, as in Perl.  Missing the empty
+-- first iteration returns rows 1-2 instead.
+WITH test_728_stop_first_iteration_mixed AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['B','C']),
+        (3, ARRAY['A']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_728_stop_first_iteration_mixed
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN ((A?? | B*){0,2} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
 -- (A? | B){3} C over the same rows: with an exact bound the two empty
 -- iterations sit below min, so the loop must continue; the third takes B
 -- and the match is rows 1-2.  Contrast with the {2,3} case above.
