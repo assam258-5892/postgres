@@ -301,11 +301,11 @@ llvm_compile_expr(ExprState *state)
 								   "v.econtext.aggnulls");
 
 	/*
-	 * RPR navigation opcodes (PREV/NEXT) swap ecxt_outertuple to a different
-	 * row mid-expression.  The JIT code loads v_outervalues and v_outernulls
-	 * once in the entry block and reuses them for all EEOP_OUTER_VAR steps.
-	 * After a slot swap, these cached pointers become stale because the new
-	 * slot has its own tts_values/tts_isnull arrays.
+	 * RPR navigation opcodes (PREV/NEXT/FIRST/LAST) swap ecxt_outertuple to a
+	 * different row mid-expression.  The JIT code loads v_outervalues and
+	 * v_outernulls once in the entry block and reuses them for all
+	 * EEOP_OUTER_VAR steps.  After a slot swap, these cached pointers become
+	 * stale because the new slot has its own tts_values/tts_isnull arrays.
 	 *
 	 * When RPR navigation opcodes are present, EEOP_OUTER_VAR reloads the
 	 * slot pointer from econtext->ecxt_outertuple on every access instead of

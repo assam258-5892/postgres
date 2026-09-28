@@ -584,8 +584,8 @@ typedef struct SortBy
  */
 typedef enum RPSkipTo
 {
-	ST_NONE,					/* no AFTER MATCH clause; default for non-RPR
-								 * windows */
+	ST_NONE,					/* not a row pattern window; an omitted AFTER
+								 * MATCH gives ST_PAST_LAST_ROW */
 	ST_NEXT_ROW,				/* SKIP TO NEXT ROW */
 	ST_PAST_LAST_ROW,			/* SKIP TO PAST LAST ROW */
 } RPSkipTo;
@@ -1636,6 +1636,13 @@ typedef struct GroupingSet
  * TargetEntry). TargetEntry.resname represents row pattern definition
  * variable name. "rpPattern" represents the PATTERN clause as a parse tree
  * (RPRPatternNode).
+ * Parse analysis sets rpSkipTo, defineClause and rpPattern from one grammar
+ * production, or none of them.  The planner does not keep them so:
+ * grouping_planner() empties defineClause alone on a window clause that will
+ * not run, one not in activeWindows.  Test rpPattern, never defineClause, for
+ * "is this a row pattern window".  An empty defineClause beside a non-null
+ * rpPattern means the clause will not run; a non-empty one does not mean it
+ * will.
  *
  */
 typedef struct WindowClause
@@ -1664,8 +1671,8 @@ typedef struct WindowClause
 	Index		winref;			/* ID referenced by window functions */
 	/* did we copy orderClause from refname? */
 	bool		copiedOrder pg_node_attr(query_jumble_ignore);
-	/* Row Pattern AFTER MATCH SKIP clause */
-	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
+	/* AFTER MATCH SKIP type; ST_NONE if this is not a row pattern window */
+	RPSkipTo	rpSkipTo;
 	/* Row Pattern DEFINE clause (list of TargetEntry) */
 	List	   *defineClause pg_node_attr(custom_query_jumble);
 	/* Row Pattern PATTERN parse tree */

@@ -1193,15 +1193,11 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				 * build_define_offsets() filled at startup; the values in it
 				 * are settled per scan by resolve_nav_offsets().
 				 */
-				if (nav->navno < 0 ||
-					nav->navno >= list_length(winstate->rprNavOffsets))
-					elog(ERROR, "RPRNavExpr navno %d out of range for %d offsets entries",
-						 nav->navno, list_length(winstate->rprNavOffsets));
+				Assert(nav->navno >= 0 &&
+					   nav->navno < list_length(winstate->rprNavOffsets));
 
 				entry = list_nth(winstate->rprNavOffsets, nav->navno);
-				if (entry->nav != nav)
-					elog(ERROR, "offsets entry %d belongs to a different RPRNavExpr",
-						 nav->navno);
+				Assert(entry->nav == nav);
 				rprnavstate = entry->rprnavstate;
 
 				/* Emit SET opcode: swap slot to target row */

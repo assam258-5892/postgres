@@ -4697,11 +4697,12 @@ mark_define_column(deparse_namespace *dpns, Var *var)
  *
  * mark_define_columns() stores a name into the colnames entry of the RTE a
  * DEFINE reference resolves to, and for a column merged by an unaliased
- * INNER or LEFT JOIN that is an input of the join rather than the join
- * itself.  A merged column has to be named the same on both sides, so
- * set_using_names() asks here, before inventing a name, whether one of the
- * inputs has settled it already.  A join input is followed down the way the
- * parser built the merged column, through joinaliasvars.
+ * INNER, LEFT or RIGHT JOIN with no type coercion that is an input of the
+ * join rather than the join itself.  A merged column has to be named the
+ * same on both sides, so set_using_names() asks here, before inventing a
+ * name, whether one of the inputs has settled it already.  A join input is
+ * followed down the way the parser built the merged column, through
+ * joinaliasvars.
  */
 static char *
 preset_input_colname(deparse_namespace *dpns, int varno, AttrNumber attno)

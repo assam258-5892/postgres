@@ -1298,6 +1298,21 @@ prepare_tuplestore(WindowAggState *winstate)
 		 * resolve_nav_offsets() runs before the first begin_partition(), so
 		 * the kind here is FIXED or RETAIN_ALL even for a parameterized
 		 * offset; RETAIN_ALL disables trim.
+		 *
+		 * XXX one read pointer serves two fetches that sit far apart.
+		 * rpr_prepare_row() fetches the frontier row the NFA is advancing
+		 * over, and ExecRPRNavGetSlot() fetches near matchStartRow for the
+		 * FIRST family; both go through window_gettupleslot(), which seeks
+		 * relative to seekpos, so the two drag the one pointer across the
+		 * whole match on every row.  In memory that is a pointer move, but
+		 * once the tuplestore spills tuplestore_skiptuples() is
+		 * tuple-at-a-time tape I/O and the cost turns quasi-quadratic:
+		 * PATTERN (S A+) DEFINE A AS v >= FIRST(v) under work_mem 64kB takes
+		 * 0.84 s at 2,000 rows, 5.4 s at 4,000 and 24.3 s at 8,000, against
+		 * 2.6 ms for those same 8,000 rows in memory.  The answers are
+		 * identical either way.  Separating them needs a second WindowObject
+		 * carrying its own read pointer for match-start navigation, which
+		 * stays inside this file.
 		 */
 		winstate->nav_winobj->markptr =
 			tuplestore_alloc_read_pointer(winstate->buffer, 0);
@@ -3066,8 +3081,8 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
 
 		/*
-		 * Must run this before the ExecInitExpr() loop over defineClause:
-		 * while compiling each RPRNavExpr, ExecInitExpr() reads
+		 * Must run this before the ExecInitQual() loop over defineClause:
+		 * while compiling each RPRNavExpr, ExecInitQual() reads
 		 * winstate->rprNavOffsets to link the RPRNavState to its entry and
 		 * seed the offset, and this call is what fills that list
 		 */
@@ -3075,7 +3090,7 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 
 		/*
 		 * Compile DEFINE clause expressions.  PREV/NEXT navigation is handled
-		 * by EEOP_RPR_NAV_SET/RESTORE opcodes emitted during ExecInitExpr, so
+		 * by EEOP_RPR_NAV_SET/RESTORE opcodes emitted during ExecInitQual, so
 		 * no varno rewriting is needed here.  Expressions are kept in DEFINE
 		 * order, so their list index equals the variable's varId.
 		 */
@@ -3198,10 +3213,10 @@ ExecRPRNavGetSlot(WindowAggState *winstate, int64 pos)
 
 	/*
 	 * If nav_slot already holds this position, return it without re-fetching.
-	 * This is critical when multiple PREV/NEXT calls in the same expression
-	 * navigate to the same row, because re-fetching would free the slot's
-	 * tuple memory and invalidate any pass-by-ref Datum pointers from earlier
-	 * navigation results.
+	 * This saves a tuplestore fetch when several navigations in the same
+	 * expression target the same row.  Earlier pass-by-ref results do not
+	 * depend on it: EEOP_RPR_NAV_RESTORE copies them out of nav_slot's tuple
+	 * memory.
 	 */
 	if (winstate->nav_slot_pos == pos)
 		return slot;
@@ -4178,16 +4193,15 @@ nav_offsets_walker(Node *node, WindowAggState *winstate)
  *
  * The concrete offset values -- and the tuplestore trim bounds derived from
  * them -- are resolved later, per scan, by resolve_nav_offsets().  Only an RPR
- * window reaches here, and the fields this fills are left at their palloc0
- * defaults on the paths that return early.
+ * window reaches here.
  */
 static void
 build_define_offsets(WindowAggState *winstate, List *defineClause)
 {
 	EvalDefineOffsetsContext ctx;
 
-	if (defineClause == NIL)
-		return;
+	/* DEFINE is mandatory, so an RPR window always has a clause */
+	Assert(defineClause != NIL);
 
 	foreach_node(TargetEntry, te, defineClause)
 	{
@@ -4404,8 +4418,8 @@ resolve_nav_offsets(WindowAggState *winstate)
 	winstate->navFirstOffset = 0;
 	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
 
-	if (winstate->rprNavOffsets == NIL)
-		return;
+	/* The request is pending only for a window that holds a navigation */
+	Assert(winstate->rprNavOffsets != NIL);
 
 	ctx.winstate = winstate;
 	ctx.maxOffset = 0;
@@ -4453,14 +4467,14 @@ rpr_is_defined(WindowAggState *winstate)
  * Determine whether a row is in the current row's reduced window frame
  * according to row pattern matching
  *
- * The row must have already been determined to be in a full window frame
- * and fetched into the slot.
+ * If pos is not yet determined, the match is first driven forward by
+ * ensure_reduced_frame().
  *
  * Returns:
  * = 0, RPR is not defined.
  * >0, if the row is the first in the reduced frame. Return the number of rows
  * in the reduced frame.
- * -1, if the row is an unmatched row
+ * -1, if the row is unmatched or starts an empty match
  * -2, if the row is inside the current match but is not its first row (an
  * interior row of the match)
  * -----------------
@@ -4616,9 +4630,8 @@ advance_nav_mark(WindowAggState *winstate, int64 currentPos)
 {
 	int64		navmarkpos;
 
-	/* No RPR navigation read pointer: nothing to advance */
-	if (winstate->nav_winobj == NULL)
-		return;
+	/* Every RPR window has its navigation read pointer */
+	Assert(winstate->nav_winobj != NULL);
 
 	/* RETAIN_ALL (offset overflow) disables trim for the backward dimension */
 	if (winstate->navMaxOffsetKind == RPR_NAV_OFFSET_RETAIN_ALL)
@@ -4666,8 +4679,8 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx)
 	/*
 	 * Determine where to start processing. Usually nfaLastProcessedRow+1 >=
 	 * matchStartRow since contexts are created at currentPos+1 during
-	 * processing.  However, matchStartRow can exceed this when rows are
-	 * skipped (e.g., unmatched rows don't update nfaLastProcessedRow).
+	 * processing.  However, a context update_reduced_frame() creates on
+	 * demand, for a pos past nfaLastProcessedRow, can start beyond it.
 	 */
 	startPos = Max(targetCtx->matchStartRow,
 				   winstate->nfaLastProcessedRow + 1);

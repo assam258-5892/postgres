@@ -270,11 +270,12 @@ transformExpressionList(ParseState *pstate, List *exprlist,
 				 *
 				 * No DEFINE test is needed here, unlike the ColumnRef arm
 				 * above.  ExpandIndirectionStar() transforms the
-				 * parenthesized argument under the same expression kind, so a
-				 * range variable still reaches transformWholeRowRef() and is
-				 * rejected; what survives is field selection on a value,
-				 * "(x).*", which occupies no qualifier slot and is allowed in
-				 * DEFINE for the same reason "(x).f" is.
+				 * parenthesized argument with p_rpr_define still set, so
+				 * transformColumnRef() still rejects a range variable before
+				 * it becomes a whole-row reference; what survives is field
+				 * selection on a value, "(x).*", which occupies no qualifier
+				 * slot and is allowed in DEFINE for the same reason "(x).f"
+				 * is.
 				 */
 				result = list_concat(result,
 									 ExpandIndirectionStar(pstate, ind,
@@ -1284,11 +1285,11 @@ ExpandColumnRefStar(ParseState *pstate, ColumnRef *cref,
 		 * FROM-clause relation, or a name that resolves to nothing at all. A
 		 * row pattern DEFINE condition may have neither, and expanding one
 		 * here binds it by RTE rather than by name, past the checks in
-		 * transformColumnRef() and transformWholeRowRef().  Decline, so that
-		 * the caller hands the whole reference to transformExpr() and it is
-		 * diagnosed there, where every other DEFINE spelling is: a relation
-		 * as a whole-row reference, a pattern variable as the qualifier it
-		 * reserves, an unresolved name as the qualified name it is.
+		 * transformColumnRef().  Decline, so that the caller hands the whole
+		 * reference to transformExpr() and it is diagnosed there, where every
+		 * other DEFINE spelling is: a pattern variable as the qualifier it
+		 * reserves, and any other name, resolved or not, as the whole-row
+		 * reference its form makes it.
 		 *
 		 * A name a hook owns has returned above, which is the point of
 		 * deciding here rather than in the caller.  Withholding the expansion

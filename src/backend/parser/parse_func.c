@@ -2156,12 +2156,14 @@ is_rpr_navigation_name(const char *name)
  * ParseRPRNavCall
  *		Recognize a row pattern navigation operation in a DEFINE clause.
  *
- * Inside an EXPR_KIND_RPR_DEFINE clause an unqualified call to one of the
- * names PREV/NEXT/FIRST/LAST denotes the corresponding row pattern navigation
- * operation (ISO/IEC 19075-5 Subclause 5.6), not an ordinary function call.
+ * Anywhere inside a DEFINE condition (p_rpr_define is set, even where a
+ * nested FILTER or aggregate ORDER BY has changed p_expr_kind) an unqualified
+ * call to one of the names PREV/NEXT/FIRST/LAST denotes the corresponding row
+ * pattern navigation operation (ISO/IEC 19075-5 Subclause 5.6), not an
+ * ordinary function call.
  * The name is matched here, before any catalog lookup, with no fallback to
  * function resolution: once it matches, decoration and argument-count
- * violations are dedicated errors rather than letting an ordinary function of
+ * violations are hard errors rather than letting an ordinary function of
  * the same name take over.  A schema-qualified call (the caller restricts us
  * to unqualified names) is the documented way to reach such a function
  * instead.

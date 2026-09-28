@@ -535,14 +535,13 @@ mergeConsecutiveAlts(List *children)
  * the GROUP in a SEQ, merge them by incrementing the GROUP's quantifier.
  * This runs iteratively: A B A B (A B)+ A B -> (A B){4,}.
  *
- * Algorithm:
- *   For each GROUP encountered in the sequence:
- *   1. PREFIX phase: compare the last N survivors kept so far against the
- *      GROUP's children.  On match, drop them and increment the GROUP's
- *      min/max.  Repeat until no match.
- *   2. SUFFIX phase: compare the next N elements not yet read against the
- *      GROUP's children.  On match, skip them and increment min/max.
- *      Repeat until no match.
+ * Algorithm, in two passes over the whole sequence:
+ *   1. PREFIX phase: for each GROUP, compare the last N survivors kept so
+ *      far against the GROUP's children.  On match, drop them and increment
+ *      the GROUP's min/max.  Repeat until no match.
+ *   2. SUFFIX phase: for each GROUP, compare the next N elements not yet
+ *      read against the GROUP's children.  On match, skip them and
+ *      increment min/max.  Repeat until no match.
  *
  * Examples:
  *   A B (A B)+ -> (A B){2,}
@@ -1335,7 +1334,7 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		if (node->reluctant)
 			endElem->flags |= RPR_ELEM_RELUCTANT;
 
-		/* The END carries the body's bits, not the group's; see README IV-4b */
+		/* The END carries the body's bits, not the group's; see README V-6 */
 		endElem->flags |= bodyFlags;
 
 		/* Set BEGIN's link to its END (next is set by finalize) */
@@ -1369,8 +1368,9 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
  *   ALT.jump  -> first SEP                            (post-ALT on the last)
  *   SEP.jump  -> next SEP (-1 on the last)
  *
- * SEP is a marker, never a state: a branch's tail and a branch-terminal
- * group's BEGIN skip are redirected past the alternation.
+ * SEP is a marker, never a state: each branch's tail is redirected past the
+ * alternation.  A branch-terminal group's BEGIN skip needs no redirect of its
+ * own, since it leaves through the group's END, which is that branch's tail.
  *
  * Returns the alternation's empty-match flags.  RPR_ELEM_EMPTY_LOOP is set if
  * any branch is nullable (OR: one nullable branch suffices).
@@ -1922,9 +1922,10 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
  *     - Simple unbounded VAR: the VAR itself (e.g., A in A+)
  *     - Unbounded GROUP: the END element (e.g., END in (A B)+)
  *   RPR_ELEM_ABSORBABLE_BRANCH: All elements in absorbable region
- *     - Simple unbounded VAR: the VAR itself only
+ *     - Simple unbounded VAR: the VAR itself
  *     - Unbounded GROUP: the whole body (including nested subgroups) and the
- *       group's END, plus any enclosing BEGIN/ALT on the path to it
+ *       group's END
+ *     - in either case, plus any enclosing BEGIN/ALT on the path to it
  *
  * Examples:
  *   A+ B C         - absorbable (A gets both flags)
