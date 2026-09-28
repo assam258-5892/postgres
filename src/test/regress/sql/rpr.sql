@@ -1,15 +1,15 @@
 --
--- Test for row pattern recognition: WINDOW clause integration and
--- scenario tests using synthetic stock data.
+-- 행 패턴 인식(RPR) 테스트: WINDOW 절 통합과 가상의 주가 데이터를 사용한
+-- 시나리오 테스트.
 --
--- Parser/planner tests: rpr_base.sql
--- NFA engine tests: rpr_nfa.sql
--- EXPLAIN statistics tests: rpr_explain.sql
+-- 파서/플래너 테스트: rpr_base.sql
+-- NFA 엔진 테스트: rpr_nfa.sql
+-- EXPLAIN 통계 테스트: rpr_explain.sql
 --
 
 \getenv abs_srcdir PG_ABS_SRCDIR
 
--- Synthetic stock data for RPR pattern matching tests
+-- RPR 패턴 매칭 테스트용 가상 주가 데이터
 CREATE TABLE rpr_stock (
        part_id integer,
        rn      integer,
@@ -40,10 +40,10 @@ INSERT INTO rpr_price VALUES
 SELECT * FROM rpr_price;
 
 --
--- Basic pattern matching with PREV/NEXT
+-- PREV/NEXT를 사용한 기본 패턴 매칭
 --
 
--- basic test using PREV
+-- PREV를 사용하는 기본 테스트
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
  FROM rpr_price
@@ -58,7 +58,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- basic test using PREV. UP appears twice
+-- PREV를 사용하는 기본 테스트. UP이 두 번 나타난다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
  FROM rpr_price
@@ -73,7 +73,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- basic test using PREV. Use '*'
+-- PREV를 사용하는 기본 테스트. '*'를 사용한다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
  FROM rpr_price
@@ -88,7 +88,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- basic test using PREV. Use '?'
+-- PREV를 사용하는 기본 테스트. '?'를 사용한다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
  FROM rpr_price
@@ -103,7 +103,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- test using alternation (|) with sequence
+-- 시퀀스와 함께 교대(|)를 사용하는 테스트
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -117,7 +117,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- test using alternation (|) with group quantifier
+-- 그룹 수량자와 함께 교대(|)를 사용하는 테스트
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -131,7 +131,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- test using nested alternation
+-- 중첩 교대를 사용하는 테스트
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -146,7 +146,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   FLAT AS price = PREV(price)
 );
 
--- test using group with quantifier
+-- 수량자가 있는 그룹을 사용하는 테스트
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -159,8 +159,8 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- test using absolute threshold values (not relative PREV)
--- HIGH: price > 150, LOW: price < 100, MID: neutral range
+-- 상대적 PREV가 아니라 절대 임계값을 사용하는 테스트
+-- HIGH: price > 150, LOW: price < 100, MID: 중립 구간
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -174,7 +174,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   HIGH AS price > 150
 );
 
--- test threshold-based pattern with alternation
+-- 교대가 있는 임계값 기반 패턴 테스트
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -188,7 +188,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   HIGH AS price > 150
 );
 
--- basic test with fixed-length pattern (A A A = exactly 3)
+-- 고정 길이 패턴의 기본 테스트 (A A A = 정확히 3)
 SELECT company, tdate, price, count(*) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -200,7 +200,7 @@ SELECT company, tdate, price, count(*) OVER w
   A AS price >= 140 AND price <= 150
 );
 
--- test using {n} quantifier (A A A should be optimized to A{3})
+-- {n} 수량자를 사용하는 테스트 (A A A는 A{3}으로 최적화되어야 한다)
 SELECT company, tdate, price, count(*) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -212,7 +212,7 @@ SELECT company, tdate, price, count(*) OVER w
   A AS price >= 140 AND price <= 150
 );
 
--- test using {n,} quantifier (2 or more)
+-- {n,} 수량자를 사용하는 테스트 (2 이상)
 SELECT company, tdate, price, count(*) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -224,7 +224,7 @@ SELECT company, tdate, price, count(*) OVER w
   A AS price > 100
 );
 
--- test using {n,m} quantifier (2 to 4)
+-- {n,m} 수량자를 사용하는 테스트 (2~4)
 SELECT company, tdate, price, count(*) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -236,8 +236,8 @@ SELECT company, tdate, price, count(*) OVER w
   A AS price > 100
 );
 
--- test prefix/suffix merge optimization with bounded quantifier
--- Pattern A B (A B){1,2} A B should be optimized to (A B){3,4}
+-- bounded 수량자를 사용한 접두/접미 병합 최적화 테스트
+-- 패턴 A B (A B){1,2} A B는 (A B){3,4}로 최적화되어야 한다
 CREATE TEMP TABLE rpr_ab_pairs (id int, val text);
 INSERT INTO rpr_ab_pairs VALUES
   (1,'A'),(2,'B'),
@@ -259,7 +259,7 @@ WINDOW w AS (
 );
 DROP TABLE rpr_ab_pairs;
 
--- last_value() should remain consistent
+-- last_value()는 일관되게 유지되어야 한다
 SELECT company, tdate, price, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -274,8 +274,8 @@ SELECT company, tdate, price, last_value(price) OVER w
   DOWN AS price < PREV(price)
 );
 
--- omit "START" in DEFINE but it is ok because "START AS TRUE" is
--- implicitly defined. per spec.
+-- DEFINE에서 "START"를 생략해도, 명세에 따라 "START AS TRUE"가 암묵적으로
+-- 정의되므로 문제없다.
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w,
  nth_value(tdate, 2) OVER w AS nth_second
  FROM rpr_price
@@ -289,7 +289,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- the first row start with less than or equal to 100
+-- 첫 번째 행은 100 이하로 시작한다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -303,7 +303,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- second row raises 120%
+-- 두 번째 행은 120% 상승한다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -317,7 +317,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   DOWN AS price < PREV(price)
 );
 
--- using NEXT
+-- NEXT를 사용한다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -330,9 +330,9 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   UPDOWN AS price > PREV(price) AND price > NEXT(price)
 );
 
--- using AFTER MATCH SKIP TO NEXT ROW (same pattern as above;
--- match length is always 2, so result is identical to SKIP PAST LAST ROW.
--- SKIP TO NEXT ROW's distinct effect is tested in backtracking section.)
+-- AFTER MATCH SKIP TO NEXT ROW을 사용한다 (위와 같은 패턴이며,
+-- 매치 길이가 항상 2 이므로 결과는 SKIP PAST LAST ROW와 동일하다.
+-- SKIP TO NEXT ROW의 고유한 효과는 백트래킹 절에서 테스트한다.)
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -346,7 +346,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   UPDOWN AS price > PREV(price) AND price > NEXT(price)
 );
 
--- PREV returns NULL at the partition's first row (no earlier row to fetch)
+-- 파티션의 첫 행에서 PREV는 NULL을 반환한다 (가져올 이전 행이 없음)
 SELECT company, tdate, price, count(*) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -359,7 +359,7 @@ WINDOW w AS (
   REST AS PREV(price) IS NOT NULL
 );
 
--- NEXT returns NULL at the partition's last row (no later row to fetch)
+-- 파티션의 마지막 행에서 NEXT는 NULL을 반환한다 (가져올 다음 행이 없음)
 SELECT company, tdate, price, count(*) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -373,7 +373,7 @@ WINDOW w AS (
   BOUNDARY AS NEXT(price) IS NULL
 );
 
--- DESC order: PREV refers to the row with later date
+-- DESC 순서: PREV는 더 나중 날짜의 행을 가리킨다
 SELECT company, tdate, price, count(*) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -388,7 +388,7 @@ WINDOW w AS (
   UP AS price > PREV(price)
 );
 
--- Multiple partitions with unequal sizes
+-- 크기가 서로 다른 여러 파티션
 WITH multi_part AS (
  SELECT * FROM (VALUES
   ('a', 1, 10), ('a', 2, 20), ('a', 3, 15),
@@ -409,7 +409,7 @@ WINDOW w AS (
   B AS val > PREV(val) OR val < PREV(val)
 );
 
--- FLOAT/NUMERIC DEFINE conditions
+-- FLOAT/NUMERIC DEFINE 조건
 WITH float_data AS (
  SELECT * FROM (VALUES
   (1, 1.0::float8), (2, 1.5), (3, 1.4999), (4, 1.50001), (5, 0.1)
@@ -428,10 +428,10 @@ WINDOW w AS (
 );
 
 --
--- Error cases: PREV/NEXT usage restrictions
+-- 오류 사례: PREV/NEXT 사용 제약
 --
 
--- Nested PREV
+-- 중첩된 PREV
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -441,7 +441,7 @@ WINDOW w AS (
     DEFINE A AS price > PREV(PREV(price))
 );
 
--- Nested NEXT
+-- 중첩된 NEXT
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -451,7 +451,7 @@ WINDOW w AS (
     DEFINE A AS price > NEXT(NEXT(price))
 );
 
--- PREV nested inside NEXT
+-- NEXT 안에 중첩된 PREV
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -461,7 +461,7 @@ WINDOW w AS (
     DEFINE A AS price > NEXT(PREV(price))
 );
 
--- PREV nested inside expression inside NEXT
+-- NEXT 안의 식 안에 중첩된 PREV
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -471,7 +471,7 @@ WINDOW w AS (
     DEFINE A AS price > NEXT(price * PREV(price))
 );
 
--- Triple nesting: error reported at outermost PREV
+-- 삼중 중첩: 가장 바깥쪽 PREV에서 오류가 보고된다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -481,8 +481,8 @@ WINDOW w AS (
     DEFINE A AS price > PREV(PREV(PREV(price)))
 );
 
--- No column reference in PREV/NEXT argument
--- PREV(1): constant only, no column reference
+-- PREV/NEXT 인자에 컬럼 참조가 없음
+-- PREV(1): 상수뿐이며 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -492,7 +492,7 @@ WINDOW w AS (
     DEFINE A AS PREV(1) > 0
 );
 
--- NEXT(1 + 2): constant expression, no column reference
+-- NEXT(1 + 2): 상수 식이며 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -502,7 +502,7 @@ WINDOW w AS (
     DEFINE A AS NEXT(1 + 2) > 0
 );
 
--- 2-arg form: PREV(1, 1): constant expression as first arg
+-- 2-인자 형태: PREV(1, 1): 첫 인자가 상수 식이다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -512,9 +512,9 @@ WINDOW w AS (
     DEFINE A AS PREV(1, 1) > 0
 );
 
--- Compound navigation without a column reference must be rejected too,
--- consistent with the simple forms above.
--- PREV(FIRST(1)): compound, constant only, no column reference
+-- 컬럼 참조가 없는 복합 내비게이션도 위의
+-- 단순 형태와 마찬가지로 거부되어야 한다.
+-- PREV(FIRST(1)): 복합형이며 상수뿐이고 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -524,7 +524,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(1)) > 0
 );
 
--- NEXT(LAST(1 + 2)): compound, constant expression, no column reference
+-- NEXT(LAST(1 + 2)): 복합형이며 상수 식이고 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -534,7 +534,7 @@ WINDOW w AS (
     DEFINE A AS NEXT(LAST(1 + 2)) > 0
 );
 
--- PREV(FIRST(1, 2)): compound, two-arg inner, no column reference
+-- PREV(FIRST(1, 2)): 복합형이며 내부가 2-인자이고 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -544,7 +544,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(1, 2)) > 0
 );
 
--- PREV(FIRST(1), 2): compound, outer offset only, no column reference
+-- PREV(FIRST(1), 2): 복합형이며 외부 오프셋뿐이고 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -554,7 +554,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(1), 2) > 0
 );
 
--- PREV(FIRST(1, 2), 3): compound, inner and outer offsets, no column reference
+-- PREV(FIRST(1, 2), 3): 복합형이며 내부·외부 오프셋이 있고 컬럼 참조가 없다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -564,7 +564,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(1, 2), 3) > 0
 );
 
--- Non-constant offset: column reference as offset
+-- 비상수 오프셋: 오프셋으로 컬럼 참조를 사용한다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -574,7 +574,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, price) > 0
 );
 
--- Non-constant offset: column reference in compound inner offset
+-- 비상수 오프셋: 복합형 내부 오프셋에 컬럼 참조를 사용한다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -584,7 +584,7 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(price, price), 2) > 0
 );
 
--- Non-constant offset: column reference in compound outer offset
+-- 비상수 오프셋: 복합형 외부 오프셋에 컬럼 참조를 사용한다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -594,7 +594,7 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(price, 1), price) > 0
 );
 
--- Non-constant offset: volatile function as offset
+-- 비상수 오프셋: 오프셋으로 휘발성 함수를 사용한다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -604,7 +604,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, random()::int) > 0
 );
 
--- Non-constant offset: volatile function as compound outer offset
+-- 비상수 오프셋: 복합형 외부 오프셋으로 휘발성 함수를 사용한다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -614,7 +614,7 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(price, 1), random()::int) > 0
 );
 
--- Non-constant offset: subquery as offset
+-- 비상수 오프셋: 오프셋으로 서브쿼리를 사용한다
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -624,7 +624,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, (SELECT 1)) > 0
 );
 
--- First arg: subquery (caught by DEFINE-level subquery restriction)
+-- 첫 인자: 서브쿼리 (DEFINE 수준의 서브쿼리 제약에 걸린다)
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -634,7 +634,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price + (SELECT 1)) > 0
 );
 
--- Volatile function inside nav.arg is rejected in the planner
+-- nav.arg 안의 휘발성 함수는 플래너에서 거부된다
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -645,7 +645,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price + random() * 0) >= 0
 );
 
--- nextval is volatile, so a DEFINE that calls it is rejected
+-- nextval은 휘발성이므로 이를 호출하는 DEFINE은 거부된다
 CREATE SEQUENCE rpr_seq;
 SELECT price FROM rpr_price
 WINDOW w AS (
@@ -657,8 +657,8 @@ WINDOW w AS (
 );
 DROP SEQUENCE rpr_seq;
 
--- A volatile DEFINE is rejected in the planner, so a view that hides one is
--- created successfully and errors only when read.
+-- 휘발성 DEFINE은 플래너에서 거부되므로, 이를 숨기는 뷰는 생성은 성공하고 읽을
+-- 때만 오류가 난다.
 CREATE TEMP VIEW rpr_volatile_view AS
 SELECT company, tdate, price, count(*) OVER w
 FROM rpr_price
@@ -672,10 +672,9 @@ WINDOW w AS (
 SELECT * FROM rpr_volatile_view;
 DROP VIEW rpr_volatile_view;
 
--- DEFINE cannot reference an outer query's column.  A correlated outer
--- reference must produce a clean error, not the internal "Upper-level Var"
--- elog that pull_var_clause would otherwise raise.
--- Qualified outer reference (o.threshold):
+-- DEFINE은 외부 쿼리의 컬럼을 참조할 수 없다.  상관 외부 참조는
+-- pull_var_clause 가 그렇지 않으면 발생시킬 내부용 "Upper-level Var" elog가
+-- 아니라 깔끔한 오류를 내야 한다.  한정된 외부 참조 (o.threshold):
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
     SELECT price FROM rpr_price
@@ -687,7 +686,7 @@ LATERAL (
         DEFINE A AS price > o.threshold
     )
 ) s;
--- Unqualified name resolving to the outer column (threshold):
+-- 외부 컬럼으로 풀리는 비한정 이름 (threshold):
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
     SELECT price FROM rpr_price
@@ -699,7 +698,7 @@ LATERAL (
         DEFINE A AS price > threshold
     )
 ) s;
--- Outer reference inside a navigation argument is rejected too:
+-- 내비게이션 인자 안의 외부 참조도 거부된다:
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
     SELECT price FROM rpr_price
@@ -711,9 +710,9 @@ LATERAL (
     )
 ) s;
 
--- An outer range variable is subject to the same two rules as a local one: a
--- whole-row reference is rejected as one, and a name that does not resolve
--- keeps its own diagnosis rather than being reported as a qualifier problem.
+-- 외부 범위 변수도 로컬 변수와 동일한 두 규칙을 따른다.  전체 행 참조는 전체
+-- 행 참조로서 거부되고, 풀리지 않는 이름은 한정자 문제로 보고되지 않고 자기
+-- 자신의 진단을 유지한다.
 SELECT * FROM (VALUES (95)) AS o(threshold),
 LATERAL (
     SELECT price FROM rpr_price
@@ -737,10 +736,10 @@ LATERAL (
     )
 ) s;
 
--- A two-part name is not always a range variable qualifier: a SQL function's
--- parameter and a PL/pgSQL variable both resolve through
--- p_post_columnref_hook.  The qualifier slot is reserved all the same, so
--- these are rejected for the spelling, not for what they name.
+-- 두 부분으로 된 이름이 항상 범위 변수 한정자인 것은 아니다.  SQL 함수의
+-- 매개변수와 PL/pgSQL 변수는 둘 다 p_post_columnref_hook 을 통해 풀린다.
+-- 그래도 한정자 슬롯은 예약되므로, 이들은 무엇을 가리키는지가 아니라 표기 자체
+-- 때문에 거부된다.
 CREATE FUNCTION rpr_sqlfn(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
     SELECT price FROM rpr_price
@@ -772,7 +771,7 @@ $$;
 SELECT rpr_plfn(0);
 DROP FUNCTION rpr_plfn(int);
 
--- Unqualified, the same parameter is readable.
+-- 한정하지 않으면 같은 매개변수를 읽을 수 있다.
 CREATE FUNCTION rpr_sqlfn(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
     SELECT price FROM rpr_price
@@ -786,12 +785,11 @@ $$;
 SELECT count(*) FROM rpr_sqlfn(0);
 DROP FUNCTION rpr_sqlfn(int);
 
--- The qualifier slot is decided on the qualifier alone, before resolution, so
--- a pattern variable takes the slot even from the routine that contains the
--- query.  Naming a pattern variable after the function makes rpr_pv.threshold
--- the pattern variable's, and the reservation is reported; that the function
--- has a parameter of that name, and the query has no such column, does not
--- enter into it.
+-- 한정자 슬롯은 풀이 전에 한정자만으로 결정되므로, 패턴 변수는 쿼리를 담은
+-- 루틴으로부터도 이 슬롯을 가져간다.  함수 이름을 따서 패턴
+-- 변수 이름을 지으면 rpr_pv.threshold는 그 패턴 변수의 것이
+-- 되고 예약이 보고된다.  함수가 그 이름의 매개변수를 가지고
+-- 있는지, 쿼리에 그런 컬럼이 없는지는 여기서 고려되지 않는다.
 CREATE FUNCTION rpr_pv(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
     SELECT price FROM rpr_price
@@ -803,8 +801,8 @@ LANGUAGE sql AS $$
         DEFINE rpr_pv AS price > rpr_pv.threshold)
 $$;
 
--- The collision is in the qualifier, not in the DEFINE variable being
--- defined: any pattern variable of that name reserves it.
+-- 충돌은 정의 중인 DEFINE 변수가 아니라 한정자에서 일어난다.  그 이름의 패턴
+-- 변수라면 무엇이든 이 이름을 예약한다.
 CREATE FUNCTION rpr_pv(threshold int) RETURNS SETOF int
 LANGUAGE sql AS $$
     SELECT price FROM rpr_price
@@ -816,9 +814,9 @@ LANGUAGE sql AS $$
         DEFINE A AS price > rpr_pv.threshold)
 $$;
 
--- A field of a composite parameter has no unqualified spelling, so it is
--- reached by parenthesizing the value: "(p).lo" selects a field rather than
--- qualifying a name, and occupies no qualifier slot.
+-- 복합 매개변수의 필드는 비한정 표기가 없으므로 값을 괄호로 묶어 접근한다.
+-- "(p).lo"는 이름을 한정하는 것이 아니라 필드를 선택하는 것이며 한정자 슬롯을
+-- 차지하지 않는다.
 CREATE TYPE rpr_pair AS (lo int, hi int);
 CREATE FUNCTION rpr_compfn(p rpr_pair) RETURNS SETOF int
 LANGUAGE sql AS $$
@@ -844,10 +842,10 @@ SELECT count(*) FROM rpr_compfn(ROW(0, 0)::rpr_pair);
 DROP FUNCTION rpr_compfn(rpr_pair);
 DROP TYPE rpr_pair;
 
--- The DEFINE rules apply to the names the ref hooks leave to the query
--- parser.  Under use_variable resolution PL/pgSQL answers first and keeps
--- any name one of its variables owns, so the qualified spelling rejected
--- above is resolved by PL/pgSQL here and never reaches the rule.
+-- DEFINE 규칙은 참조 훅이 쿼리 파서에 넘기는 이름에 적용된다.  use_variable
+-- 풀이 방식에서는 PL/pgSQL 이 먼저 응답하고 자신의 변수가 소유한 이름을 모두
+-- 가져가므로, 위에서 거부된 한정 표기는 여기서는 PL/pgSQL 이 풀어버려 규칙에
+-- 도달하지 않는다.
 CREATE FUNCTION rpr_plfn_var(threshold int) RETURNS bigint
 LANGUAGE plpgsql AS $$
 #variable_conflict use_variable
@@ -869,9 +867,8 @@ $$;
 SELECT rpr_plfn_var(0);
 DROP FUNCTION rpr_plfn_var(int);
 
--- The same applies to a pattern variable's name.  Under the default
--- resolution PL/pgSQL declines the name, so the reservation is reached and
--- the collision is reported rather than resolved.
+-- 패턴 변수 이름도 마찬가지다.  기본 풀이 방식에서는 PL/pgSQL 이 그 이름을
+-- 거절하므로 예약에 도달하고, 충돌이 풀리는 대신 보고된다.
 CREATE FUNCTION rpr_conflictfn_err() RETURNS bigint
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -917,19 +914,18 @@ $$;
 SELECT rpr_conflictfn();
 DROP FUNCTION rpr_conflictfn();
 
--- A star on a name a ref hook owns is not a reference to a FROM-clause
--- relation, so it expands in a DEFINE condition as it does anywhere else.
--- Withholding the expansion would not reject such a name; it would read
--- "rec.*" as the single whole value "rec", which is a different condition,
--- and one that differs silently wherever a row constructor is not counting
--- its entries.  Each function below matches every row when the record holds
--- (1,2) and none when it does not, so a reading that is off returns the
--- wrong count rather than an error.
+-- 참조 훅이 소유한 이름에 붙은 별표는 FROM 절 릴레이션에 대한 참조가 아니므로,
+-- DEFINE 조건에서도 다른 곳과 똑같이 전개된다. 이 전개를 하지 않는다고 해서
+-- 그런 이름이 거부되는 것은 아니다.  그 경우 "rec.*"는 단일 전체 값 "rec"로
+-- 읽히는데, 이는 다른 조건이며 행 생성자가 항목 수를 세지 않는
+-- 곳에서는 조용히 달라진다.  아래 각 함수는 레코드가 (1,2)일
+-- 때 모든 행에 일치하고 그렇지 않을 때는 하나도 일치하지
+-- 않아야 하므로, 잘못 읽으면 오류 대신 잘못된 개수를 돌려준다.
 CREATE TYPE rpr_pair AS (a int, b int);
 CREATE TEMP TABLE rpr_rec (id int);
 INSERT INTO rpr_rec VALUES (1), (2), (3);
 
--- under the default resolution the post hook answers the name:
+-- 기본 풀이 방식에서는 post 훅이 이 이름에 응답한다:
 CREATE FUNCTION rpr_recstar(x int, y int) RETURNS bigint
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -951,7 +947,7 @@ SELECT rpr_recstar(1, 2);
 SELECT rpr_recstar(1, 3);
 DROP FUNCTION rpr_recstar(int, int);
 
--- under use_variable the pre hook answers it instead:
+-- use_variable 에서는 대신 pre 훅이 응답한다:
 CREATE FUNCTION rpr_recstar_var(x int, y int) RETURNS bigint
 LANGUAGE plpgsql AS $$
 #variable_conflict use_variable
@@ -974,8 +970,7 @@ SELECT rpr_recstar_var(1, 2);
 SELECT rpr_recstar_var(1, 3);
 DROP FUNCTION rpr_recstar_var(int, int);
 
--- the same spelling outside a DEFINE condition, which is what the two above
--- have to agree with:
+-- DEFINE 조건 밖에서의 같은 표기이며, 위 두 경우가 이것과 일치해야 한다:
 CREATE FUNCTION rpr_recstar_plain(x int, y int) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -988,7 +983,7 @@ $$;
 SELECT rpr_recstar_plain(1, 2);
 DROP FUNCTION rpr_recstar_plain(int, int);
 
--- A FROM-clause relation is not such a name, inside such a function or out.
+-- FROM 절 릴레이션은 그런 함수 안팎 어디서도 그런 이름이 아니다.
 CREATE FUNCTION rpr_relstar() RETURNS bigint
 LANGUAGE plpgsql AS $$
 #variable_conflict use_variable
@@ -1011,9 +1006,9 @@ DROP FUNCTION rpr_relstar();
 DROP TABLE rpr_rec;
 DROP TYPE rpr_pair;
 
--- An outer range variable used as a function-call qualifier reaches DEFINE as
--- a FuncExpr rather than a Var, so the level the qualifier resolved at, not
--- the shape of the resulting node, is what identifies the outer reference.
+-- 함수 호출의 한정자로 쓰인 외부 범위 변수는 Var가 아니라 FuncExpr 로서
+-- DEFINE에 도달하므로, 외부 참조를 식별하는 것은 결과 노드의 모양이 아니라
+-- 한정자가 풀린 수준이다.
 CREATE TABLE rpr_outer (threshold int);
 INSERT INTO rpr_outer VALUES (95);
 CREATE FUNCTION rpr_rowfn(rpr_outer) RETURNS int LANGUAGE sql AS 'SELECT 1';
@@ -1031,10 +1026,9 @@ LATERAL (
 DROP FUNCTION rpr_rowfn(rpr_outer);
 DROP TABLE rpr_outer;
 
--- DEFINE rejects a schema-qualified column reference (three or more name
--- parts) once it resolves; the qualified form itself is not allowed.
--- (rpr_price is a temp table, so it is qualified with pg_temp here.)
--- 3-part (schema.table.column):
+-- DEFINE은 스키마로 한정된 컬럼 참조(이름 부분이 3개 이상)가 풀리고 나면 이를
+-- 거부한다.  한정된 형태 자체가 허용되지 않는다.  (rpr_price 는 임시
+-- 테이블이므로 여기서는 pg_temp 로 한정한다.) 3-부분 (schema.table.column):
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1043,7 +1037,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS pg_temp.rpr_price.price > 0
 );
--- whole-row variant (schema.table.*):
+-- 전체 행 변형 (schema.table.*):
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1052,10 +1046,9 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (pg_temp.rpr_price.*) IS NOT NULL
 );
--- A two-part table-qualified whole-row reference is rejected as well, and by
--- the whole-row check rather than by a qualifier rule: the error names the
--- whole-row reference, not the qualifier.
--- 2-part (table.*):
+-- 두 부분으로 테이블 한정된 전체 행 참조도 거부되며, 한정자 규칙이 아니라
+-- 전체 행 검사에 의해서다.  오류는 한정자가 아니라 전체 행 참조를 지목한다.
+-- 2-부분 (table.*):
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1064,9 +1057,8 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (rpr_price.*) IS NOT NULL
 );
--- The form decides before the qualifier is looked up, so a misspelled table
--- name is reported as the whole-row reference it is written as, not as a
--- missing FROM-clause entry:
+-- 형태가 한정자를 조회하기 전에 결정되므로, 철자가 틀린 테이블 이름은 누락된
+-- FROM 절 항목이 아니라 작성된 그대로의 전체 행 참조로 보고된다:
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1075,7 +1067,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (stok.*) IS NOT NULL
 );
--- and the same through a row constructor:
+-- 행 생성자를 통해서도 마찬가지다:
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1085,9 +1077,9 @@ WINDOW w AS (
     DEFINE A AS ROW(stok.*) IS NOT NULL
 );
 
--- A row constructor reaches the same references through
--- transformExpressionList(), whose star expansion binds them by RTE into
--- individual column Vars, past every check.  DEFINE skips it.
+-- 행 생성자는 transformExpressionList()를 통해 같은 참조에
+-- 도달하는데, 이 함수의 별표 전개는 이들을 RTE 단위로 개별 컬럼
+-- Var로 묶어 모든 검사를 지나친다.  DEFINE은 이를 건너뛴다.
 -- ROW(schema.table.*):
 SELECT price FROM rpr_price
 WINDOW w AS (
@@ -1106,8 +1098,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS ROW(rpr_price.*) IS NOT NULL
 );
--- the ROW keyword is optional, so the bare constructor needs the same
--- treatment:
+-- ROW 키워드는 생략할 수 있으므로, 맨 생성자도 같은 처리가 필요하다:
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1116,7 +1107,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS (rpr_price.*, 1) IS NOT NULL
 );
--- redundant parentheses are not a way around it:
+-- 불필요한 괄호로도 우회할 수 없다:
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1125,7 +1116,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS ROW((rpr_price.*)) IS NOT NULL
 );
--- a pattern variable qualifier is a separate class of rejection:
+-- 패턴 변수 한정자는 별도의 거부 부류다:
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1134,8 +1125,8 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS ROW(A.*) IS NOT NULL
 );
--- The plain two-part form is the one the standard writes its DEFINE examples
--- with, and it is decided on the qualifier alone, before resolution.
+-- 표준이 DEFINE 예제를 작성할 때 쓰는 형태는 이 단순한 두 부분 형태이며, 풀이
+-- 전에 한정자만으로 결정된다.
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1144,9 +1135,9 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS A.price > 100
 );
--- Deciding on the qualifier alone means a pattern variable takes a name a
--- range variable would otherwise answer to: the rejection names the pattern
--- variable, not the alias, even though "a" is a live alias here.
+-- 한정자만으로 결정한다는 것은, 그렇지 않았다면 범위 변수가 응답했을 이름을
+-- 패턴 변수가 가져간다는 뜻이다.  여기서 "a"가 실제 별칭임에도 거부는 별칭이
+-- 아니라 패턴 변수를 지목한다.
 SELECT price FROM rpr_price AS a
 WINDOW w AS (
     PARTITION BY company
@@ -1155,11 +1146,10 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS a.price > 100
 );
--- Unlike the pattern variable and whole-row rejections, the range variable
--- and schema-qualified rejections classify the reference only after it
--- resolves, so a misspelled column keeps the diagnosis and the suggestion it
--- gets anywhere else.  Firing on the qualifier alone would report a range
--- variable problem before the rest of the name was looked at.
+-- 패턴 변수 및 전체 행 거부와 달리, 범위 변수 및 스키마 한정 거부는 참조가
+-- 풀린 뒤에만 이를 분류한다.  그래서 철자가 틀린 컬럼은 다른 곳에서와 같은
+-- 진단과 제안을 그대로 유지한다.  한정자만으로 판단했다면 이름의 나머지 부분을
+-- 보기도 전에 범위 변수 문제로 보고했을 것이다.
 SELECT price FROM rpr_price
 WINDOW w AS (
     PARTITION BY company
@@ -1176,14 +1166,13 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS pg_temp.rpr_price.pric > 0
 );
--- the same typo outside a DEFINE clause, for comparison:
+-- 비교를 위한, DEFINE 절 밖에서의 같은 오타:
 SELECT price FROM rpr_price WHERE rpr_price.pric > 0;
 
--- Retrying an unresolved column as a function call on the whole row builds a
--- whole-row reference the query does not contain.  That must not be reported
--- as one, and must not let the reference through either: rpr_tag(rpr_stock)
--- below resolves, so the retry succeeds and the result is rejected by the
--- qualifier rules rather than by the whole-row check.
+-- 풀리지 않은 컬럼을 전체 행에 대한 함수 호출로 재시도하면 쿼리에 없는 전체 행
+-- 참조가 만들어진다.  이를 전체 행 참조로 보고해서도 안 되고, 그대로
+-- 통과시켜서도 안 된다.  아래의 rpr_tag(rpr_stock)는 풀리므로 재시도는
+-- 성공하고, 그 결과는 전체 행 검사가 아니라 한정자 규칙에 의해 거부된다.
 CREATE FUNCTION rpr_tag(rpr_stock) RETURNS int
     LANGUAGE sql IMMUTABLE AS $$SELECT 1$$;
 SELECT price FROM rpr_stock
@@ -1204,9 +1193,9 @@ WINDOW w AS (
 );
 DROP FUNCTION rpr_tag(rpr_stock);
 
--- A JOIN USING alias has no whole-row Var of its own, so the same retry
--- expands it to a row constructor instead.  The retry carries no star, so
--- DEFINE lets it through to that arm.
+-- JOIN USING 별칭은 자신의 전체 행 Var를 가지지 않으므로, 같은 재시도는 대신
+-- 이를 행 생성자로 전개한다. 이 재시도는 별표를 가지지 않으므로 DEFINE은 이를
+-- 그 갈래까지 통과시킨다.
 CREATE TEMP TABLE rpr_j_l (x int, y int);
 CREATE TEMP TABLE rpr_j_r (x int, z int);
 SELECT count(*) OVER w FROM (rpr_j_l JOIN rpr_j_r USING (x)) j
@@ -1232,7 +1221,7 @@ WINDOW w AS (
 );
 DROP TABLE rpr_j_l, rpr_j_r;
 
--- A row constructor over plain columns is unaffected.
+-- 일반 컬럼에 대한 행 생성자는 영향받지 않는다.
 SELECT company, tdate, count(*) OVER w AS cnt
 FROM rpr_price
 WHERE company = 'company2' AND tdate <= '2023-07-03'
@@ -1245,14 +1234,13 @@ WINDOW w AS (
     DEFINE A AS ROW(price, price) IS NOT NULL
 );
 
--- A restriction on a DEFINE condition covers the whole condition, including a
--- clause nested inside it that carries an expression kind of its own.  FILTER
--- and an aggregate's ORDER BY are the two such clauses a condition can reach,
--- and each case below is preceded by the same reference written directly in
--- the condition, which is the rejection the nested one has to keep.
+-- DEFINE 조건에 대한 제약은 그 안에 중첩되어 고유한 식 종류를 갖는 절까지
+-- 포함해 조건 전체를 대상으로 한다.  조건이 닿을 수 있는 그런 절은 FILTER와
+-- 집계의 ORDER BY 두 가지이며, 아래 각 사례 앞에는 같은 참조를 조건 안에 직접
+-- 적은 경우가 나오는데, 중첩된 경우도 이 거부를 그대로 유지해야 한다.
 CREATE TEMP TABLE rpr_nest_i (i int, v int);
 CREATE TEMP TABLE rpr_nest_o (v int);
--- an outer query column:
+-- 외부 쿼리 컬럼:
 SELECT o.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
              WINDOW w AS (
                  ORDER BY inn.i
@@ -1277,8 +1265,8 @@ SELECT o.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
                  DEFINE A AS v > count(1 ORDER BY o.v))
              LIMIT 1)
 FROM rpr_nest_o o GROUP BY o.v;
--- a pattern variable qualifier, where an outer alias answers to the same
--- name, so letting it through would silently read the outer column instead:
+-- 패턴 변수 한정자이며, 외부 별칭이 같은 이름에 응답하므로 이를 통과시키면
+-- 대신 외부 컬럼을 조용히 읽게 된다:
 SELECT count(*) OVER w FROM rpr_nest_i A
 WINDOW w AS (
     ORDER BY A.i
@@ -1295,7 +1283,7 @@ SELECT A.v, (SELECT count(*) OVER w FROM rpr_nest_i inn
                              WITHIN GROUP (ORDER BY A.v) > 0)
              LIMIT 1)
 FROM rpr_nest_i A GROUP BY A.v;
--- a whole-row reference, which a row constructor would expand by RTE:
+-- 전체 행 참조이며, 행 생성자라면 RTE별로 전개했을 것이다:
 SELECT (SELECT count(*) OVER w FROM rpr_nest_i inn
         WINDOW w AS (
             ORDER BY inn.i
@@ -1313,7 +1301,7 @@ SELECT (SELECT count(*) OVER w FROM rpr_nest_i inn
                         WITHIN GROUP (ORDER BY ROW(o.*)::text) IS NOT NULL)
         LIMIT 1)
 FROM rpr_nest_o o GROUP BY o.v;
--- a subquery:
+-- 서브쿼리:
 SELECT count(*) OVER w FROM rpr_nest_i inn
 WINDOW w AS (
     ORDER BY inn.i
@@ -1328,8 +1316,8 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS count(*) FILTER (WHERE (SELECT 1) = 1) > 0
 );
--- The nesting itself is not what is rejected: with nothing forbidden inside
--- it, the aggregate carrying the FILTER is what the condition trips over.
+-- 중첩 자체가 거부되는 것은 아니다.  그 안에 금지된 것이 없다면, 조건이 걸려
+-- 넘어지는 대상은 FILTER를 가진 집계다.
 SELECT count(*) OVER w FROM rpr_nest_i inn
 WINDOW w AS (
     ORDER BY inn.i
@@ -1340,12 +1328,13 @@ WINDOW w AS (
 DROP TABLE rpr_nest_i, rpr_nest_o;
 
 --
--- 2-arg PREV/NEXT: functional tests
+-- 2-인자 PREV/NEXT: 기능 테스트
 --
 
--- PREV(price, 2): with A=any, B matches where the price beats the one two rows
--- back.  On company1 (100, 200, 150, 140, 150, 90, 110, 130, 120, 130) that is
--- 200 -> 150, then 110 -> 130 -> 120, which stops where 130 only ties 130.
+-- PREV(price, 2): A=any일 때, B는 price가 2행 앞의 값보다 클 때 일치한다.
+-- company1(100, 200, 150, 140, 150, 90, 110, 130, 120, 130)에서는
+-- 200 -> 150 이고, 이어서 110 -> 130 -> 120 이며,
+-- 130 이 130 과 같기만 한 지점에서 멈춘다.
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1358,9 +1347,10 @@ WINDOW w AS (
         B AS price > PREV(price, 2)
 );
 
--- NEXT(price, 2): A matches while the price beats the one two rows ahead, so
--- company1 gives 200 on its own, since 150 only ties the 150 ahead of it, and
--- then 140, 150 up to where 90 falls short of 130.
+-- NEXT(price, 2): A는 price가 2행 뒤의 값보다 큰 동안
+-- 일치하므로, company1에서는 200 이 단독으로 일치한다.  150 은
+-- 그 앞의 150 과 같기만 하기 때문이며, 이어서 140, 150 이
+-- 일치하다가 90 이 130 에 못 미치는 지점에서 끝난다.
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1371,8 +1361,8 @@ WINDOW w AS (
     DEFINE A AS price > NEXT(price, 2)
 );
 
--- Expressions inside PREV/NEXT arg: expr is evaluated on target row
--- PREV(price - 50, 1): fetches (price - 50) from 1 row back
+-- PREV/NEXT 인자 안의 식: 식은 대상 행에서 평가된다 PREV(price - 50, 1): 1 행
+-- 앞에서 (price - 50)을 가져온다
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1383,7 +1373,7 @@ WINDOW w AS (
     DEFINE A AS price > PREV(price - 50, 1)
 );
 
--- NEXT(price * 2, 1): fetches (price * 2) from 1 row ahead
+-- NEXT(price * 2, 1): 1 행 뒤에서 (price * 2)를 가져온다
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1394,8 +1384,8 @@ WINDOW w AS (
     DEFINE A AS price < NEXT(price * 2, 1)
 );
 
--- Large offset: PREV(val, 999) on 1000-row series matches only last row
--- NEXT(val, 999) matches only first row
+-- 큰 오프셋: 1000 행 시리즈에서 PREV(val, 999)는 마지막 행에서만 일치한다.
+-- NEXT(val, 999)는 첫 행에서만 일치한다
 SELECT val, first_value(val) OVER w, last_value(val) OVER w, count(*) OVER w
 FROM generate_series(1, 1000) AS t(val)
 WINDOW w AS (
@@ -1414,8 +1404,8 @@ WINDOW w AS (
 )
 LIMIT 3;
 
--- PREV(price, 0): offset 0 means current row, always equal to price
--- A+ matches entire partition as one group; count = partition size
+-- PREV(price, 0): 오프셋 0 은 현재 행을 뜻하며 항상 price와 같다 A+는 파티션
+-- 전체를 하나의 그룹으로 일치시킨다; count = 파티션 크기
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1426,7 +1416,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, 0) = price
 );
 
--- 2-arg PREV/NEXT: negative offset
+-- 2-인자 PREV/NEXT: 음수 오프셋
 SELECT company, tdate, price, first_value(price) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -1436,7 +1426,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, -1) IS NOT NULL
 );
 
--- 2-arg PREV/NEXT: NULL offset (typed)
+-- 2-인자 PREV/NEXT: NULL 오프셋 (타입 있음)
 SELECT company, tdate, price, first_value(price) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -1446,7 +1436,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, NULL::int8) IS NOT NULL
 );
 
--- 2-arg PREV/NEXT: NULL offset (untyped)
+-- 2-인자 PREV/NEXT: NULL 오프셋 (타입 없음)
 SELECT company, tdate, price, first_value(price) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -1456,7 +1446,7 @@ WINDOW w AS (
     DEFINE A AS PREV(price, NULL) IS NOT NULL
 );
 
--- 2-arg PREV/NEXT: host variable negative and NULL
+-- 2-인자 PREV/NEXT: 호스트 변수가 음수이거나 NULL
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w
 FROM rpr_price
@@ -1470,7 +1460,7 @@ EXECUTE test_prev_offset(-1);
 EXECUTE test_prev_offset(NULL);
 DEALLOCATE test_prev_offset;
 
--- 2-arg PREV/NEXT: host variable with expression (0 + $1)
+-- 2-인자 PREV/NEXT: 식을 가진 호스트 변수 (0 + $1)
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w
 FROM rpr_price
@@ -1484,9 +1474,9 @@ EXECUTE test_prev_offset(-1);
 EXECUTE test_prev_offset(NULL);
 DEALLOCATE test_prev_offset;
 
--- 2-arg PREV/NEXT: host variable with positive value.  A generic plan keeps
--- the parameter as a Param, so the offset is resolved at run time; a custom
--- plan would fold it to a constant and settle the reach at init.
+-- 2-인자 PREV/NEXT: 양수 값을 가진 호스트 변수.  제네릭 플랜은 매개변수를
+-- Param으로 유지하므로 오프셋은 실행 시점에 풀린다; 커스텀 플랜이라면 이를
+-- 상수로 접어 도달 범위를 초기화 시점에 정한다.
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_offset(int8) AS
 SELECT company, tdate, price, first_value(price) OVER w, count(*) OVER w
@@ -1503,8 +1493,8 @@ EXECUTE test_prev_offset(2);
 DEALLOCATE test_prev_offset;
 RESET plan_cache_mode;
 
--- 2-arg: two PREV with different offsets in same DEFINE clause
--- B: price exceeds both 1-back and 2-back values
+-- 2-인자: 같은 DEFINE 절에서 오프셋이 다른 두 PREV
+-- B: price가 1 행 앞 값과 2행 앞 값을 모두 초과한다
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1518,8 +1508,8 @@ WINDOW w AS (
         B AS price > PREV(price, 1) AND price > PREV(price, 2)
 );
 
--- 2-arg: PREV and NEXT with explicit offsets in same DEFINE clause
--- A: price exceeds 1-back and is below 1-ahead (ascending interior point)
+-- 2-인자: 같은 DEFINE 절에서 명시적 오프셋을 가진 PREV와 NEXT A: price가 1 행
+-- 앞보다 크고 1 행 뒤보다 작다 (상승 중인 내부 지점)
 SELECT company, tdate, price,
        first_value(price) OVER w, last_value(price) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1531,9 +1521,9 @@ WINDOW w AS (
     DEFINE A AS price > PREV(price, 1) AND price < NEXT(price, 1)
 );
 
--- Pass-by-ref types: two PREV calls targeting different positions, so the
--- first navigation result must survive the second fetch.  B compares the
--- 1-back and 2-back tdate text.
+-- 참조 전달 타입: 서로 다른 위치를 대상으로 하는 두 PREV 호출이므로, 첫 번째
+-- 내비게이션 결과가 두 번째 가져오기 후에도 살아남아야 한다.  B는 1 행 앞과 2
+-- 행 앞의 tdate 텍스트를 비교한다.
 SELECT company, tdate, tdate::text AS tdate_text,
        first_value(tdate::text) OVER w, last_value(tdate::text) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1548,7 +1538,7 @@ WINDOW w AS (
 );
 
 -- numeric: PREV(price::numeric, 1) > PREV(price::numeric, 2)
--- B matches when price 1-back > price 2-back (ascending pair).
+-- B는 1 행 앞 price가 2 행 앞 price보다 클 때 일치한다 (상승 쌍).
 SELECT company, tdate, price::numeric AS nprice,
        first_value(price::numeric) OVER w, last_value(price::numeric) OVER w, count(*) OVER w
 FROM rpr_price
@@ -1562,10 +1552,10 @@ WINDOW w AS (
         B AS PREV(price::numeric, 1) > PREV(price::numeric, 2)
 );
 
--- Bare pass-by-reference column rather than a cast: the two navigations land
--- on different rows, so the second fetch frees the tuple the first result
--- points into.  The casts above allocate a fresh datum and never reach that;
--- only EEOP_RPR_NAV_RESTORE's datumCopy keeps this one alive.
+-- 캐스트가 아니라 맨 참조 전달 컬럼: 두 내비게이션이 서로 다른 행에
+-- 떨어지므로, 두 번째 가져오기는 첫 번째 결과가 가리키는 튜플을
+-- 해제한다.  위의 캐스트들은 새 데이텀을 할당하므로 이 상황에 도달하지
+-- 않는다; 오직 EEOP_RPR_NAV_RESTORE 의 datumCopy 만이 이 값을 살려 둔다.
 CREATE TEMP TABLE rpr_byref (id int, s text);
 INSERT INTO rpr_byref VALUES
   (1, 'aaa'), (2, 'bbb'), (3, 'ccc'), (4, 'bbb'), (5, 'ddd'), (6, 'aaa');
@@ -1580,9 +1570,10 @@ WINDOW w AS (
 );
 DROP TABLE rpr_byref;
 
--- Typmod coercion over a navigation result: casting PREV(p) (a numeric(10,3)
--- column) to a narrower numeric(8,2) inside DEFINE forces coerce_type_typmod,
--- which calls exprTypmod() on the RPRNavExpr.
+-- 내비게이션 결과에 대한 typmod 강제 변환: DEFINE 안에서
+-- PREV(p) (numeric(10,3) 컬럼)를 더 좁은 numeric(8,2)로
+-- 캐스팅하면 coerce_type_typmod 가 강제 실행되며,
+-- 이는 RPRNavExpr 에 대해 exprTypmod()를 호출한다.
 CREATE TEMP TABLE rpr_typmod (id int, p numeric(10,3));
 INSERT INTO rpr_typmod VALUES (1, 1.5), (2, 2.5), (3, 3.5);
 SELECT id, count(*) OVER w AS cnt
@@ -1596,18 +1587,18 @@ WINDOW w AS (
 DROP TABLE rpr_typmod;
 
 --
--- FIRST/LAST navigation
+-- FIRST/LAST 내비게이션
 --
 
--- Test data for FIRST/LAST: values cycle back so FIRST(val) = LAST(val)
--- at specific positions.
+-- FIRST/LAST용 테스트 데이터: 값이 순환하여 특정 위치에서 FIRST(val) =
+-- LAST(val)이 된다.
 CREATE TEMP TABLE rpr_nav_cycle (id int, val int);
 INSERT INTO rpr_nav_cycle VALUES (1,10),(2,20),(3,30),(4,10),(5,50),(6,10);
 
--- FIRST(val) = constant: B matches when match_start has val=10
--- match_start=1(10): A=id1, B=id2, FIRST(val)=10 -> match {1,2}
--- match_start=3(30): A=id3, B=id4, FIRST(val)=30!=10 -> no match
--- match_start=4(10): A=id4, B=id5, FIRST(val)=10 -> match {4,5}
+-- FIRST(val) = 상수: match_start 의 val이 10 일 때 B가 일치한다
+-- match_start=1(10): A=id1, B=id2, FIRST(val)=10 -> 매치 {1,2}
+-- match_start=3(30): A=id3, B=id4, FIRST(val)=30!=10 -> 매치 없음
+-- match_start=4(10): A=id4, B=id5, FIRST(val)=10 -> 매치 {4,5}
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1617,8 +1608,8 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(val) = 10
 );
 
--- LAST(val): always equals current row's val (offset 0 default)
--- Equivalent to: B AS val > 15
+-- LAST(val): 항상 현재 행의 val과 같다 (기본 오프셋 0) 다음과 동등하다: B AS
+-- val > 15
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1628,11 +1619,11 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS LAST(val) > 15
 );
 
--- Reluctant A+? with FIRST(val) = LAST(val): find shortest match where
--- first and last rows have the same val.
--- match_start=1(10): reluctant tries B early:
---   id2(20!=10), id3(30!=10), id4(10=10) -> match {1,2,3,4}
--- match_start=5(50): id6(10!=50) -> no match
+-- FIRST(val) = LAST(val)인 소극적 A+?: 첫 행과
+-- 마지막 행의 val이 같은 최단 매치를 찾는다.
+-- match_start=1(10): 소극적 매칭이 일찍 B를 시도한다:
+--   id2(20!=10), id3(30!=10), id4(10=10) -> 매치 {1,2,3,4}
+-- match_start=5(50): id6(10!=50) -> 매치 없음
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1642,10 +1633,10 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(val) = LAST(val)
 );
 
--- Greedy A+ with FIRST(val) = LAST(val): find longest match where
--- first and last rows have the same val.
--- match_start=1(10): greedy A eats all, B tries last:
---   id6(10=10) -> match {1,2,3,4,5,6}
+-- FIRST(val) = LAST(val)인 탐욕적 A+: 첫 행과
+-- 마지막 행의 val이 같은 최장 매치를 찾는다.
+-- match_start=1(10): 탐욕적 A가 모두 먹어치우고, B가 마지막을 시도한다:
+--   id6(10=10) -> 매치 {1,2,3,4,5,6}
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1655,8 +1646,8 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(val) = LAST(val)
 );
 
--- SKIP TO NEXT ROW with FIRST(val) = LAST(val): overlapping match attempts.
--- Each row reports only the match that starts at it.
+-- FIRST(val) = LAST(val)에서의 SKIP TO NEXT ROW: 중첩되는 매치 시도.  각 행은
+-- 자신에서 시작하는 매치만 보고한다.
 SELECT id, val, first_value(id) OVER w AS mf, last_value(id) OVER w AS ml
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1666,9 +1657,9 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(val) = LAST(val)
 );
 
--- FIRST/LAST 2-arg offset form
+-- FIRST/LAST 2-인자 오프셋 형태
 --
--- FIRST(val, 0) = FIRST(val): match_start row
+-- FIRST(val, 0) = FIRST(val): match_start 행
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1678,10 +1669,11 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(val, 0) = 10
 );
 
--- FIRST(val, 1): match_start + 1 row (second row of match)
--- match_start=1(10): FIRST(val,1)=20, B needs val=20
--- -> id2(20) match, id3(30) no
--- match_start=3(30): FIRST(val,1)=10, B needs val=10 -> id4(10) match
+-- FIRST(val, 1): match_start + 1 행 (매치의 두 번째 행)
+-- match_start=1(10): FIRST(val,1)=20, B는 val=20 을
+-- 필요로 한다 -> id2(20) 매치, id3(30)은 아님
+-- match_start=3(30): FIRST(val,1)=10, B는
+-- val=10 을 필요로 한다 -> id4(10) 매치
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1691,7 +1683,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS val = FIRST(val, 1)
 );
 
--- FIRST(val, 99): offset beyond match range -> NULL, no match
+-- FIRST(val, 99): 매치 범위를 벗어난 오프셋 -> NULL, 매치 없음
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1701,7 +1693,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(val, 99) IS NOT NULL
 );
 
--- LAST(val, 0) = LAST(val): current row
+-- LAST(val, 0) = LAST(val): 현재 행
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1711,9 +1703,9 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS LAST(val, 0) > 15
 );
 
--- LAST(val, 1): one row back from current (previous match row)
--- At B evaluation on id2: LAST(val,1) = val at id1 = 10
--- B matches when previous row val < 30
+-- LAST(val, 1): 현재에서 1행 앞 (이전 매치 행)
+-- id2에서 B를 평가할 때: LAST(val,1) = id1의 val = 10
+-- B는 이전 행의 val < 30 일 때 일치한다
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1723,7 +1715,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS LAST(val, 1) < 30
 );
 
--- LAST(val, 99): offset before match_start -> NULL
+-- LAST(val, 99): match_start 이전의 오프셋 -> NULL
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1733,7 +1725,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS LAST(val, 99) IS NOT NULL
 );
 
--- Error: NULL offset
+-- 오류: NULL 오프셋
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1741,7 +1733,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS FIRST(val, NULL::int8) IS NULL
 );
 
--- Error: negative offset
+-- 오류: 음수 오프셋
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1749,15 +1741,15 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS LAST(val, -1) IS NULL
 );
 
--- Functional notation: should access column, not RPR navigation
+-- 함수 표기법: RPR 내비게이션이 아니라 컬럼에 접근해야 한다
 CREATE TEMP TABLE rpr_names (prev int, next int, first text, last text);
 INSERT INTO rpr_names VALUES (1, 2, 'Joe', 'Blow');
 SELECT prev(f), next(f), first(f), last(f) FROM rpr_names f;
 DROP TABLE rpr_names;
 
--- Compound navigation: PREV(FIRST(val), M)
+-- 복합 내비게이션: PREV(FIRST(val), M)
 -- rpr_nav_cycle: (1,10),(2,20),(3,30),(4,10),(5,50),(6,10)
--- PREV(FIRST(val), 1): target = match_start + 0 - 1 = match_start - 1
+-- PREV(FIRST(val), 1): 대상 = match_start + 0 - 1 = match_start - 1
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1767,8 +1759,8 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(FIRST(val), 1) > 0
 );
 
--- NEXT(FIRST(val, 1), 1): target = match_start + 1 + 1 = match_start + 2
--- At match_start=1, B on id2: target=1+1+1=3(val=30), 30>0 -> true
+-- NEXT(FIRST(val, 1), 1): 대상 = match_start + 1 + 1 = match_start + 2
+-- match_start=1, id2에서의 B: 대상=1+1+1=3(val=30), 30>0 -> 참
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1778,12 +1770,12 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(FIRST(val, 1), 1) > 0
 );
 
--- PREV(LAST(val), 2): LAST(val) is the current row (inner offset 0), so
--- target = currentpos - 0 - 2 = currentpos - 2.
--- Same backward reach as PREV(val, 2).
--- At currentpos=2 (start id=1): target=0 -> out of range -> NULL -> B fails.
--- At currentpos=3 (start id=2): target=1(val=10) -> in range -> B runs on
--- id3..id6, so the match is id2..id6.
+-- PREV(LAST(val), 2): LAST(val)은 현재 행이므로
+-- (내부 오프셋 0), 대상 = currentpos - 0 - 2 = currentpos - 2 가
+-- 된다.  PREV(val, 2)와 같은 역방향 도달 범위다.
+-- currentpos=2 일 때 (시작 id=1): 대상=0 -> 범위 밖 -> NULL -> B 실패.
+-- currentpos=3 일 때 (시작 id=2): 대상=1(val=10) -> 범위 안 -> B가
+-- id3..id6에서 실행되어 매치는 id2..id6이 된다.
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1793,12 +1785,12 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(LAST(val), 2) IS NOT NULL
 );
 
--- NEXT(LAST(val, 1), 2): LAST(val, 1) is one row back (inner offset 1), then
--- NEXT adds 2, so target = currentpos - 1 + 2 = currentpos + 1.  Looks one row
--- ahead: same as NEXT(val, 1).
--- At currentpos=2 (start id=1): target=3(val=30) -> in range -> B true.
--- B stays true through id5 (target=6); at id6 target=7 -> out of range
--- -> NULL, so the match is id1..id5.
+-- NEXT(LAST(val, 1), 2): LAST(val, 1)은 1행 앞이므로 (내부 오프셋 1),
+-- NEXT가 2 를 더해 대상 = currentpos - 1 + 2 = currentpos + 1 이
+-- 된다.  1행 뒤를 본다는 점에서 NEXT(val, 1)과 같다.
+-- currentpos=2 일 때 (시작 id=1): 대상=3(val=30) -> 범위 안 -> B 참.
+-- B는 id5까지 참을 유지하고 (대상=6), id6에서는
+-- 대상=7 -> 범위 밖 -> NULL이 되어 매치는 id1..id5가 된다.
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1808,7 +1800,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(LAST(val, 1), 2) IS NOT NULL
 );
 
--- Compound: outer offset beyond partition (PREV far back)
+-- 복합형: 외부 오프셋이 파티션을 벗어남 (PREV가 멀리 앞으로)
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1817,7 +1809,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(FIRST(val), 99) IS NOT NULL
 );
 
--- Compound: outer offset beyond partition (NEXT far forward)
+-- 복합형: 외부 오프셋이 파티션을 벗어남 (NEXT가 멀리 뒤로)
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1826,7 +1818,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(FIRST(val), 99) IS NOT NULL
 );
 
--- Compound: inner offset beyond match range (FIRST offset too large)
+-- 복합형: 내부 오프셋이 매치 범위를 벗어남 (FIRST 오프셋이 너무 큼)
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1835,7 +1827,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(FIRST(val, 99), 1) IS NOT NULL
 );
 
--- Compound: inner offset beyond match range (LAST offset too large)
+-- 복합형: 내부 오프셋이 매치 범위를 벗어남 (LAST 오프셋이 너무 큼)
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1844,7 +1836,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(LAST(val, 99), 1) IS NOT NULL
 );
 
--- Compound: NULL outer offset (runtime error)
+-- 복합형: NULL 외부 오프셋 (런타임 오류)
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1852,7 +1844,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS PREV(FIRST(val), NULL::int8) IS NULL
 );
 
--- Compound: negative outer offset (runtime error)
+-- 복합형: 음수 외부 오프셋 (런타임 오류)
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1860,9 +1852,9 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS NEXT(LAST(val), -1) IS NULL
 );
 
--- Compound: an out-of-range inner offset must not skip validation of the outer
--- one.  All four arms resolve their outer offset through the same call, so
--- each appears once, and the negative and the null case take two arms apiece.
+-- 복합형: 범위를 벗어난 내부 오프셋이 있어도 외부 오프셋의 검증을 건너뛰어서는
+-- 안 된다.  네 갈래 모두 같은 호출을 통해 외부 오프셋을 풀므로 각각 한 번씩
+-- 나타나며, 음수와 NULL 경우는 각각 두 갈래를 차지한다.
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1888,9 +1880,10 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(LAST(val, 99), -1) IS NULL
 );
 
--- Same with a host variable, where the offset is not a Const the planner can
--- fold: one prepared statement, and only the outer offset decides the outcome.
--- The reach reads "runtime" here; a custom plan would fold it to 99 - 1 = 98.
+-- 호스트 변수로도 같은 내용이며, 이때 오프셋은 플래너가 접을 수 있는 Const가
+-- 아니다: prepared statement 하나이며 외부 오프셋만이 결과를 결정한다.  여기서
+-- 도달 범위는 "runtime"으로 읽힌다; 커스텀 플랜이라면 이를 99 - 1 = 98 로
+-- 접었을 것이다.
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_compound_illegal(int8, int8) AS
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
@@ -1907,9 +1900,9 @@ EXECUTE test_compound_illegal(0, -1);
 DEALLOCATE test_compound_illegal;
 RESET plan_cache_mode;
 
--- An offset is settled before the first row is fetched, so a partition with no
--- rows at all rejects an illegal one just the same, and a legal one returns no
--- rows rather than failing.
+-- 오프셋은 첫 행을 가져오기 전에 확정되므로, 행이 전혀
+-- 없는 파티션이라도 잘못된 오프셋은 똑같이 거부하고,
+-- 올바른 오프셋은 실패하는 대신 행을 반환하지 않는다.
 CREATE TABLE rpr_nav_empty (id int, val int);
 SELECT id, count(*) OVER w FROM rpr_nav_empty WINDOW w AS (
     ORDER BY id
@@ -1938,8 +1931,8 @@ DEALLOCATE test_empty_offset;
 RESET plan_cache_mode;
 DROP TABLE rpr_nav_empty;
 
--- Outer offset overflows int64: target position out of range -> NULL.
--- Plain NEXT(val, INT64_MAX): currentpos + INT64_MAX overflows.
+-- 외부 오프셋이 int64를 오버플로한다: 대상 위치가 범위 밖 -> NULL.  단순
+-- NEXT(val, INT64_MAX): currentpos + INT64_MAX 가 오버플로한다.
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1947,8 +1940,9 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS NEXT(val, 9223372036854775807) IS NULL
 );
 
--- Compound NEXT(FIRST()): outer offset overflow.  Inner offset 1 forces
--- inner_pos >= 1, so inner_pos + INT64_MAX overflows at every match.
+-- 복합형 NEXT(FIRST()): 외부 오프셋 오버플로.
+-- 내부 오프셋 1 은 inner_pos >= 1 을 강제하므로, 모든
+-- 매치에서 inner_pos + INT64_MAX 가 오버플로한다.
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1956,7 +1950,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(FIRST(val, 1), 9223372036854775807) IS NULL
 );
 
--- Compound NEXT(LAST()): outer offset overflow.
+-- 복합형 NEXT(LAST()): 외부 오프셋 오버플로.
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1964,12 +1958,12 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS NEXT(LAST(val), 9223372036854775807) IS NULL
 );
 
--- Inner offset overflows int64.  The cases above all overflow while applying
--- the outer offset; these two overflow while computing the inner position,
--- before any outer offset is applied.  A is false at the first row, so no
--- match starts there and match_start is at least 1 wherever B is evaluated;
--- match_start + INT64_MAX then overflows.  With match_start 0 the sum still
--- fits and the clamp below it answers instead.
+-- 내부 오프셋이 int64를 오버플로한다.  위의 사례들은 모두 외부 오프셋을
+-- 적용하는 동안 오버플로하지만, 이 둘은 외부 오프셋이 적용되기 전, 내부 위치를
+-- 계산하는 동안 오버플로한다.  A는 첫 행에서 거짓이므로 거기서는 매치가
+-- 시작하지 않고, B가 평가되는 곳이라면 어디든 match_start 는 최소 1 이다;
+-- 따라서 match_start + INT64_MAX 가 오버플로한다.  match_start 가 0 이면 합은
+-- 여전히 범위에 들어오고, 그 아래의 clamp가 대신 답한다.
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1977,8 +1971,8 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS val > 10, B AS FIRST(val, 9223372036854775807) IS NULL
 );
 
--- The same overflow reached through a compound navigation, where it happens
--- before the outer offset is applied
+-- 복합 내비게이션을 통해 도달하는 같은 오버플로이며, 외부 오프셋이 적용되기
+-- 전에 일어난다
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1986,8 +1980,8 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS val > 10, B AS NEXT(FIRST(val, 9223372036854775807), 1) IS NULL
 );
 
--- Compound: default offsets on both sides
--- PREV(FIRST(val)): inner=0 (match_start), outer=1 -> target = match_start - 1
+-- 복합형: 양쪽 모두 기본 오프셋
+-- PREV(FIRST(val)): inner=0 (match_start), outer=1 -> 대상 = match_start - 1
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -1997,7 +1991,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(FIRST(val)) IS NOT NULL
 );
 
--- NEXT(LAST(val)): inner=0 (currentpos), outer=1 -> target = currentpos + 1
+-- NEXT(LAST(val)): inner=0 (currentpos), outer=1 -> 대상 = currentpos + 1
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -2007,7 +2001,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS NEXT(LAST(val)) IS NOT NULL
 );
 
--- Compound: inner NULL offset (runtime error)
+-- 복합형: 내부 NULL 오프셋 (런타임 오류)
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2015,7 +2009,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS PREV(FIRST(val, NULL::int8), 1) IS NULL
 );
 
--- Compound: inner negative offset (runtime error)
+-- 복합형: 내부 음수 오프셋 (런타임 오류)
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2023,7 +2017,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS NEXT(LAST(val, -1), 1) IS NULL
 );
 
--- Offset argument whose type has no implicit cast to bigint (parse error)
+-- bigint로의 암묵적 캐스트가 없는 타입의 오프셋 인자 (구문분석 오류)
 SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2031,7 +2025,7 @@ SELECT id, val, count(*) OVER w FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS val > PREV(val, 1.5)
 );
 
--- Compound + host variable offsets
+-- 복합형 + 호스트 변수 오프셋
 PREPARE test_compound_offset(int8, int8) AS
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
@@ -2045,7 +2039,7 @@ EXECUTE test_compound_offset(0, 1);
 EXECUTE test_compound_offset(1, 1);
 DEALLOCATE test_compound_offset;
 
--- Compound + SKIP TO NEXT ROW: overlapping matches with PREV(FIRST())
+-- 복합형 + SKIP TO NEXT ROW: PREV(FIRST())를 사용한 중첩 매치
 SELECT id, val, first_value(id) OVER w AS mf, count(*) OVER w AS cnt
 FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
@@ -2055,7 +2049,7 @@ FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS PREV(FIRST(val), 1) > 0
 );
 
--- Compound + multiple partitions
+-- 복합형 + 여러 파티션
 CREATE TEMP TABLE rpr_nav_part (gid int, id int, val int);
 INSERT INTO rpr_nav_part VALUES
     (1,1,10),(1,2,20),(1,3,30),
@@ -2070,7 +2064,7 @@ FROM rpr_nav_part WINDOW w AS (
 );
 DROP TABLE rpr_nav_part;
 
--- Reverse nesting: FIRST wrapping PREV is prohibited
+-- 역방향 중첩: FIRST가 PREV를 감싸는 것은 금지된다
 SELECT id, val FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2078,7 +2072,7 @@ SELECT id, val FROM rpr_nav_cycle WINDOW w AS (
     DEFINE A AS TRUE, B AS FIRST(PREV(val)) > 0
 );
 
--- Reverse nesting: LAST wrapping NEXT is prohibited
+-- 역방향 중첩: LAST가 NEXT를 감싸는 것은 금지된다
 SELECT id, val FROM rpr_nav_cycle WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2089,10 +2083,10 @@ SELECT id, val FROM rpr_nav_cycle WINDOW w AS (
 DROP TABLE rpr_nav_cycle;
 
 --
--- SKIP TO / Backtracking / Frame boundary
+-- SKIP TO / 역추적 / 프레임 경계
 --
 
--- match everything
+-- 모든 것을 매치한다
 SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -2106,7 +2100,7 @@ SELECT company, tdate, price, first_value(price) OVER w, last_value(price) OVER 
   A AS TRUE
 );
 
--- nth_value beyond reduced frame (no IGNORE NULLS)
+-- 축소된 프레임을 벗어난 nth_value (IGNORE NULLS 없음)
 SELECT company, tdate, price,
  nth_value(price, 5) OVER w AS nth_5
 FROM rpr_price
@@ -2122,8 +2116,8 @@ WINDOW w AS (
   DOWN AS price < PREV(price)
 );
 
--- backtracking with reclassification of rows
--- using AFTER MATCH SKIP PAST LAST ROW
+-- 행 재분류가 있는 역추적
+-- AFTER MATCH SKIP PAST LAST ROW를 사용
 SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -2138,8 +2132,8 @@ SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER 
   B AS price > 100
 );
 
--- backtracking with reclassification of rows
--- using AFTER MATCH SKIP TO NEXT ROW
+-- 행 재분류가 있는 역추적
+-- AFTER MATCH SKIP TO NEXT ROW를 사용
 SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER w
  FROM rpr_price
  WINDOW w AS (
@@ -2154,8 +2148,8 @@ SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER 
   B AS price > 100
 );
 
--- SKIP TO NEXT ROW with limited frame
--- Each row should produce its own match within its frame
+-- 제한된 프레임에서의 SKIP TO NEXT ROW
+-- 각 행은 자신의 프레임 안에서 자기만의 매치를 만들어야 한다
 WITH data AS (
  SELECT * FROM (VALUES
   ('A', 1), ('A', 2),
@@ -2172,7 +2166,7 @@ WINDOW w AS (
  DEFINE A AS id < 10
 );
 
--- Limited frame with absorption test
+-- 제한된 프레임에서의 흡수 테스트
 WITH frame_absorb_test AS (
  SELECT * FROM (VALUES
   (0, 'A'), (1, 'A'), (2, 'A'), (3, 'B')
@@ -2207,10 +2201,10 @@ SELECT company, tdate, price, first_value(tdate) OVER w, last_value(tdate) OVER 
 );
 
 --
--- Aggregates
+-- 집계
 --
 
--- using AFTER MATCH SKIP PAST LAST ROW
+-- AFTER MATCH SKIP PAST LAST ROW를 사용
 SELECT company, tdate, price,
  first_value(price) OVER w,
  last_value(price) OVER w,
@@ -2232,7 +2226,7 @@ UP AS price > PREV(price),
 DOWN AS price < PREV(price)
 );
 
--- using AFTER MATCH SKIP TO NEXT ROW
+-- AFTER MATCH SKIP TO NEXT ROW를 사용
 SELECT company, tdate, price,
  first_value(price) OVER w,
  last_value(price) OVER w,
@@ -2254,7 +2248,7 @@ UP AS price > PREV(price),
 DOWN AS price < PREV(price)
 );
 
--- row_number() within RPR reduced frame
+-- RPR 축소된 프레임 안의 row_number()
 SELECT company, tdate, price, row_number() OVER w, count(*) OVER w
 FROM rpr_price
 WINDOW w AS (
@@ -2270,10 +2264,10 @@ WINDOW w AS (
 );
 
 --
--- SQL Integration: JOIN, CTE, LATERAL
+-- SQL 통합: JOIN, CTE, LATERAL
 --
 
--- JOIN case
+-- JOIN 사례
 CREATE TEMP TABLE rpr_join_left (i int, v1 int);
 CREATE TEMP TABLE rpr_join_right (j int, v2 int);
 INSERT INTO rpr_join_left VALUES(1,10);
@@ -2295,7 +2289,7 @@ WINDOW w AS (
  A AS v1 <= 11 AND v2 <= 11
 );
 
--- WITH case
+-- WITH 사례
 WITH wstock AS (
   SELECT * FROM rpr_price WHERE tdate < '2023-07-08'
 )
@@ -2315,7 +2309,7 @@ count(*) OVER w
   DOWN AS price < PREV(price)
 );
 
--- ReScan test: LATERAL join forces WindowAgg rescan with RPR
+-- ReScan 테스트: LATERAL 조인이 RPR과 함께 WindowAgg 재스캔을 강제한다
 SELECT g.x, sub.*
 FROM generate_series(1, 2) g(x),
 LATERAL (
@@ -2333,7 +2327,7 @@ LATERAL (
 ) sub
 ORDER BY g.x, sub.id;
 
--- PREV has multiple column reference
+-- PREV가 여러 컬럼 참조를 가짐
 CREATE TEMP TABLE rpr_prev_multicol (id INTEGER, i SERIAL, j INTEGER);
 INSERT INTO rpr_prev_multicol(id, j) SELECT 1, g*2 FROM generate_series(1, 10) AS g;
 SELECT id, i, j, count(*) OVER w
@@ -2351,10 +2345,10 @@ SELECT id, i, j, count(*) OVER w
 );
 
 --
--- Large-scale / scalability tests
+-- 대규모 / 확장성 테스트
 --
 
--- Smoke test for larger partitions.
+-- 더 큰 파티션에 대한 스모크 테스트.
 WITH s AS (
  SELECT v, count(*) OVER w AS c
  FROM (SELECT generate_series(1, 5000) v)
@@ -2366,7 +2360,7 @@ WITH s AS (
   DEFINE r AS TRUE
  )
 )
--- Should be exactly one long match across all rows.
+-- 모든 행에 걸친 하나의 긴 매치여야 한다.
 SELECT * FROM s WHERE c > 0;
 
 WITH s AS (
@@ -2380,11 +2374,11 @@ WITH s AS (
   DEFINE r AS TRUE
  )
 )
--- Every row should be its own match.
+-- 각 행은 자기만의 매치여야 한다.
 SELECT count(*) FROM s WHERE c > 0;
 
--- Large partition test: 100K rows with A+ B* C{10000,} pattern
--- Tests that int32 count doesn't overflow with large repetitions
+-- 대형 파티션 테스트: A+ B* C{10000,} 패턴을 가진 10만 행 대량 반복에서 int32
+-- 카운트가 오버플로하지 않는지 테스트한다
 WITH data AS (
  SELECT generate_series(0, 100000) AS v
 ),
@@ -2405,12 +2399,12 @@ result AS (
    C AS v >= 66666 AND v < 99999
  )
 )
--- Should match: A (33333 rows) + B (33333 rows) + C (33333 rows) = 99999 rows
+-- 매치되어야 함: A (33333 행) + B (33333 행) + C (33333 행) = 99999 행
 SELECT match_first, match_last, match_len FROM result WHERE match_len > 0;
 
--- JIT PREV/NEXT navigation test: 100K rows with PREV in DEFINE.
--- Exercises EEOP_RPR_NAV_SET/RESTORE JIT code paths (has_rpr_nav reload)
--- at scale.  A single V: price falls to zero at the midpoint, then rises.
+-- JIT PREV/NEXT 내비게이션 테스트: DEFINE에 PREV가 있는 10만 행.
+-- EEOP_RPR_NAV_SET/RESTORE JIT 코드 경로(has_rpr_nav 재적재)를 대규모로
+-- 실행한다.  단일 V형: price가 중간 지점에서 0까지 떨어졌다가 다시 오른다.
 SET jit = on;
 SET jit_above_cost = 0;
 WITH data AS (
@@ -2437,7 +2431,7 @@ FROM result WHERE match_len > 0;
 RESET jit_above_cost;
 RESET jit;
 
--- JIT compound navigation test
+-- JIT 복합 내비게이션 테스트
 SET jit = on;
 SET jit_above_cost = 0;
 SELECT count(*) AS matched_rows
@@ -2458,8 +2452,7 @@ RESET jit;
 -- IGNORE NULLS
 --
 
--- no NULL rows case. The result should be identical with
--- "basic test using PREV"
+-- NULL 행이 없는 경우.  결과는 "basic test using PREV"와 동일해야 한다
 SELECT company, tdate, price, first_value(price) IGNORE NULLS OVER w,
  last_value(price) IGNORE NULLS OVER w,
  nth_value(tdate, 2) IGNORE NULLS OVER w AS nth_second
@@ -2475,8 +2468,8 @@ SELECT company, tdate, price, first_value(price) IGNORE NULLS OVER w,
   DOWN AS price < PREV(price)
 );
 
--- nth_value with IGNORE NULLS option wants to find the second row but
--- due to a NULL in the middle, it returns the third row.
+-- IGNORE NULLS 옵션을 가진 nth_value 는 두 번째 행을 찾으려 하지만 중간의 NULL
+-- 때문에 세 번째 행을 반환한다.
 WITH data AS (
  SELECT * FROM (VALUES
   (10, 1), (11, NULL), (12, 3), (13, 4)
@@ -2492,9 +2485,8 @@ WITH data AS (
    DEFINE A AS gid < 13
   );
 
--- nth_value with IGNORE NULLS option wants to find the third row but
--- due to a NULL in the middle, it reaches the end of reduced frame and
--- returns NULL
+-- IGNORE NULLS 옵션을 가진 nth_value 는 세 번째 행을 찾으려 하지만 중간의 NULL
+-- 때문에 축소된 프레임의 끝에 도달하여 NULL을 반환한다
 WITH data AS (
  SELECT * FROM (VALUES
   (10, 1), (11, NULL), (12, 3), (13, 4)
@@ -2510,7 +2502,7 @@ WITH data AS (
    DEFINE A AS gid < 13
   );
 
--- nth_value beyond reduced frame with IGNORE NULLS
+-- IGNORE NULLS에서 축소된 프레임을 벗어난 nth_value
 SELECT company, tdate, price,
  nth_value(price, 5) IGNORE NULLS OVER w AS nth_5_in
 FROM rpr_price
@@ -2526,7 +2518,7 @@ WINDOW w AS (
   DOWN AS price < PREV(price)
 );
 
--- IGNORE NULLS + first_value where first value in reduced frame is NULL
+-- IGNORE NULLS + 축소된 프레임의 첫 값이 NULL인 first_value
 WITH data AS (
  SELECT * FROM (VALUES
   (1, NULL), (2, NULL), (3, 30), (4, 40)
@@ -2543,7 +2535,7 @@ WINDOW w AS (
  DEFINE A AS TRUE
 );
 
--- IGNORE NULLS + all values NULL in reduced frame
+-- IGNORE NULLS + 축소된 프레임의 모든 값이 NULL
 WITH data AS (
  SELECT * FROM (VALUES
   (1, NULL), (2, NULL), (3, NULL)
@@ -2562,9 +2554,9 @@ WINDOW w AS (
 );
 
 --
--- last_value IGNORE NULLS when the reduced frame ends with NULLs
--- The search for a non-NULL value must start at the end of the reduced frame,
--- not the full frame, so the later non-NULL row 4 is not returned.
+-- 축소된 프레임이 NULL로 끝날 때의 last_value IGNORE NULLS non-NULL 값 탐색은
+-- 전체 프레임이 아니라 축소된 프레임의 끝에서 시작해야 하므로, 뒤쪽의
+-- non-NULL인 4 번 행은 반환되지 않는다
 --
 CREATE TEMP TABLE rpr_nullval (id INT, val INT);
 INSERT INTO rpr_nullval VALUES (1, 10), (2, NULL), (3, NULL), (4, 20);
@@ -2584,14 +2576,14 @@ WINDOW w AS (
 );
 
 --
--- nth_value with a NULL offset
+-- NULL 오프셋을 가진 nth_value
 --
 
 CREATE TABLE rpr_dormant (id int, price int);
 INSERT INTO rpr_dormant SELECT g, g*10 FROM generate_series(1,60) g;
 
--- reference: first_value(id) is the start row of the match beginning at the
--- current row, count(*) is that match's length over the reduced frame
+-- 참고: first_value(id)는 현재 행에서 시작하는 매치의 시작 행이고, count(*)는
+-- 축소된 프레임에 걸친 그 매치의 길이다
 SELECT * FROM (
   SELECT id, first_value(id) OVER w AS match_start, count(*) OVER w AS match_len
   FROM rpr_dormant
@@ -2600,7 +2592,7 @@ SELECT * FROM (
     PATTERN (A+) DEFINE A AS price > PREV(FIRST(price), 50))
 ) s WHERE id > 50 ORDER BY id;
 
--- nth_value with a NULL offset; FIRST navigation in DEFINE, SKIP PAST LAST ROW
+-- NULL 오프셋을 가진 nth_value; DEFINE의 FIRST 내비게이션, SKIP PAST LAST ROW
 SELECT * FROM (
   SELECT id, nv FROM (
     SELECT id, nth_value(price, CASE WHEN id < 50 THEN NULL ELSE 1 END) OVER w AS nv
@@ -2611,7 +2603,7 @@ SELECT * FROM (
   ) s
 ) t WHERE id > 50 ORDER BY id;
 
--- the same window with first_value and count alongside nth_value
+-- nth_value 와 함께 first_value, count를 둔 같은 윈도우
 SELECT * FROM (
   SELECT id, nv, fv, cnt FROM (
     SELECT id, nth_value(price, CASE WHEN id < 50 THEN NULL ELSE 1 END) OVER w AS nv,
@@ -2623,7 +2615,7 @@ SELECT * FROM (
   ) s
 ) t WHERE id > 50 ORDER BY id;
 
--- the same nth_value with a non-navigation DEFINE
+-- 내비게이션이 없는 DEFINE에서의 같은 nth_value
 SELECT * FROM (
   SELECT id, nv FROM (
     SELECT id, nth_value(price, CASE WHEN id < 50 THEN NULL ELSE 1 END) OVER w AS nv
@@ -2634,7 +2626,7 @@ SELECT * FROM (
   ) s
 ) t WHERE id > 50 ORDER BY id;
 
--- the same nth_value with a PREV-only DEFINE (no FIRST navigation)
+-- PREV만 있는 DEFINE에서의 같은 nth_value (FIRST 내비게이션 없음)
 SELECT * FROM (
   SELECT id, nv FROM (
     SELECT id, nth_value(price, CASE WHEN id < 50 THEN NULL ELSE 1 END) OVER w AS nv
@@ -2645,7 +2637,7 @@ SELECT * FROM (
   ) s
 ) t WHERE id > 50 ORDER BY id;
 
--- nth_value with a NULL offset band in the middle of the partition
+-- 파티션 중간에 NULL 오프셋 구간이 있는 nth_value
 SELECT * FROM (
   SELECT id, nv FROM (
     SELECT id, nth_value(price, CASE WHEN id BETWEEN 20 AND 40 THEN NULL ELSE 1 END) OVER w AS nv
@@ -2659,12 +2651,12 @@ SELECT * FROM (
 DROP TABLE rpr_dormant;
 
 --
--- NULL handling
+-- NULL 처리
 --
 
 CREATE TEMP TABLE rpr_stock_null (company TEXT, tdate DATE, price INTEGER);
 INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-01', 100);
-INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-02', NULL);  -- NULL in middle
+INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-02', NULL);  -- 중간의 NULL
 INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-03', 200);
 INSERT INTO rpr_stock_null VALUES ('c1', '2023-07-04', 150);
 
@@ -2679,12 +2671,12 @@ WINDOW w AS (
 PREV(price)
 );
 
--- Consecutive NULLs: PREV navigates through NULL values
+-- 연속된 NULL: PREV가 NULL 값을 통과해 내비게이션한다
 CREATE TEMP TABLE rpr_consec_null (id INT, val INT);
 INSERT INTO rpr_consec_null VALUES
  (1, 100), (2, NULL), (3, NULL), (4, NULL), (5, 200), (6, 300);
 
--- PREV(val) IS NULL is true for a genuine NULL in the previous row
+-- 이전 행이 진짜 NULL이면 PREV(val) IS NULL은 참이다
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_consec_null
 WINDOW w AS (
@@ -2698,7 +2690,7 @@ WINDOW w AS (
   C AS val IS NOT NULL
 );
 
--- NEXT(val) through consecutive NULLs
+-- 연속된 NULL을 통과하는 NEXT(val)
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_consec_null
 WINDOW w AS (
@@ -2715,10 +2707,10 @@ WINDOW w AS (
 DROP TABLE rpr_consec_null;
 
 -- ============================================================
--- Stock Scenario Tests (1632 rows, partitioned regions)
+-- 주가 시나리오 테스트 (1632 행, 파티션된 지역)
 -- ============================================================
 
--- Consecutive rising days: find streaks of 7+ days
+-- 연속 상승일: 7 일 이상의 연속 구간을 찾는다
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2734,7 +2726,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- V-shape recovery: 4+ days decline followed by 4+ days rise
+-- V자형 반등: 4 일 이상 하락 후 4 일 이상 상승
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2754,7 +2746,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- W-bottom: decline, bounce, re-decline, recovery
+-- W자형 바닥: 하락, 반등, 재하락, 회복
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2776,7 +2768,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Volume surge streak: 6+ consecutive days of increasing volume
+-- 거래량 급증 구간: 거래량이 증가하는 6 일 이상의 연속 구간
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2795,7 +2787,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Volatility squeeze: consecutive narrowing of daily price range
+-- 변동성 수축: 일일 가격 범위가 연속으로 좁아짐
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2814,7 +2806,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Gap up: open significantly higher than previous close (5%+)
+-- 갭 상승: 시가가 전일 종가보다 크게 높음 (5% 이상)
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS gap_rn,
            first_value(price) OVER w AS prev_close,
@@ -2832,8 +2824,7 @@ SELECT * FROM (
     )
 ) t WHERE cnt > 0 ORDER BY gap_rn;
 
--- Price-volume divergence: price rising while volume declining
--- (bearish signal)
+-- 가격-거래량 다이버전스: 가격은 상승하는데 거래량은 감소 (약세 신호)
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2852,7 +2843,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Consolidation then breakout: sideways movement followed by sharp rise
+-- 통합 후 돌파: 횡보 후 급격한 상승
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2872,7 +2863,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Dead cat bounce: decline followed by weak recovery (<1% per day)
+-- 데드 캣 바운스: 하락 후 약한 회복 (일일 1% 미만)
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2892,7 +2883,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Uptrend: 7+ consecutive days of higher highs AND higher lows
+-- 상승 추세: 고점과 저점이 모두 높아지는 7 일 이상의 연속 구간
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2911,7 +2902,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Panic and snap-back: 3%+ daily drops followed by 2%+ rebound
+-- 패닉과 급반등: 일일 3% 이상 하락 후 2% 이상 반등
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,
@@ -2931,7 +2922,7 @@ SELECT * FROM (
     )
 ) t WHERE days > 0 ORDER BY start_rn;
 
--- Volume climax reversal: uptrend, volume spike (1.5x), then decline
+-- 거래량 클라이맥스 반전: 상승 추세, 거래량 급증(1.5배), 이후 하락
 SELECT * FROM (
     SELECT first_value(rn) OVER w AS start_rn,
            last_value(rn) OVER w AS end_rn,

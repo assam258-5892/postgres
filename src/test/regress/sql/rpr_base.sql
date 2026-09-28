@@ -1,60 +1,60 @@
 -- ============================================================
--- RPR Base Tests
--- Tests for Row Pattern Recognition (ISO/IEC 19075-5)
+-- RPR 기본 테스트
+-- 행 패턴 인식(Row Pattern Recognition, ISO/IEC 19075-5) 테스트
 -- ============================================================
 --
--- Parser Layer:
---   Keyword Usage Tests
---   DEFINE Clause Tests
---   FRAME Options Tests
---   PARTITION BY + FRAME Tests
---   PATTERN Syntax Tests
---   Quantifiers Tests
---   Navigation Functions Tests
---   SKIP TO / INITIAL Tests
---   Serialization/Deserialization Tests
---   Glued Quantifier / Alternation Tests
---   Error Cases Tests
+-- 파서 계층:
+--   키워드 사용 테스트
+--   DEFINE 절 테스트
+--   FRAME 옵션 테스트
+--   PARTITION BY + FRAME 테스트
+--   PATTERN 구문 테스트
+--   수량자 테스트
+--   내비게이션 함수 테스트
+--   SKIP TO / INITIAL 테스트
+--   직렬화/역직렬화 테스트
+--   결합된 수량자 / 교대 테스트
+--   오류 사례 테스트
 --
--- Planner Layer:
---   Pattern Optimization Tests
---   Absorption Flag Display Tests
---   Absorption Analysis Tests
---   Edge Case Tests
---   Optimization Fallback Tests
---   Planner Integration Tests
---   Subquery and CTE Tests
---   JOIN Tests
---   Complex Expression Tests
---   Set Operations Tests
---   Sorting and Grouping Tests
---   SQL Function Inlining Tests
---   Stress Tests
---   Error Limit Tests
+-- 플래너 계층:
+--   패턴 최적화 테스트
+--   흡수 플래그 표시 테스트
+--   흡수 분석 테스트
+--   에지 케이스 테스트
+--   최적화 폴백 테스트
+--   플래너 통합 테스트
+--   서브쿼리와 CTE 테스트
+--   JOIN 테스트
+--   복합 표현식 테스트
+--   집합 연산 테스트
+--   정렬과 그룹화 테스트
+--   SQL 함수 인라인화 테스트
+--   스트레스 테스트
+--   오류 한계 테스트
 --
--- Contributed Tests:
---   Basic Pattern Matching
---   Pathological Patterns
+-- 기여된 테스트:
+--   기본 패턴 매칭
+--   병리적 패턴
 -- ============================================================
 
 SET client_min_messages = WARNING;
 
 -- ============================================================
--- Keyword Usage Tests
+-- 키워드 사용 테스트
 -- ============================================================
 
--- RPR keywords as column names
--- Keywords: define, initial, past, pattern, permute, seek
+-- 열 이름으로 쓰인 RPR 키워드
+-- 키워드: define, initial, past, pattern, permute, seek
 
 CREATE TABLE rpr_keywords (
     id INT,
-    define INT,      -- DEFINE keyword
-    initial INT,     -- INITIAL keyword
-    past INT,        -- PAST keyword
-    pattern INT,     -- PATTERN keyword
-    permute INT,     -- PERMUTE keyword
-    seek INT,        -- SEEK keyword
-    skip INT         -- SKIP keyword (pre-existing)
+    define INT,      -- DEFINE 키워드
+    initial INT,     -- INITIAL 키워드
+    past INT,        -- PAST 키워드
+    pattern INT,     -- PATTERN 키워드
+    permute INT,     -- PERMUTE 키워드
+    seek INT,        -- SEEK 키워드
+    skip INT         -- SKIP 키워드 (기존에 있던 것)
 );
 
 INSERT INTO rpr_keywords VALUES (1, 10, 20, 30, 40, 45, 50, 60);
@@ -65,10 +65,10 @@ FROM rpr_keywords;
 DROP TABLE rpr_keywords;
 
 -- ============================================================
--- DEFINE Clause Tests
+-- DEFINE 절 테스트
 -- ============================================================
 
--- Simple column references
+-- 단순 열 참조들
 CREATE TABLE rpr_stock_price (
     dt DATE,
     symbol TEXT,
@@ -83,7 +83,7 @@ INSERT INTO rpr_stock_price VALUES
     ('2024-01-04', 'AAPL', 160, 1500),
     ('2024-01-05', 'AAPL', 158, 1100);
 
--- Simple column reference
+-- 단순 열 참조
 SELECT dt, price, COUNT(*) OVER w as cnt
 FROM rpr_stock_price
 WINDOW w AS (
@@ -94,7 +94,7 @@ WINDOW w AS (
     DEFINE UP AS price > 150
 );
 
--- Multiple column references
+-- 여러 개의 열 참조
 SELECT dt, price, volume, COUNT(*) OVER w as cnt
 FROM rpr_stock_price
 WINDOW w AS (
@@ -105,7 +105,7 @@ WINDOW w AS (
     DEFINE GOOD AS price > 150 AND volume > 1000
 );
 
--- Expression in DEFINE
+-- DEFINE 안의 표현식
 SELECT dt, price, COUNT(*) OVER w as cnt
 FROM rpr_stock_price
 WINDOW w AS (
@@ -116,7 +116,7 @@ WINDOW w AS (
     DEFINE HIGH AS price * 1.1 > 165
 );
 
--- Arithmetic and functions
+-- 산술 연산과 함수
 SELECT dt, price, volume, COUNT(*) OVER w as cnt
 FROM rpr_stock_price
 WINDOW w AS (
@@ -129,11 +129,11 @@ WINDOW w AS (
 
 DROP TABLE rpr_stock_price;
 
--- Pattern variables with no DEFINE entry
+-- DEFINE 항목이 없는 패턴 변수
 CREATE TABLE rpr_auto (id INT, val INT);
 INSERT INTO rpr_auto VALUES (1, 10), (2, 20), (3, 30), (4, 15);
 
--- B has no DEFINE entry, so it matches every row
+-- B는 DEFINE 항목이 없으므로 모든 행에 매치된다
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_auto
 WINDOW w AS (
@@ -143,7 +143,7 @@ WINDOW w AS (
     DEFINE A AS val > 15
 );
 
--- Multiple undefined variables
+-- 정의되지 않은 변수가 여러 개인 경우
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_auto
 WINDOW w AS (
@@ -151,10 +151,10 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B C)
     DEFINE A AS val > 0
-    -- B and C have no DEFINE entry, so they match every row
+    -- B와 C는 DEFINE 항목이 없으므로 모든 행에 매치된다
 );
 
--- All variables defined explicitly
+-- 모든 변수를 명시적으로 정의
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_auto
 WINDOW w AS (
@@ -169,11 +169,11 @@ WINDOW w AS (
 
 DROP TABLE rpr_auto;
 
--- Duplicate variable names
+-- 중복된 변수 이름
 CREATE TABLE rpr_dup (id INT);
 INSERT INTO rpr_dup VALUES (1), (2);
 
--- Duplicate DEFINE variable name is not allowed
+-- 중복된 DEFINE 변수 이름은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_dup
 WINDOW w AS (
@@ -185,11 +185,11 @@ WINDOW w AS (
 
 DROP TABLE rpr_dup;
 
--- Boolean coercion
+-- 불리언 강제 변환
 CREATE TABLE rpr_bool (id INT, flag BOOLEAN);
 INSERT INTO rpr_bool VALUES (1, true), (2, false);
 
--- DEFINE clause must be a boolean expression
+-- DEFINE 절은 불리언 표현식이어야 한다
 SELECT COUNT(*) OVER w
 FROM rpr_bool
 WINDOW w AS (
@@ -199,7 +199,7 @@ WINDOW w AS (
     DEFINE A AS id
 );
 
--- Boolean column reference
+-- 불리언 열 참조
 SELECT id, flag, COUNT(*) OVER w as cnt
 FROM rpr_bool
 WINDOW w AS (
@@ -219,7 +219,7 @@ WINDOW w AS (
     DEFINE N AS NULL::boolean
 );
 
--- Implicit cast to boolean via custom type
+-- 사용자 정의 타입을 통한 암묵적 불리언 캐스트
 CREATE TYPE rpr_truthyint AS (v int);
 CREATE FUNCTION rpr_truthyint_to_bool(rpr_truthyint) RETURNS boolean AS $$
   SELECT ($1).v <> 0;
@@ -250,8 +250,8 @@ DROP TYPE rpr_truthyint;
 
 DROP TABLE rpr_bool;
 
--- Coercion over a boolean domain is not a no-op; the wrapped Var must still
--- propagate when referenced only in DEFINE (flag is not in the select list)
+-- 불리언 도메인에 대한 강제 변환은 no-op이 아니다.  래핑된 Var는 DEFINE에서만
+-- 참조되더라도(select 목록에는 flag가 없음) 전파되어야 한다
 CREATE DOMAIN rpr_boolish AS boolean;
 CREATE TABLE rpr_domain (id int, flag rpr_boolish);
 INSERT INTO rpr_domain VALUES (1, true), (2, false), (3, true);
@@ -266,8 +266,8 @@ WINDOW w AS (
 DROP TABLE rpr_domain;
 DROP DOMAIN rpr_boolish;
 
--- A Var referenced only inside a navigation operation must still propagate
--- (val appears only inside PREV(), not as a bare operand or in the select list)
+-- 내비게이션 연산 안에서만 참조되는 Var도 전파되어야 한다 (val은 PREV()
+-- 안에서만 나타나며, 단독 피연산자나 select 목록에는 없다)
 CREATE TABLE rpr_nav (id int, val int);
 INSERT INTO rpr_nav VALUES (1, 0), (2, 1), (3, 0), (4, 2);
 SELECT id, COUNT(*) OVER w AS cnt
@@ -280,7 +280,7 @@ WINDOW w AS (
 );
 DROP TABLE rpr_nav;
 
--- A non-boolean DEFINE expression is rejected
+-- 불리언이 아닌 DEFINE 표현식은 거부된다
 CREATE TABLE rpr_noncoerce (id int, n int);
 INSERT INTO rpr_noncoerce VALUES (1, 1);
 SELECT id, COUNT(*) OVER w AS cnt
@@ -293,8 +293,8 @@ WINDOW w AS (
 );
 DROP TABLE rpr_noncoerce;
 
--- A non-boolean later DEFINE is rejected at its own definition even when an
--- earlier DEFINE variable is valid
+-- 앞선 DEFINE 변수가 유효하더라도, 불리언이 아닌 뒤쪽 DEFINE은 그 자신이
+-- 정의되는 지점에서 거부된다
 CREATE TABLE rpr_noncoerce2 (id int, n int);
 INSERT INTO rpr_noncoerce2 VALUES (1, 1);
 SELECT id, COUNT(*) OVER w AS cnt
@@ -307,11 +307,11 @@ WINDOW w AS (
 );
 DROP TABLE rpr_noncoerce2;
 
--- Complex expressions
+-- 복합 표현식
 CREATE TABLE rpr_complex (id INT, val1 INT, val2 INT);
 INSERT INTO rpr_complex VALUES (1, 10, 20), (2, 15, 25), (3, 20, 30);
 
--- CASE expression
+-- CASE 표현식
 SELECT id, val1, val2, COUNT(*) OVER w as cnt
 FROM rpr_complex
 WINDOW w AS (
@@ -323,25 +323,25 @@ WINDOW w AS (
 
 DROP TABLE rpr_complex;
 
--- Extra DEFINE variable not present in PATTERN
+-- PATTERN에 없는 추가 DEFINE 변수
 CREATE TABLE rpr_unused (id INT);
 INSERT INTO rpr_unused VALUES (1), (2);
 
--- Extra DEFINE variable
+-- 추가 DEFINE 변수
 SELECT id, COUNT(*) OVER w as cnt
 FROM rpr_unused
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
-    DEFINE A AS id > 0, B AS id > 5  -- B not in pattern
+    DEFINE A AS id > 0, B AS id > 5  -- B는 패턴에 없다
 );
 
 DROP TABLE rpr_unused;
 
--- A DEFINE predicate is evaluated only when its variable is tentatively
--- mapped.  A is false at every row, so B is never reached; B's condition
--- (which would divide by zero) must never run, and every row is unmatched.
+-- DEFINE 조건절은 그 변수가 잠정적으로 매핑될 때만 평가된다.  A는 모든 행에서
+-- false이므로 B에는 결코 도달하지 않는다.  (0 으로 나누는) B의 조건은 절대
+-- 실행되어서는 안 되며, 모든 행이 매치되지 않아야 한다.
 CREATE TABLE rpr_lazy (id INT, v INT);
 INSERT INTO rpr_lazy VALUES (1, 1), (2, 2), (3, 3);
 SELECT id, v, count(*) OVER w AS cnt
@@ -355,12 +355,12 @@ WINDOW w AS (
 
 DROP TABLE rpr_lazy;
 
--- A navigation result carrying a collation.  Both forms make the parser ask
--- for the collation of the navigation node itself rather than of its argument.
+-- 콜레이션을 갖는 내비게이션 결과.  두 형태 모두 파서가 인자의 콜레이션이
+-- 아니라 내비게이션 노드 자체의 콜레이션을 요구하게 만든다.
 CREATE TABLE rpr_navcoll (id INT, s TEXT);
 INSERT INTO rpr_navcoll VALUES (1, 'a'), (2, 'B'), (3, 'c');
 
--- COLLATE applied to the navigation result
+-- 내비게이션 결과에 적용된 COLLATE
 SELECT id, s, count(*) OVER w AS cnt
 FROM rpr_navcoll
 WINDOW w AS (
@@ -370,8 +370,8 @@ WINDOW w AS (
     DEFINE A AS PREV(s) COLLATE "C" < s
 );
 
--- Simple CASE over the navigation result: the placeholder takes its collation
--- from the tested expression
+-- 내비게이션 결과에 대한 단순 CASE: 플레이스홀더는 테스트 대상 표현식으로부터
+-- 자신의 콜레이션을 가져온다
 SELECT id, s, count(*) OVER w AS cnt
 FROM rpr_navcoll
 WINDOW w AS (
@@ -383,9 +383,9 @@ WINDOW w AS (
 
 DROP TABLE rpr_navcoll;
 
--- A system column in a DEFINE expression.  Only the scan reads it as a system
--- attribute; it reaches the expression as an outer Var, and navigation still
--- applies to it: PREV(ctid) is the previous row of the match, not this row.
+-- DEFINE 표현식 안의 시스템 열.  스캔만 이를 시스템 속성으로 읽으며,
+-- 표현식에는 외부 Var로 도달한다.  이때도 내비게이션은 여전히 적용된다:
+-- PREV(ctid)는 이 행이 아니라 매치의 이전 행이다.
 CREATE TABLE rpr_navsys (i INT);
 INSERT INTO rpr_navsys SELECT generate_series(1, 5);
 SELECT i, count(*) OVER w AS cnt
@@ -400,18 +400,18 @@ WINDOW w AS (
 DROP TABLE rpr_navsys;
 
 -- ============================================================
--- FRAME Options Tests
+-- FRAME 옵션 테스트
 -- ============================================================
 
 CREATE TABLE rpr_frame (id INT, val INT);
 INSERT INTO rpr_frame VALUES
-    (1, 10), (2, 10), (3, 10),  -- Same val: 10
-    (4, 20), (5, 20),           -- Same val: 20
+    (1, 10), (2, 10), (3, 10),  -- 같은 val: 10
+    (4, 20), (5, 20),           -- 같은 val: 20
     (6, 30);
 
--- Valid frame options
+-- 유효한 프레임 옵션
 
--- ROWS: counts physical rows (1 FOLLOWING = next 1 physical row)
+-- ROWS: 물리적 행 수를 센다 (1 FOLLOWING = 다음 물리적 행 1 개)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -423,7 +423,7 @@ WINDOW w AS (
 )
 ORDER BY id;
 
--- frame must start at CURRENT ROW, not UNBOUNDED PRECEDING
+-- 프레임은 UNBOUNDED PRECEDING이 아니라 CURRENT ROW에서 시작해야 한다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -433,9 +433,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- EXCLUDE options
+-- EXCLUDE 옵션
 
--- EXCLUDE not permitted
+-- EXCLUDE는 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -446,7 +446,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- EXCLUDE GROUP not permitted
+-- EXCLUDE GROUP은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -457,7 +457,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- EXCLUDE TIES not permitted
+-- EXCLUDE TIES는 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -468,8 +468,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Both rules broken at once.  The frame shape is settled first, so the
--- report names the shape; the EXCLUDE clause may not survive the rewrite.
+-- 두 규칙을 한꺼번에 어긴 경우.  프레임 모양이 먼저 확정되므로 보고에는 그
+-- 모양이 이름으로 나타나며, EXCLUDE 절은 재작성 과정에서 살아남지 못할
+-- 수 있다.
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -480,7 +481,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- range frame is not allowed with RPR
+-- range 프레임은 RPR과 함께 쓸 수 없다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -490,7 +491,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- GROUPS frame is not allowed with RPR
+-- GROUPS 프레임은 RPR과 함께 쓸 수 없다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -500,9 +501,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- omitting the frame clause leaves the standard default, RANGE BETWEEN
--- UNBOUNDED PRECEDING AND CURRENT ROW, which breaks three of the rules at
--- once.  One report, stating what the frame has to be.
+-- 프레임 절을 생략하면 표준 기본값인 RANGE BETWEEN UNBOUNDED PRECEDING AND
+-- CURRENT ROW가 남으며, 이는 세 규칙을 한꺼번에 어긴다.  보고는 프레임이
+-- 어떠해야 하는지를 말하는 하나만 나온다.
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -511,7 +512,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- frame must start at CURRENT ROW, not offset PRECEDING
+-- 프레임은 offset PRECEDING이 아니라 CURRENT ROW에서 시작해야 한다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -521,7 +522,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- frame must start at CURRENT ROW, not offset FOLLOWING
+-- 프레임은 offset FOLLOWING이 아니라 CURRENT ROW에서 시작해야 한다
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -531,7 +532,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: end before start: CURRENT ROW AND 1 PRECEDING
+-- ERROR: 끝이 시작보다 앞섬: CURRENT ROW AND 1 PRECEDING
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -541,7 +542,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: end before start: CURRENT ROW AND UNBOUNDED PRECEDING
+-- ERROR: 끝이 시작보다 앞섬: CURRENT ROW AND UNBOUNDED PRECEDING
 SELECT COUNT(*) OVER w
 FROM rpr_frame
 WINDOW w AS (
@@ -551,8 +552,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Single row frame: CURRENT ROW AND CURRENT ROW is rejected (the standard
--- allows only UNBOUNDED FOLLOWING or a positive offset FOLLOWING).
+-- 한 행짜리 프레임: CURRENT ROW AND CURRENT ROW는 거부된다 (표준은 UNBOUNDED
+-- FOLLOWING이나 양의 offset FOLLOWING만 허용한다).
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -563,8 +564,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Zero offset: CURRENT ROW AND 0 FOLLOWING denotes the same one-row frame
--- and is likewise rejected (caught at execution time).
+-- 오프셋 0: CURRENT ROW AND 0 FOLLOWING은 같은 한 행짜리 프레임을 나타내며
+-- 마찬가지로 거부된다 (실행 시점에 검출된다).
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -575,8 +576,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- A non-constant frame end offset is allowed; a zero value is rejected by the
--- same execution-time check the literal 0 above reaches.
+-- 상수가 아닌 프레임 끝 오프셋은 허용되며, 값이 0 이면 위의 리터럴 0 이
+-- 도달하는 것과 같은 실행 시점 검사에 의해 거부된다.
 PREPARE rpr_end_offset(int8) AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
@@ -591,7 +592,7 @@ EXECUTE rpr_end_offset(2);
 EXECUTE rpr_end_offset(0);
 DEALLOCATE rpr_end_offset;
 
--- Large offset: CURRENT ROW AND 1000 FOLLOWING
+-- 큰 오프셋: CURRENT ROW AND 1000 FOLLOWING
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -602,7 +603,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Maximum offset: CURRENT ROW AND 2147483646 FOLLOWING (INT_MAX - 1)
+-- 최대 오프셋: CURRENT ROW AND 2147483646 FOLLOWING (INT_MAX - 1)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -613,11 +614,11 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- int64 frame-end overflow: a huge FOLLOWING offset must clamp to the
--- partition end (matchStartRow + offset + 1 overflows int64; the clamp makes
--- it behave like UNBOUNDED FOLLOWING).  Guards against signed-integer overflow
--- in the "frameOffset + 1" subexpression (undefined behavior).  The cnt values
--- must match the UNBOUNDED FOLLOWING result for the same data.
+-- int64 프레임 끝 오버플로: 매우 큰 FOLLOWING 오프셋은 파티션 끝으로
+-- 클램프되어야 한다 (matchStartRow + offset + 1 이 int64 를 오버플로하므로
+-- 클램프가 UNBOUNDED FOLLOWING처럼 동작하게 만든다).  "frameOffset + 1"
+-- 부분식에서의 부호 있는 정수 오버플로(정의되지 않은 동작)를 막는다.  cnt 값은
+-- 같은 데이터에 대해 UNBOUNDED FOLLOWING 결과와 일치해야 한다.
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -628,7 +629,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- range frame is not allowed with RPR
+-- range 프레임은 RPR과 함께 쓸 수 없다
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -639,7 +640,7 @@ WINDOW w AS (
     DEFINE A AS val >= 0, B AS val >= 0
 );
 
--- GROUPS frame with RPR (not permitted)
+-- RPR과 함께 쓰는 GROUPS 프레임 (허용되지 않음)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
 WINDOW w AS (
@@ -653,16 +654,16 @@ WINDOW w AS (
 DROP TABLE rpr_frame;
 
 -- ============================================================
--- PARTITION BY + FRAME Tests
+-- PARTITION BY + FRAME 테스트
 -- ============================================================
 
--- Test PARTITION BY with RPR to ensure proper partitioning behavior
+-- RPR과 함께 쓰는 PARTITION BY가 올바르게 파티셔닝되는지 확인하는 테스트
 CREATE TABLE rpr_partition (id INT, grp INT, val INT);
 INSERT INTO rpr_partition VALUES
     (1, 1, 10), (2, 1, 20), (3, 1, 30),
     (4, 2, 15), (5, 2, 25), (6, 2, 35);
 
--- PARTITION BY with ROWS frame
+-- ROWS 프레임과 함께 쓰는 PARTITION BY
 SELECT id, grp, val, COUNT(*) OVER w as cnt
 FROM rpr_partition
 WINDOW w AS (
@@ -674,7 +675,7 @@ WINDOW w AS (
     DEFINE A AS val >= 10, B AS val > 15
 );
 
--- PARTITION BY with RANGE frame
+-- RANGE 프레임과 함께 쓰는 PARTITION BY
 SELECT id, grp, val, COUNT(*) OVER w as cnt
 FROM rpr_partition
 WINDOW w AS (
@@ -689,7 +690,7 @@ WINDOW w AS (
 DROP TABLE rpr_partition;
 
 -- ============================================================
--- PATTERN Syntax Tests
+-- PATTERN 구문 테스트
 -- ============================================================
 
 CREATE TABLE rpr_pattern (id INT, val INT);
@@ -697,9 +698,9 @@ INSERT INTO rpr_pattern VALUES
     (1, 5), (2, 10), (3, 15), (4, 20), (5, 25),
     (6, 30), (7, 35), (8, 40), (9, 45), (10, 50);
 
--- Alternation (|)
+-- 교대 (|)
 
--- Multiple alternatives
+-- 여러 대안
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_pattern
 WINDOW w AS (
@@ -709,9 +710,9 @@ WINDOW w AS (
     DEFINE A AS val > 35, B AS val BETWEEN 15 AND 35, C AS val < 15
 );
 
--- Grouping
+-- 그룹화
 
--- Nested grouping with quantifier
+-- 수량자를 가진 중첩 그룹화
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_pattern
 WINDOW w AS (
@@ -721,9 +722,9 @@ WINDOW w AS (
     DEFINE A AS val > 10, B AS val > 20, C AS val > 30
 );
 
--- Sequence
+-- 시퀀스
 
--- Multi-element sequence
+-- 여러 요소로 이루어진 시퀀스
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_pattern
 WINDOW w AS (
@@ -738,9 +739,9 @@ WINDOW w AS (
         E AS val >= 45
 );
 
--- Complex combinations
+-- 복합 조합
 
--- Alternation with grouping
+-- 그룹화를 포함한 교대
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_pattern
 WINDOW w AS (
@@ -750,7 +751,7 @@ WINDOW w AS (
     DEFINE A AS val < 20, B AS val >= 20, C AS val < 30, D AS val >= 30
 );
 
--- Alternation + sequence + grouping
+-- 교대 + 시퀀스 + 그룹화
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_pattern
 WINDOW w AS (
@@ -765,7 +766,7 @@ WINDOW w AS (
         FINISH AS val > 40
 );
 
--- Nested alternation in groups
+-- 그룹 안에 중첩된 교대
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_pattern
 WINDOW w AS (
@@ -778,7 +779,7 @@ WINDOW w AS (
 DROP TABLE rpr_pattern;
 
 -- ============================================================
--- Quantifiers Tests
+-- 수량자 테스트
 -- ============================================================
 
 CREATE TABLE rpr_quant (id INT, val INT);
@@ -786,9 +787,9 @@ INSERT INTO rpr_quant VALUES
     (1, 10), (2, 20), (3, 30), (4, 40), (5, 50),
     (6, 60), (7, 70), (8, 80), (9, 90), (10, 100);
 
--- Basic greedy quantifiers
+-- 기본 탐욕적 수량자
 
--- * (zero or more)
+-- * (0 개 이상)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -798,7 +799,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- + (one or more)
+-- + (1 개 이상)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -808,7 +809,7 @@ WINDOW w AS (
     DEFINE A AS val > 50
 );
 
--- ? (zero or one)
+-- ? (0 개 또는 1 개)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -818,9 +819,9 @@ WINDOW w AS (
     DEFINE A AS val = 50
 );
 
--- Edge case quantifiers
+-- 경계 사례 수량자
 
--- {0} is not allowed (min must be >= 1)
+-- {0}은 허용되지 않는다 (최솟값은 1 이상이어야 한다)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -830,7 +831,7 @@ WINDOW w AS (
     DEFINE A AS val > 1000, B AS val > 0
 );
 
--- {0,0} is not allowed (max must be >= 1)
+-- {0,0}은 허용되지 않는다 (최댓값은 1 이상이어야 한다)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -840,7 +841,7 @@ WINDOW w AS (
     DEFINE A AS val > 1000, B AS val > 0
 );
 
--- {0,1} (equivalent to ?)
+-- {0,1} (?와 동등)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -850,9 +851,9 @@ WINDOW w AS (
     DEFINE A AS val = 50
 );
 
--- Exact quantifiers {n}
+-- 정확한 수량자 {n}
 
--- {3} (representative exact quantifier)
+-- {3} (대표적인 정확한 수량자)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -862,9 +863,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Range quantifiers {n,}
+-- 범위 수량자 {n,}
 
--- {2,} (representative n or more)
+-- {2,} (대표적인 n개 이상)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -874,9 +875,9 @@ WINDOW w AS (
     DEFINE A AS val > 40
 );
 
--- Upper bound quantifiers {,m}
+-- 상한 수량자 {,m}
 
--- {,3} (representative up to m)
+-- {,3} (대표적인 m개 이하)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -886,9 +887,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Range quantifiers {n,m}
+-- 범위 수량자 {n,m}
 
--- {3,7} (representative range)
+-- {3,7} (대표적인 범위)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_quant
 WINDOW w AS (
@@ -900,25 +901,25 @@ WINDOW w AS (
 
 DROP TABLE rpr_quant;
 
--- Reluctant quantifiers
+-- 소극적 수량자
 CREATE TABLE rpr_reluctant (id INT, val INT);
 INSERT INTO rpr_reluctant VALUES (1, 10), (2, 20), (3, 30);
 
--- A greedy quantifier followed by a reluctant one over the same variable must
--- not be merged: the merged spellings A{2,3} and A{1,4} match all three rows
--- where these stop at two, so merging would change the preferred match.
+-- 같은 변수에 대해 탐욕적 수량자 뒤에 소극적 수량자가 오는 경우는 병합되어서는
+-- 안 된다: 병합된 표기 A{2,3}과 A{1,4}는 두 자리에서 멈추는 세 행 모두에
+-- 매치되므로, 병합하면 선호되는 매치가 달라진다.
 SELECT id, count(*) OVER w FROM rpr_reluctant
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2} A??) DEFINE A AS TRUE);
 
 SELECT id, count(*) OVER w FROM rpr_reluctant
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{1,2} A{0,2}?) DEFINE A AS TRUE);
 
--- cascade: the reluctant middle VAR must stop the merge on both sides, where
--- the merged A{1,3} would match all three rows
+-- 연쇄: 소극적인 중간 VAR는 양쪽에서 병합을 막아야 한다.  병합된 A{1,3}은 세
+-- 행 모두에 매치될 것이다
 SELECT id, count(*) OVER w FROM rpr_reluctant
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? A?? A) DEFINE A AS TRUE);
 
--- *? (zero or more, reluctant)
+-- *? (0 개 이상, 소극적)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -928,7 +929,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- +? (one or more, reluctant)
+-- +? (1 개 이상, 소극적)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -938,7 +939,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ?? (zero or one, reluctant)
+-- ?? (0 개 또는 1 개, 소극적)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -948,7 +949,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {n,}? (n or more, reluctant)
+-- {n,}? (n개 이상, 소극적)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -958,7 +959,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {n,m}? (n to m, reluctant)
+-- {n,m}? (n개에서 m개, 소극적)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -968,9 +969,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {n}? (exactly n): min == max, so the reluctant flag is cleared and the
--- plan is indistinguishable from A{2}.  A fixed count has no shorter match,
--- so the result is the same either way.
+-- {n}?  (정확히 n개): min == max이므로 소극적 플래그는 제거되고 계획은 A{2}와
+-- 구별할 수 없다.  고정된 개수는 더 짧은 매치가 없으므로 결과는 어느
+-- 쪽이든 같다.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -980,7 +981,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {,m}? (up to m, reluctant)
+-- {,m}? (m개 이하, 소극적)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -990,7 +991,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {2}+ (should be {2}? not {2}+)
+-- {2}+ ({2}?가 되어야 하며 {2}+가 아니다)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1000,7 +1001,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {2,}* (should be {2,}? not {2,}*)
+-- {2,}* ({2,}?가 되어야 하며 {2,}*가 아니다)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1010,7 +1011,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {,3}* (should be {,3}? not {,3}*)
+-- {,3}* ({,3}?가 되어야 하며 {,3}*가 아니다)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1020,7 +1021,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {1,3}+ (should be {1,3}? not {1,3}+)
+-- {1,3}+ ({1,3}?가 되어야 하며 {1,3}+가 아니다)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1030,9 +1031,9 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Boundary errors in reluctant quantifiers
+-- 소극적 수량자의 경계 오류
 
--- negative bound is not allowed
+-- 음수 하한은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1042,7 +1043,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: quantifier bound exceeds limits
+-- ERROR: 수량자 상한이 한계를 초과함
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1052,7 +1053,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- negative lower bound is not allowed
+-- 음수 하한은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1062,7 +1063,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: quantifier lower bound exceeds limits
+-- ERROR: 수량자 하한이 한계를 초과함
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1072,7 +1073,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- zero upper bound is not allowed
+-- 0 상한은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1082,7 +1083,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: {,2147483647}? (upper bound in range exceeds limits)
+-- ERROR: {,2147483647}? (범위의 상한이 한계를 초과함)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1092,7 +1093,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: {-1,3}? (negative lower bound in range is not allowed)
+-- ERROR: {-1,3}? (범위의 음수 하한은 허용되지 않음)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1102,7 +1103,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: {1,2147483647}? (upper bound in range exceeds limits)
+-- ERROR: {1,2147483647}? (범위의 상한이 한계를 초과함)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1112,7 +1113,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: {5,3}? (min > max is not allowed)
+-- ERROR: {5,3}? (min > max는 허용되지 않음)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1122,11 +1123,11 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Token-separated reluctant quantifiers (space between quantifier and ?)
--- Whitespace between the quantifier and "?" is insignificant: each form below
--- returns exactly what its unseparated counterpart above returns.
+-- 토큰으로 분리된 소극적 수량자 (수량자와 ? 사이의 공백) 수량자와 "?" 사이의
+-- 공백은 의미가 없다: 아래 각 형태는 위쪽의 분리되지 않은 대응 형태가 반환하는
+-- 것과 정확히 같은 값을 반환한다.
 
--- * ? (token separated)
+-- * ? (토큰으로 분리됨)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1136,7 +1137,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- + ? (token separated)
+-- + ? (토큰으로 분리됨)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1146,7 +1147,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- {2,} ? (token separated)
+-- {2,} ? (토큰으로 분리됨)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1156,7 +1157,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- * + (invalid combination)
+-- * + (허용되지 않는 조합)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1166,7 +1167,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- + * (invalid combination)
+-- + * (허용되지 않는 조합)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1176,7 +1177,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ? ? (parsed as ?? reluctant quantifier)
+-- ? ? (?? 소극적 수량자로 해석됨)
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1186,8 +1187,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Two operator tokens where the first is not "?": the offending one is the
--- second, so that is what gets named and what the cursor points at
+-- 첫 토큰이 "?"가 아닌 연산자 토큰 두 개: 문제가 되는 쪽은 두 번째이므로
+-- 그것이 이름으로 지목되고 커서도 그것을 가리킨다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1197,10 +1198,10 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- A first token ending in "|" is a quantifier plus the alternation operator,
--- so what follows it has to be a pattern and an Op never is one.  The report
--- names the alternation rather than the pair: "A* ?" is accepted, so naming
--- that pair would describe something the grammar takes.
+-- "|"로 끝나는 첫 토큰은 수량자와 교대 연산자가 결합된 것이므로, 그 뒤에는
+-- 패턴이 와야 하고 Op는 결코 패턴이 될 수 없다.  보고는 그 쌍이 아니라 교대를
+-- 이름으로 지목한다: "A* ?"는 받아들여지므로, 그 쌍을 이름으로 지목하면 문법이
+-- 받아들이는 무언가를 가리키게 된다.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1210,8 +1211,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- the same for a glued two-character quantifier, where naming the pair would
--- have to invent "*?" out of "*?|"
+-- 결합된 두 문자짜리 수량자에도 마찬가지이며, 이 쌍을 이름으로 지목하려면
+-- "*?|"에서 "*?"를 지어내야 한다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1221,8 +1222,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- A first token that is no quantifier at all is itself the offending one, so
--- it is reported the same way as when it stands alone
+-- 아예 수량자가 아닌 첫 토큰은 그 자체가 문제가 되는 대상이므로, 단독으로
+-- 나타났을 때와 같은 방식으로 보고된다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1232,8 +1233,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- The two tokens are reported separately, so the report cannot glue them into
--- a spelling that was never typed
+-- 두 토큰은 따로 보고되므로, 보고가 한 번도 입력되지 않은 표기로 그것들을
+-- 결합할 수 없다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1243,8 +1244,7 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 1
 );
 
--- The trailing "|" belongs to the alternation, not to the quantifier, so the
--- report drops it
+-- 끝에 붙은 "|"는 수량자가 아니라 교대에 속하므로, 보고에서는 빠진다
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1256,12 +1256,12 @@ WINDOW w AS (
 
 DROP TABLE rpr_reluctant;
 
--- Quantifier boundary conditions
+-- 수량자 경계 조건
 
 CREATE TABLE rpr_bounds (id INT);
 INSERT INTO rpr_bounds VALUES (1), (2);
 
--- ERROR: quantifier lower bound must not exceed upper bound
+-- ERROR: 수량자 하한은 상한을 넘을 수 없다
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1271,7 +1271,7 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- Large bounds
+-- 큰 한계값
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1281,7 +1281,7 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- Very large bound
+-- 매우 큰 한계값
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1291,7 +1291,7 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- INT_MAX - 1 = 2147483646 (at limit)
+-- INT_MAX - 1 = 2147483646 (한계값)
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1301,7 +1301,7 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- ERROR: quantifier bound exceeds limits
+-- ERROR: 수량자 상한이 한계를 초과함
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1311,9 +1311,9 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- {n,} boundary errors
+-- {n,} 경계 오류
 
--- ERROR: negative lower bound in {n,} is not allowed
+-- ERROR: {n,}에서 음수 하한은 허용되지 않음
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1323,7 +1323,7 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- ERROR: quantifier lower bound exceeds limits
+-- ERROR: 수량자 하한이 한계를 초과함
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1333,9 +1333,9 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- {,m} boundary errors
+-- {,m} 경계 오류
 
--- Zero upper bound in {,m}
+-- {,m}에서 0 상한
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1345,7 +1345,7 @@ WINDOW w AS (
     DEFINE A AS id > 0
 );
 
--- ERROR: quantifier upper bound exceeds limits
+-- ERROR: 수량자 상한이 한계를 초과함
 SELECT COUNT(*) OVER w
 FROM rpr_bounds
 WINDOW w AS (
@@ -1357,13 +1357,12 @@ WINDOW w AS (
 
 DROP TABLE rpr_bounds;
 
--- Pattern element-count boundary (maximum 32767 elements, the FIN marker
--- included).  Alternating distinct variables stop the optimizer from merging
--- consecutive elements, so each "A B" pair contributes two elements.
--- ECHO is silenced so the generated multi-thousand-token patterns do not flood
--- the expected output.
---   16383 pairs         -> 32766 + 1 FIN = 32767 = maximum, accepted.
---   16383 pairs + one A -> 32767 + 1 FIN = 32768 > maximum, rejected.
+-- 패턴 요소 개수 경계 (FIN 마커를 포함하여 최대 32767 개).  서로 다른 변수를
+-- 번갈아 쓰면 최적화기가 연속된 요소들을 병합하지 못하므로, "A B" 쌍마다 요소
+-- 2 개가 생긴다.  수천 개짜리 토큰으로 이루어진 패턴이 생성되므로 예상 출력이
+-- 넘치지 않도록 ECHO를 끈다.
+--   16383 쌍         -> 32766 + FIN 1 개 = 32767 = 최대, 허용됨.
+--   16383 쌍 + A 1 개 -> 32767 + FIN 1 개 = 32768 > 최대, 거부됨.
 \set ECHO none
 SELECT format($$SELECT count(*) OVER w FROM (SELECT 1 i) t
   WINDOW w AS (ORDER BY i ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1376,18 +1375,17 @@ SELECT format($$SELECT count(*) OVER w FROM (SELECT 1 i) t
 \set ECHO all
 
 -- ============================================================
--- Navigation Functions Tests (PREV / NEXT / FIRST / LAST)
+-- 내비게이션 함수 테스트 (PREV / NEXT / FIRST / LAST)
 -- ============================================================
 CREATE TEMP TABLE rpr_nav0 (id int, v int);
 INSERT INTO rpr_nav0 SELECT g, g*10 FROM generate_series(1, 5) g;
 
--- Two concurrently open portals of the SAME cached generic plan, with
--- different offset parameters.
+-- 같은 캐시된 제네릭 플랜에 대해 서로 다른 오프셋 매개변수를 가진, 동시에 열린
+-- 두 개의 포털.
 --
--- The parameterized cursor 'c' compiles to one plpgsql statement -> one SPI
--- cached plan.  The recursive call OPENs a second portal of that same plan
--- (with a different offset) while the outer portal is already started but has
--- not yet FETCHed.
+-- 매개변수화된 커서 'c'는 하나의 plpgsql 문으로 컴파일되어 SPI 캐시 플랜
+-- 하나가 된다.  재귀 호출은 (다른 오프셋으로) 같은 플랜의 두 번째 포털을
+-- OPEN하는데, 이때 외부 포털은 이미 시작되었지만 아직 FETCH되지 않은 상태다.
 CREATE OR REPLACE FUNCTION rpr_nested(p_off int, depth int)
 RETURNS SETOF text LANGUAGE plpgsql AS $$
 DECLARE
@@ -1423,9 +1421,9 @@ CREATE TABLE rpr_nav (id INT, val INT);
 INSERT INTO rpr_nav VALUES
     (1, 10), (2, 20), (3, 15), (4, 25), (5, 30);
 
--- Avoid evaluating the inner argument expression when the target row is out
--- of range or does not exist.  PREV misses on the first row of the partition
--- and NEXT on the last, so the two directions are checked separately.
+-- 대상 행이 범위를 벗어나거나 존재하지 않을 때 내부 인자 표현식의 평가를
+-- 피한다.  PREV는 파티션의 첫 행에서, NEXT는 마지막 행에서 실패하므로 두
+-- 방향을 따로 검사한다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is not null) is null);
@@ -1434,9 +1432,9 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val is not null) is null);
 
--- FIRST and LAST cannot miss under PATTERN (A): the match is one row long, so
--- the target is the current row and the slot swap is elided.  These two run
--- that path; the query further down is what pins what it writes.
+-- PATTERN (A)에서는 FIRST와 LAST가 실패할 수 없다: 매치가 한 행 길이이므로
+-- 대상은 현재 행이고 슬롯 교체는 생략된다. 이 두 테스트는 그 경로를 실행하며,
+-- 아래 쿼리는 그것이 무엇을 쓰는지 고정한다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val is not null) is null);
@@ -1445,10 +1443,10 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS FIRST(val is not null) is null);
 
--- The elided path has to report the target row as present, since resnull may
--- still be null from a scan whose navigation missed.  Here the navigation is
--- the whole DEFINE, so nothing overwrites resnull in between, and inlining the
--- function makes the offset a parameter: 1 misses, then 0 elides.
+-- 생략된 경로도 대상 행이 존재한다고 보고해야 한다.  내비게이션이 실패한
+-- 스캔에서 온 resnull이 여전히 null일 수 있기 때문이다.  여기서는 내비게이션이
+-- DEFINE 전체이므로 그 사이에 resnull을 덮어쓰는 것이 없고, 함수를
+-- 인라인화하면 오프셋이 매개변수가 된다: 1 은 실패하고, 0 은 생략된다.
 CREATE FUNCTION rpr_nav_off(k int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $$
   SELECT count(*) OVER w FROM rpr_nav WHERE id = 1
   WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1456,12 +1454,11 @@ CREATE FUNCTION rpr_nav_off(k int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $
 SELECT o.k, f FROM (VALUES (1), (0)) o(k), LATERAL rpr_nav_off(o.k) f;
 DROP FUNCTION rpr_nav_off(int);
 
--- Under a longer pattern FIRST and LAST can miss.  On the first row of a
--- match currentpos equals match_start, so an offset of one falls outside the
--- match in either direction, and the compound forms miss on their inner
--- navigation, which is a separate bound from the one the plain forms cross.
--- The argument does not propagate null, so a missing row is told apart from
--- a row of nulls.
+-- 더 긴 패턴에서는 FIRST와 LAST가 실패할 수 있다.  매치의 첫 행에서는
+-- currentpos가 match_start 값과 같으므로 오프셋 1 은 어느 방향으로도 매치를
+-- 벗어나며, 복합 형태는 내부 내비게이션에서 실패하는데 이는 단순 형태가 넘는
+-- 경계와는 별개다.  인자는 null을 전파하지 않으므로, 존재하지 않는 행과 null로
+-- 이루어진 행은 구별된다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1482,15 +1479,15 @@ FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(LAST(val is not null, 1), 2) is null);
 
--- Not a duplicate of the PREV(val is not null) case: the argument here is
--- true where that one is false, and a missing row still has to win over both.
+-- PREV(val is not null) 사례의 중복이 아니다: 여기서 인자는 그 경우가 false인
+-- 곳에서 true이며, 존재하지 않는 행은 여전히 둘 다를 이겨야 한다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is null) is null);
 
--- Skipping the argument is data-dependent: restricted to the row PREV misses
--- on, a division by zero in it never runs; over the whole table NEXT reaches
--- a row for all but the last and it does.
+-- 인자를 건너뛰는지는 데이터에 따라 달라진다: PREV가 실패하는 행으로 한정하면
+-- 그 안의 0 으로 나누기는 결코 실행되지 않지만, 테이블 전체에서는 NEXT가
+-- 마지막 행을 제외한 모든 행에 도달하며 그때는 실행된다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t WHERE id = 1
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val / 0) > 0);
@@ -1499,48 +1496,48 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val / 0) > 0);
 
--- A constant subexpression of the argument is folded away, so the pattern
--- does not recompute it per row.
+-- 인자의 상수 부분식은 미리 접혀 없어지므로, 패턴은 행마다 그것을 다시
+-- 계산하지 않는다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(val + 2 * 3) > 0);
 
--- Folding a constant subexpression can raise where the whole argument would
--- not have: unlike val / 0 above, 1 / 0 does not depend on the row, so it is
--- reached at plan time even on the row PREV misses on.
+-- 상수 부분식을 접으면 인자 전체로는 일어나지 않았을 오류가 날 수 있다: 위의
+-- val / 0 과 달리 1 / 0 은 행에 의존하지 않으므로, PREV가 실패하는 행에서도
+-- 계획 시점에 도달한다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WHERE id = 1
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val + 1 / 0) > 0);
 
--- Here the null reaches the DEFINE predicate itself instead of an IS NULL
--- An all-NULL target row would have made v IS NULL true and matched the
--- first row, so this pins the predicate side of the same behaviour.
+-- 여기서는 null이 IS NULL이 아니라 DEFINE 조건절 자체에 도달한다 대상 행
+-- 전체가 NULL이었다면 v IS NULL이 true가 되어 첫 행에 매치되었을 것이므로, 이
+-- 테스트는 같은 동작의 조건절 쪽을 고정한다.
 WITH t(id, v) AS (VALUES (1, 10), (2, 20))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
 
--- Pulling up the VALUES substitutes 10 for v, which is not what the column
--- stood for under a navigation: the argument reads the row the navigation
--- lands on, not this one.  The replacement is wrapped in a PlaceHolderVar
--- rather than folded through.
+-- VALUES를 풀업하면 v 자리에 10 이 대입되는데, 이는 내비게이션 아래에서 그
+-- 열이 의미하던 바가 아니다: 인자는 내비게이션이 도달한 행을 읽는 것이지 이
+-- 행을 읽는 것이 아니다.  대입 결과는 접혀 없어지지 않고
+-- PlaceHolderVar 로 래핑된다.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
 
--- That wrapping is what keeps this one from raising: the divisor is constant
--- but the dividend is not folded through, so the division stands until
--- execution, where PREV has no row to navigate to and never reaches it.
+-- 그 래핑이 바로 이 쿼리가 오류를 내지 않게 하는 이유다: 제수는 상수이지만
+-- 피제수가 접혀 없어지지 않으므로 나눗셈은 실행 시점까지 그대로 남고, 그곳에서
+-- PREV는 내비게이션할 행이 없어 결코 도달하지 않는다.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
 
--- A pulled-up subquery and a function RTE that folded to a constant reach a
--- navigation argument the same way, so both are wrapped as well.
+-- 풀업된 서브쿼리와 상수로 접힌 함수 RTE는 내비게이션 인자에 같은 방식으로
+-- 도달하므로 둘 다 마찬가지로 래핑된다.
 SELECT id, count(*) OVER w AS cnt
 FROM (SELECT 1 AS id, 10 AS v) t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
@@ -1549,37 +1546,37 @@ SELECT count(*) OVER w AS cnt
 FROM abs(-10) AS v
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
 
--- Only the argument is protected.  One level outside the navigation the same
--- column is replaced and folded as it is anywhere else, and the division
--- raises at plan time -- as it does for the same WHERE clause over the same
--- one-row VALUES, with no pattern in sight.
+-- 보호되는 것은 인자뿐이다.  내비게이션 한 단계 바깥에서는 같은 열이 다른
+-- 곳에서와 똑같이 대입되고 접혀 없어지며, 나눗셈은 계획 시점에 오류를 낸다 --
+-- 패턴이 전혀 없는, 같은 한 행짜리 VALUES에 대한 같은
+-- WHERE절에서와 마찬가지다.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS v / 0 > 0);
 
--- A replacement that still depends on the row is left unwrapped, because it
--- is what the column meant at whichever row the navigation lands on.
+-- 여전히 행에 의존하는 대입 결과는 래핑되지 않은 채로 남는다.  그것이
+-- 내비게이션이 도달하는 행이 무엇이든 그 열이 의미하는 바이기 때문이다.
 SELECT id, count(*) OVER w AS cnt
 FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(v) > 0);
 
--- Nesting: the inner navigation's argument is below the outer one's, so the
--- column there is wrapped too.
+-- 중첩: 내부 내비게이션의 인자는 외부 내비게이션의 인자보다 아래에 있으므로,
+-- 그곳의 열도 마찬가지로 래핑된다.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A) DEFINE A AS PREV(LAST(v / 0, 1), 2) > 0);
 
--- eval_const_expressions() must perform a few rewrites on every expression it
--- is handed -- a CollateExpr becomes a RelabelType, named arguments become
--- positional, omitted defaults are inserted -- and the executor depends on
--- all three, so they are mandatory, not optimizations.  Each of the three
--- below reaches the executor only if those rewrites reach inside a navigation
--- argument, and each returns what the same expression one level outside the
--- navigation returns.
+-- eval_const_expressions()는 자신에게 주어진 모든 표현식에 대해 몇 가지
+-- 재작성을 반드시 수행해야 한다 -- CollateExpr 는 RelabelType 이 되고, 이름
+-- 붙은 인자는 위치 인자가 되며, 생략된 기본값은 채워진다 -- 그리고 실행기는 이
+-- 세 가지 모두에 의존하므로 이들은 최적화가 아니라 필수 사항이다.  아래 세
+-- 테스트는 이 재작성이 내비게이션 인자 안쪽까지 도달할 때만 실행기에 이르며,
+-- 각각은 내비게이션 한 단계 바깥의 같은 표현식이 반환하는 것과 같은
+-- 값을 반환한다.
 CREATE TABLE rpr_nav_txt (id int, s text);
 INSERT INTO rpr_nav_txt VALUES (1, 'b'), (2, 'c'), (3, 'a');
 CREATE FUNCTION rpr_nav_named(a int, b int) RETURNS int
@@ -1587,21 +1584,21 @@ CREATE FUNCTION rpr_nav_named(a int, b int) RETURNS int
 CREATE FUNCTION rpr_nav_dflt(a int, b int DEFAULT 100) RETURNS int
     LANGUAGE sql IMMUTABLE AS 'SELECT $2';
 
--- COLLATE under a navigation: the executor has no CollateExpr step, so the
--- RelabelType rewrite has to reach here.
+-- 내비게이션 아래의 COLLATE: 실행기에는 CollateExpr 단계가 없으므로
+-- RelabelType 재작성이 여기까지 도달해야 한다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav_txt
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(s COLLATE "C") > 'a');
 
--- Named arguments under a navigation: the executor has no NamedArgExpr step.
+-- 내비게이션 아래의 이름 붙은 인자: 실행기에는 NamedArgExpr 단계가 없다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(rpr_nav_named(b => 7, a => val)) > 0);
 
--- An omitted default under a navigation: without the insertion the call is
--- initialized with one fewer argument than the callee reads.
+-- 내비게이션 아래의 생략된 기본값: 채워 넣지 않으면 호출이 콜리가 읽는 것보다
+-- 하나 적은 인자로 초기화된다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1611,11 +1608,10 @@ DROP FUNCTION rpr_nav_dflt(int, int);
 DROP FUNCTION rpr_nav_named(int, int);
 DROP TABLE rpr_nav_txt;
 
--- A navigation offset is resolved once at the top of the scan, before any
--- input row has been read, so it must not be matched to the window input the
--- way the navigated argument is.  These two spell the offset the same as a
--- window ORDER BY key and as a GROUP BY expression, which is what makes the
--- match available.
+-- 내비게이션 오프셋은 어떤 입력 행도 읽기 전에 스캔의 맨 앞에서 한 번
+-- 결정되므로, 내비게이션되는 인자와 같은 방식으로 윈도우 입력에 매칭시켜서는
+-- 안 된다.  아래 두 테스트는 오프셋을 윈도우 ORDER BY 키와, 그리고 GROUP BY
+-- 표현식과 똑같이 표기하는데, 이것이 매칭을 가능하게 만드는 조건이다.
 CREATE TABLE rpr_navoff (id int, val int);
 INSERT INTO rpr_navoff VALUES (1, 10), (2, 20), (3, 15), (4, 30), (5, 5);
 
@@ -1626,7 +1622,7 @@ WINDOW w AS (ORDER BY (extract(hour from localtimestamp)::int * 0 + 1), id
              PATTERN (A B+)
              DEFINE B AS val > PREV(val, (extract(hour from localtimestamp)::int * 0 + 1)));
 
--- Control: an offset that matches nothing in the window input.
+-- 대조군: 윈도우 입력의 어떤 것과도 일치하지 않는 오프셋.
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_navoff
 WINDOW w AS (ORDER BY (extract(hour from localtimestamp)::int * 0 + 1), id
@@ -1645,7 +1641,7 @@ ORDER BY id, val;
 
 DROP TABLE rpr_navoff;
 
--- PREV function - reference previous row in pattern
+-- PREV 함수 - 패턴 안에서 이전 행을 참조
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1657,7 +1653,7 @@ WINDOW w AS (
         B AS val > PREV(val)
 );
 
--- NEXT function - reference next row in pattern
+-- NEXT 함수 - 패턴 안에서 다음 행을 참조
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1669,7 +1665,7 @@ WINDOW w AS (
         B AS val > 0
 );
 
--- Combined PREV and NEXT
+-- PREV와 NEXT를 함께 사용
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1682,7 +1678,7 @@ WINDOW w AS (
         C AS val > PREV(val)
 );
 
--- PREV function cannot be used other than in DEFINE
+-- PREV 함수는 DEFINE 밖에서 쓸 수 없다
 SELECT PREV(id), id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1694,7 +1690,7 @@ WINDOW w AS (
         B AS val > PREV(val)
 );
 
--- NEXT function cannot be used other than in DEFINE
+-- NEXT 함수는 DEFINE 밖에서 쓸 수 없다
 SELECT NEXT(id), id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1706,7 +1702,7 @@ WINDOW w AS (
         B AS val > PREV(val)
 );
 
--- FIRST function - reference match_start row
+-- FIRST 함수 - match_start 행을 참조
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1718,7 +1714,7 @@ WINDOW w AS (
         B AS val > FIRST(val)
 );
 
--- LAST function without offset - equivalent to current row's value
+-- 오프셋 없는 LAST 함수 - 현재 행의 값과 동등
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1730,7 +1726,7 @@ WINDOW w AS (
         B AS LAST(val) > PREV(val)
 );
 
--- FIRST and LAST combined
+-- FIRST와 LAST를 함께 사용
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_nav
 WINDOW w AS (
@@ -1742,23 +1738,22 @@ WINDOW w AS (
         B AS val > FIRST(val) AND LAST(val) > PREV(val)
 );
 
--- FIRST function cannot be used other than in DEFINE
+-- FIRST 함수는 DEFINE 밖에서 쓸 수 없다
 SELECT FIRST(id), id, val FROM rpr_nav;
 
--- LAST function cannot be used other than in DEFINE
+-- LAST 함수는 DEFINE 밖에서 쓸 수 없다
 SELECT LAST(id), id, val FROM rpr_nav;
 
 DROP TABLE rpr_nav;
 
--- Name-space: prev/next/first/last are navigation functions,
--- not ordinary functions
+-- 이름공간: prev/next/first/last는 내비게이션 함수이며, 일반 함수가 아니다
 CREATE SCHEMA rpr_navns;
 SET search_path TO rpr_navns, public;
 CREATE TABLE rpr_nav_rows (g text, id int, val int);
 INSERT INTO rpr_nav_rows VALUES ('x', 1, 100), ('x', 2, 200), ('x', 3, 150),
                       ('x', 4, 140), ('x', 5, 150);
 
--- Outside DEFINE these are ordinary identifiers and resolve to nothing
+-- DEFINE 밖에서는 이들이 평범한 식별자이며 아무것도 가리키지 못한다
 SELECT prev(val) FROM rpr_nav_rows;
 SELECT next(val) FROM rpr_nav_rows;
 SELECT prev(val, 2) FROM rpr_nav_rows;
@@ -1766,15 +1761,16 @@ SELECT next(val, 2) FROM rpr_nav_rows;
 SELECT first(val) FROM rpr_nav_rows;
 SELECT last(val) FROM rpr_nav_rows;
 SELECT first(val, 1) FROM rpr_nav_rows;
--- A schema-qualified call is also a plain (failing) function lookup
+-- 스키마로 한정한 호출도 마찬가지로 (실패하는) 평범한 함수 조회일 뿐이다
 SELECT pg_catalog.prev(val) FROM rpr_nav_rows;
 
--- Outside DEFINE, a user-defined function of that name is callable
+-- DEFINE 밖에서는 그 이름의 사용자 정의 함수를 호출할 수 있다
 CREATE FUNCTION next(numeric) RETURNS numeric AS 'SELECT -999::numeric'
   LANGUAGE sql IMMUTABLE;
 SELECT next(10);
 
--- Inside DEFINE, unqualified PREV is nav whether or not a user prev() exists
+-- DEFINE 안에서는 사용자 prev()가 존재하든 말든 한정되지 않은
+-- PREV는 내비게이션이다
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -1783,8 +1779,9 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     DEFINE START AS TRUE, UP AS val > PREV(val))
   ORDER BY id;
 
--- A qualified call invokes the function, so its volatility still matters
--- VOLATILE: unqualified is nav; qualified is rejected unless it folds away
+-- 한정된 호출은 함수를 호출하므로 그 휘발성이 여전히 중요하다
+-- VOLATILE: 한정되지 않으면 내비게이션이고, 한정되면 접혀 없어지지 않는
+-- 한 거부된다
 CREATE FUNCTION prev(integer) RETURNS integer
   LANGUAGE plpgsql VOLATILE AS 'BEGIN RETURN -999; END';
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
@@ -1801,8 +1798,8 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     PATTERN (A+)
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
--- The SQL body inlines and folds to a constant, so no volatile call
--- is left for the check to find
+-- SQL 본문이 인라인화되어 상수로 접히므로, 검사가 찾아낼 휘발성 호출이
+-- 남지 않는다
 CREATE OR REPLACE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
   LANGUAGE sql VOLATILE;
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
@@ -1813,8 +1810,9 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
 
--- No OVER references the window, so flattening the subquery drops it
--- before the check runs, the same way an unreferenced CTE is never planned
+-- OVER가 윈도우를 참조하지 않으므로, 서브쿼리를 평탄화하면 검사가 실행되기
+-- 전에 그것이 사라진다.  참조되지 않는 CTE가 결코 계획되지 않는 것과
+-- 같은 방식이다
 SELECT id FROM (
  SELECT id FROM rpr_nav_rows
  WINDOW w AS (
@@ -1822,25 +1820,25 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS random() > 0.5)) s
 ORDER BY id;
 
--- ERROR: OFFSET 0 keeps the subquery, so the subquery is planned and the
--- check reaches its DEFINE before anything settles that no OVER references
--- the window, just as for an unreferenced window at the top level
+-- ERROR: OFFSET 0 이 서브쿼리를 남겨두므로 서브쿼리는 계획되고, 최상위의
+-- 참조되지 않는 윈도우에서와 마찬가지로 어떤 OVER도 그 윈도우를 참조하지
+-- 않는다고 확정되기 전에 검사가 그 DEFINE에 도달한다
 SELECT id FROM (
  SELECT id FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
 
--- ERROR: an OVER referencing the window keeps the subquery without OFFSET 0,
--- and its DEFINE is checked the same way
+-- ERROR: 윈도우를 참조하는 OVER가 OFFSET 0 없이도 서브쿼리를 남겨두며, 그
+-- DEFINE도 같은 방식으로 검사된다
 SELECT id, c FROM (
  SELECT id, count(*) OVER w AS c FROM rpr_nav_rows
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5)) sub;
 
--- The same query with WHERE false makes the subquery rel dummy, so the
--- planner never plans it and nothing looks at its DEFINE
+-- WHERE false를 쓴 같은 쿼리는 서브쿼리 rel을 더미로 만들므로, 플래너는 그것을
+-- 계획하지 않고 그 DEFINE을 들여다보는 곳도 없다
 SELECT id, c FROM (
  SELECT id, count(*) OVER w AS c FROM rpr_nav_rows
  WINDOW w AS (
@@ -1848,8 +1846,8 @@ SELECT id, c FROM (
     PATTERN (A+) DEFINE A AS random() > 0.5)) sub
 WHERE false;
 
--- The window runs, but the volatile is in a dead CASE arm that folds away
--- before the check, so nothing volatile is left for the check to find
+-- 윈도우는 실행되지만, 휘발성 호출은 검사 전에 접혀 없어지는 죽은 CASE 분기
+-- 안에 있으므로 검사가 찾아낼 휘발성 요소가 남지 않는다
 SELECT id, count(*) OVER w AS c FROM rpr_nav_rows
  WINDOW w AS (ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -1857,9 +1855,9 @@ SELECT id, count(*) OVER w AS c FROM rpr_nav_rows
                                   ELSE val > 5 END)
 ORDER BY id;
 
--- ERROR: folding can splice in a volatile that parse analysis never saw -- a
--- STABLE function whose default argument is volatile -- and the check runs
--- late enough to catch it
+-- ERROR: 폴딩은 파스 분석이 본 적 없는 휘발성 요소를 끼워 넣을 수 있다 -- 기본
+-- 인자가 휘발성인 STABLE 함수가 그렇다 -- 그리고 검사는 그것을 잡아낼 만큼
+-- 늦게 실행된다
 CREATE FUNCTION rpr_off_leak(n bigint DEFAULT (random() * 5)::bigint)
   RETURNS bigint LANGUAGE sql STABLE AS 'SELECT n';
 SELECT count(*) OVER w FROM generate_series(1, 100) g(v)
@@ -1868,8 +1866,8 @@ SELECT count(*) OVER w FROM generate_series(1, 100) g(v)
 DROP FUNCTION rpr_off_leak(bigint);
 
 
--- A UNION ALL leaf is flattened like any other subquery, so its
--- unreferenced window goes the same way
+-- UNION ALL의 leaf도 다른 서브쿼리와 마찬가지로 평탄화되므로, 참조되지 않는 그
+-- 윈도우도 같은 길을 간다
 SELECT id FROM (
  SELECT id FROM rpr_nav_rows
  WINDOW w AS (
@@ -1878,8 +1876,7 @@ SELECT id FROM (
  UNION ALL
  SELECT id FROM rpr_nav_rows) s;
 
--- An unreferenced CTE is never planned, so nothing looks at its
--- DEFINE
+-- 참조되지 않는 CTE는 결코 계획되지 않으므로, 그 DEFINE을 들여다보는 곳도 없다
 WITH unused AS (
  SELECT id FROM rpr_nav_rows
  WINDOW w AS (
@@ -1887,7 +1884,7 @@ WITH unused AS (
     PATTERN (A+) DEFINE A AS random() > 0.5))
 SELECT 1;
 
--- ERROR: referencing it plans the CTE, and the check reaches the DEFINE there
+-- ERROR: 참조하면 CTE가 계획되고, 검사는 그곳의 DEFINE에 도달한다
 WITH used AS (
  SELECT id FROM rpr_nav_rows
  WINDOW w AS (
@@ -1896,7 +1893,7 @@ WITH used AS (
 SELECT count(*) FROM used;
 
 DROP FUNCTION prev(integer);
--- IMMUTABLE: unqualified is nav; qualified is the escape hatch and succeeds
+-- IMMUTABLE: 한정되지 않으면 내비게이션이고, 한정되면 예외 통로이며 성공한다
 CREATE FUNCTION prev(integer) RETURNS integer AS 'SELECT -999'
   LANGUAGE sql IMMUTABLE;
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
@@ -1906,9 +1903,9 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     PATTERN (START UP+)
     DEFINE START AS TRUE, UP AS val > PREV(val))
   ORDER BY id;
--- (val).prev is attribute notation,
--- so it calls the ordinary function prev(val)
--- (the IMMUTABLE user prev here), the same as the schema-qualified call below
+-- (val).prev는 속성 표기법이므로
+-- 평범한 함수 prev(val)을 호출한다
+-- (여기서는 IMMUTABLE 사용자 prev), 아래의 스키마 한정 호출과 마찬가지다
 SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
   FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -1924,7 +1921,7 @@ SELECT id, val, count(*) OVER w AS cnt, last_value(id) OVER w AS last_id
     DEFINE A AS rpr_navns.prev(val) = -999)
   ORDER BY id;
 
--- Zero or more than two arguments is an error, with no function fallback
+-- 인자가 0 개이거나 2 개를 넘으면 오류이며, 함수로의 대체 처리는 없다
 SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
@@ -1933,7 +1930,7 @@ SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val, 1, 2) IS NULL);
--- the error stands even when a user function of that exact arity exists
+-- 정확히 그 인자 개수의 사용자 함수가 있어도 오류는 유지된다
 CREATE FUNCTION prev(integer, integer, integer) RETURNS integer
   AS 'SELECT -999' LANGUAGE sql IMMUTABLE;
 SELECT count(*) OVER w FROM rpr_nav_rows
@@ -1942,7 +1939,7 @@ SELECT count(*) OVER w FROM rpr_nav_rows
     PATTERN (A+) DEFINE A AS PREV(val, 1, 2) IS NULL);
 DROP FUNCTION prev(integer, integer, integer);
 
--- Syntactic decoration is rejected
+-- 구문적 장식은 거부된다
 SELECT count(*) OVER w FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
@@ -1980,7 +1977,7 @@ SELECT count(*) OVER w FROM rpr_nav_rows
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS PREV(val) IGNORE NULLS IS NULL);
 
--- Quoting does not escape: "prev" is nav, "PREV" is an ordinary name
+-- 인용해도 벗어나지 못한다: "prev"는 내비게이션이고, "PREV"는 평범한 이름이다
 SELECT id, val, count(*) OVER w AS cnt
   FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -1993,8 +1990,8 @@ SELECT count(*) OVER w FROM rpr_nav_rows
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS "PREV"(val) IS NULL);
 
--- A view round-trips: bare PREV stays a navigation function, and a qualified
--- user prev() stays schema-qualified so it does not reparse as navigation
+-- 뷰는 원래 상태로 왕복한다: 한정 없는 PREV는 내비게이션 함수로 남고, 한정된
+-- 사용자 prev()는 스키마 한정 상태로 남아 내비게이션으로 재파싱되지 않는다
 CREATE VIEW rpr_navns_nav AS
   SELECT id, count(*) OVER w AS cnt FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -2009,8 +2006,8 @@ SELECT pg_get_viewdef('rpr_navns_nav');
 SELECT pg_get_viewdef('rpr_navns_fn');
 DROP VIEW rpr_navns_nav, rpr_navns_fn;
 
--- A qualified last() in DEFINE must stay schema-qualified on deparse so that
--- it does not reparse as the LAST navigation function (force-qualify path)
+-- DEFINE 안의 한정된 last()는 디파스 시에도 스키마 한정 상태로 남아야 LAST
+-- 내비게이션 함수로 재파싱되지 않는다 (강제 한정 경로)
 CREATE FUNCTION rpr_navns.last(integer) RETURNS integer AS 'SELECT -999' LANGUAGE sql IMMUTABLE;
 CREATE VIEW rpr_navns_fn_last AS
   SELECT id, count(*) OVER w AS cnt FROM rpr_nav_rows
@@ -2021,8 +2018,7 @@ SELECT pg_get_viewdef('rpr_navns_fn_last');
 DROP VIEW rpr_navns_fn_last;
 DROP FUNCTION rpr_navns.last(integer);
 
--- Attribute notation is never a navigation call; it resolves to a field or
--- to an ordinary function
+-- 속성 표기법은 결코 내비게이션 호출이 아니다: 필드나 평범한 함수로 풀린다
 CREATE TYPE rpr_navns_pair AS (first int, last int);
 CREATE TABLE rpr_composite_rows (id int, p rpr_navns_pair);
 INSERT INTO rpr_composite_rows VALUES (1, (10, 20)), (2, (30, 40));
@@ -2036,7 +2032,7 @@ SELECT count(*) OVER w FROM rpr_composite_rows
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING INITIAL
     PATTERN (A+) DEFINE A AS (p).prev > 0);
 
--- Navigation offset must not contain a navigation operation
+-- 내비게이션 오프셋에는 내비게이션 연산이 들어갈 수 없다
 SELECT id, val
   FROM rpr_nav_rows
   WINDOW w AS (PARTITION BY g ORDER BY id
@@ -2049,7 +2045,7 @@ DROP SCHEMA rpr_navns CASCADE;
 RESET search_path;
 
 -- ============================================================
--- SKIP TO / INITIAL Tests
+-- SKIP TO / INITIAL 테스트
 -- ============================================================
 
 CREATE TABLE rpr_skip (id INT, val INT);
@@ -2083,9 +2079,9 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 2, C AS val > 4
 );
 
--- Default behavior (should be SKIP PAST LAST ROW)
+-- 기본 동작 (SKIP PAST LAST ROW여야 한다)
 
--- No SKIP TO clause (default)
+-- SKIP TO 절 없음 (기본값)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_skip
 WINDOW w AS (
@@ -2095,8 +2091,8 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 1
 );
 
--- Compare default with explicit PAST LAST ROW
--- Results should be identical
+-- 기본값과 명시적인 PAST LAST ROW 비교
+-- 결과는 동일해야 한다
 WITH default_skip AS (
     SELECT id, val, COUNT(*) OVER w as cnt
     FROM rpr_skip
@@ -2128,7 +2124,7 @@ DROP TABLE rpr_skip;
 CREATE TABLE rpr_init (id INT, val INT);
 INSERT INTO rpr_init VALUES (1, 10), (2, 20), (3, 30), (4, 40);
 
--- Explicit INITIAL
+-- 명시적 INITIAL
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_init
 WINDOW w AS (
@@ -2139,7 +2135,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Implicit INITIAL (default)
+-- 암묵적 INITIAL (기본값)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_init
 WINDOW w AS (
@@ -2156,7 +2152,7 @@ DROP TABLE rpr_init;
 CREATE TABLE rpr_seek (id INT, val INT);
 INSERT INTO rpr_seek VALUES (1, 10);
 
--- SEEK keyword, SEEK mode is not supported
+-- SEEK 키워드는 인식되지만, SEEK 모드는 지원되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_seek
 WINDOW w AS (
@@ -2174,7 +2170,7 @@ DROP TABLE rpr_seek;
 CREATE TABLE rpr_permute (id INT, val INT);
 INSERT INTO rpr_permute VALUES (1, 10);
 
--- PERMUTE syntax is recognized, but the feature is not supported
+-- PERMUTE 구문은 인식되지만, 이 기능은 지원되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_permute
 WINDOW w AS (
@@ -2184,7 +2180,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- rejected the same way for a list, and for sub-patterns of any shape
+-- 목록에 대해서도, 어떤 모양의 하위 패턴에 대해서도 같은 방식으로 거부된다
 SELECT COUNT(*) OVER w
 FROM rpr_permute
 WINDOW w AS (
@@ -2194,7 +2190,7 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 1, C AS val > 2, D AS val > 3
 );
 
--- PERMUTE stays unreserved, so it is still usable as a pattern variable
+-- PERMUTE는 비예약어로 남아 있으므로 여전히 패턴 변수로 쓸 수 있다
 SELECT COUNT(*) OVER w
 FROM rpr_permute
 WINDOW w AS (
@@ -2204,10 +2200,10 @@ WINDOW w AS (
     DEFINE PERMUTE AS val > 5, A AS val > 0
 );
 
--- Except immediately before a group: PERMUTE shifts on "(" whether or not a
--- comma follows, so such a variable lands on the not-supported error, and for
--- that user the alternations advice is beside the point.  The hint has to name
--- the way out too.
+-- 예외는 그룹 바로 앞에 올 때뿐이다: PERMUTE는 콤마가 뒤따르든 말든 "("에서
+-- 옮겨가므로, 그런 변수는 지원되지 않는다는 오류로 떨어지고 그 사용자에게는
+-- 교대를 쓰라는 조언이 핵심을 벗어난다.  힌트는 빠져나갈 방법도 함께
+-- 알려줘야 한다.
 SELECT COUNT(*) OVER w
 FROM rpr_permute
 WINDOW w AS (
@@ -2217,7 +2213,7 @@ WINDOW w AS (
     DEFINE PERMUTE AS val > 5, A AS val > 0, B AS val > 9
 );
 
--- quoted, the same query runs
+-- 인용하면 같은 쿼리가 실행된다
 SELECT COUNT(*) OVER w
 FROM rpr_permute
 WINDOW w AS (
@@ -2227,8 +2223,8 @@ WINDOW w AS (
     DEFINE PERMUTE AS val > 5, A AS val > 0, B AS val > 9
 );
 
--- Deparse must quote such a variable, or a view holding one would reparse as
--- the PERMUTE syntax; other variables stay unquoted
+-- 디파스는 그런 변수를 반드시 인용해야 한다.  그러지 않으면 그것을 담은 뷰가
+-- PERMUTE 구문으로 재파싱될 것이다.  다른 변수들은 인용되지 않은 채로 남는다
 CREATE VIEW rpr_permute_v AS
   SELECT COUNT(*) OVER w AS cnt FROM rpr_permute
   WINDOW w AS (
@@ -2239,9 +2235,8 @@ CREATE VIEW rpr_permute_v AS
   );
 SELECT pg_get_viewdef('rpr_permute_v'::regclass);
 
--- Quoted even where no group follows: the deparser quotes the name wherever
--- it appears in PATTERN rather than looking ahead for the "(" that would
--- make it ambiguous
+-- 뒤에 그룹이 오지 않는 경우에도 인용된다: 디파서는 모호하게 만들 "("가 있는지
+-- 미리 살피는 대신, PATTERN 안에 나타나는 곳마다 그 이름을 인용한다
 CREATE VIEW rpr_permute_v2 AS
   SELECT COUNT(*) OVER w AS cnt FROM rpr_permute
   WINDOW w AS (
@@ -2252,9 +2247,9 @@ CREATE VIEW rpr_permute_v2 AS
   );
 SELECT pg_get_viewdef('rpr_permute_v2'::regclass);
 
--- EXPLAIN deparses the compiled pattern with a printer of its own, so it has
--- to quote the same names ruleutils does.  The alternation keeps the group
--- from being flattened away, which is what puts a "(" after the variable.
+-- EXPLAIN은 자체 출력기로 컴파일된 패턴을 디파스하므로, ruleutils와 같은
+-- 이름을 인용해야 한다.  교대는 그룹이 평탄화되어 사라지는 것을 막는데, 이것이
+-- 변수 뒤에 "("가 붙게 만드는 요인이다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w
 FROM rpr_permute
@@ -2269,19 +2264,19 @@ DROP VIEW rpr_permute_v, rpr_permute_v2;
 DROP TABLE rpr_permute;
 
 -- ============================================================
--- Serialization/Deserialization Tests
+-- 직렬화/역직렬화 테스트
 -- ============================================================
--- RPR-defining views and tables here that are not dropped explicitly are
--- intentionally left in place so that pg_dump/pg_upgrade exercise the
--- deparse-then-re-parse round-trip of the RPR window clause.
+-- 여기서 명시적으로 삭제하지 않는 RPR 정의 뷰와 테이블은,
+-- pg_dump/pg_upgrade 가 RPR 윈도우 절의 디파스 후 재파싱 왕복을 검증하도록
+-- 일부러 남겨둔 것이다.
 
--- View creation and deparsing
+-- 뷰 생성과 디파스
 
 CREATE TABLE rpr_serial (id INT, val INT);
 INSERT INTO rpr_serial VALUES
     (1, 10), (2, 20), (3, 15), (4, 25), (5, 30);
 
--- Simple pattern
+-- 단순 패턴
 CREATE VIEW rpr_serial_v1 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2292,13 +2287,13 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Verify view works (tests deserialization)
+-- 뷰가 동작하는지 확인 (역직렬화 테스트)
 SELECT * FROM rpr_serial_v1 ORDER BY id;
 
--- Verify deparsing
+-- 디파스 확인
 SELECT pg_get_viewdef('rpr_serial_v1'::regclass);
 
--- Complex pattern with alternation
+-- 교대를 포함한 복합 패턴
 CREATE VIEW rpr_serial_v2 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2312,7 +2307,7 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v2 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v2'::regclass);
 
--- Pattern with grouping and quantifiers
+-- 그룹화와 수량자를 가진 패턴
 CREATE VIEW rpr_serial_v3 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2329,7 +2324,7 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v3 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v3'::regclass);
 
--- All features combined
+-- 모든 기능을 조합
 CREATE VIEW rpr_serial_v4 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2349,9 +2344,9 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v4 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v4'::regclass);
 
--- Additional quantifiers for deparsing coverage
+-- 디파스 커버리지를 위한 추가 수량자
 
--- ? quantifier (zero or one)
+-- ? 수량자 (0 개 또는 1 개)
 CREATE VIEW rpr_serial_v5 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2365,7 +2360,7 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v5 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v5'::regclass);
 
--- {n,} quantifier (n or more)
+-- {n,} 수량자 (n개 이상)
 CREATE VIEW rpr_serial_v6 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2379,7 +2374,7 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v6 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v6'::regclass);
 
--- {n} quantifier (exactly n)
+-- {n} 수량자 (정확히 n개)
 CREATE VIEW rpr_serial_v7 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2393,7 +2388,7 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v7 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v7'::regclass);
 
--- Nested ALT pattern (tests deparse of complex nested structure)
+-- 중첩된 ALT 패턴 (복합 중첩 구조의 디파스 테스트)
 CREATE VIEW rpr_serial_v8 AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_serial
@@ -2407,7 +2402,7 @@ WINDOW w AS (
 SELECT * FROM rpr_serial_v8 ORDER BY id;
 SELECT pg_get_viewdef('rpr_serial_v8'::regclass);
 
--- Navigation function serialization: PREV with offset
+-- 내비게이션 함수 직렬화: 오프셋을 가진 PREV
 CREATE VIEW rpr_serial_nav1 AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2417,7 +2412,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS TRUE, B AS val > PREV(val, 2));
 SELECT pg_get_viewdef('rpr_serial_nav1'::regclass);
 
--- Navigation function serialization: FIRST and LAST
+-- 내비게이션 함수 직렬화: FIRST와 LAST
 CREATE VIEW rpr_serial_nav2 AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2427,7 +2422,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS TRUE, B AS FIRST(val) < LAST(val, 1));
 SELECT pg_get_viewdef('rpr_serial_nav2'::regclass);
 
--- Navigation function serialization: compound PREV(FIRST())
+-- 내비게이션 함수 직렬화: 복합 PREV(FIRST())
 CREATE VIEW rpr_serial_nav3 AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2437,7 +2432,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS TRUE, B AS PREV(FIRST(val, 1), 2) > 0);
 SELECT pg_get_viewdef('rpr_serial_nav3'::regclass);
 
--- Navigation function serialization: compound NEXT(LAST())
+-- 내비게이션 함수 직렬화: 복합 NEXT(LAST())
 CREATE VIEW rpr_serial_nav4 AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2447,7 +2442,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS TRUE, B AS NEXT(LAST(val), 2) IS NOT NULL);
 SELECT pg_get_viewdef('rpr_serial_nav4'::regclass);
 
--- Navigation function serialization: compound PREV(LAST())
+-- 내비게이션 함수 직렬화: 복합 PREV(LAST())
 CREATE VIEW rpr_serial_nav5 AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2457,7 +2452,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS TRUE, B AS PREV(LAST(val, 1), 2) > 0);
 SELECT pg_get_viewdef('rpr_serial_nav5'::regclass);
 
--- Navigation function serialization: compound NEXT(FIRST())
+-- 내비게이션 함수 직렬화: 복합 NEXT(FIRST())
 CREATE VIEW rpr_serial_nav6 AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2467,7 +2462,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS TRUE, B AS NEXT(FIRST(val), 3) > 0);
 SELECT pg_get_viewdef('rpr_serial_nav6'::regclass);
 
--- Pretty deparse: navigation calls are function-like and take no extra parens
+-- 예쁜 디파스: 내비게이션 호출은 함수처럼 보이며 여분의 괄호를 더 쓰지 않는다
 CREATE VIEW rpr_nav_pretty_v AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2480,7 +2475,7 @@ WINDOW w AS (ORDER BY id
                          AND PREV(FIRST(val)) > 0);
 SELECT pg_get_viewdef('rpr_nav_pretty_v'::regclass, true);
 
--- Reluctant {1}? quantifier deparse through ruleutils
+-- ruleutils를 거친 소극적 {1}? 수량자 디파스
 CREATE VIEW rpr_quant_reluctant_v AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2491,7 +2486,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS val > 0, B AS val > 0);
 SELECT pg_get_viewdef('rpr_quant_reluctant_v'::regclass);
 
--- Quoted identifier round-trip: mixed-case names need quoting
+-- 인용된 식별자 왕복: 대소문자가 섞인 이름은 인용이 필요하다
 CREATE VIEW rpr_serial_quoted AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2501,9 +2496,9 @@ WINDOW w AS (ORDER BY id
              DEFINE "Start" AS TRUE, "Up" AS val > PREV(val));
 SELECT pg_get_viewdef('rpr_serial_quoted'::regclass);
 
--- Quoting the deparser adds on its own: permute is unreserved, so the stored
--- rule holds a plain name and only the deparser knows it has to come back
--- quoted.  Restoring this view is what proves it does.
+-- 디파서가 스스로 덧붙이는 인용: permute는 비예약어이므로 저장된 규칙은 평범한
+-- 이름을 담고 있고, 그것이 인용된 채로 돌아와야 한다는 것은 디파서만 알고
+-- 있다. 이 뷰를 복원하는 것이 바로 그것을 증명한다.
 CREATE VIEW rpr_serial_permute AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -2513,8 +2508,8 @@ WINDOW w AS (ORDER BY id
              DEFINE PERMUTE AS val > 0, A AS val > 10, B AS val > 20);
 SELECT pg_get_viewdef('rpr_serial_permute'::regclass);
 
--- Inline OVER round-trip: inline window spec (no WINDOW alias) deparses
--- inside OVER (...)
+-- 인라인 OVER 왕복: 인라인 윈도우 명세(WINDOW 별칭 없음)는 OVER (...)
+-- 안에 디파스된다
 CREATE VIEW rpr_serial_inline_over AS
 SELECT id, val,
        count(*) OVER (ORDER BY id
@@ -2524,10 +2519,10 @@ SELECT id, val,
 FROM rpr_serial;
 SELECT pg_get_viewdef('rpr_serial_inline_over'::regclass);
 
--- Multi-relation view: a DEFINE column is deparsed with no qualifier, so it
--- must stay unambiguous across the join for the view to re-parse.  This one
--- is left in place like the rpr_serial views above, which is what puts an
--- unqualified DEFINE column through the pg_dump round trip at all.
+-- 다중 관계 뷰: DEFINE 열은 한정자 없이 디파스되므로, 뷰가 재파싱되려면 조인
+-- 전체에서 모호하지 않아야 한다. 이 뷰는 위의 rpr_serial 뷰들처럼 그대로 남아
+-- 있는데, 이것이 한정자 없는 DEFINE 열을 pg_dump 왕복 전체에
+-- 통과시키는 요인이다.
 CREATE TABLE rpr_serial_j (id INT, qty INT);
 INSERT INTO rpr_serial_j VALUES (1, 5), (2, 7), (3, 9), (4, 11), (5, 13);
 
@@ -2538,10 +2533,10 @@ WINDOW w AS (ORDER BY s.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (UP+) DEFINE UP AS val > 0);
 SELECT pg_get_viewdef('rpr_serial_join'::regclass);
 
--- A DEFINE clause can only name a column without a qualifier, so the name has
--- to resolve exactly as printed.  When another relation of the query acquires
--- a column of that name, the deparser pushes the newcomer aside with a column
--- alias list, the same way it protects a column merged by USING.
+-- DEFINE 절은 한정자 없이 열만 이름으로 쓸 수 있으므로, 그 이름은 출력된
+-- 그대로 풀려야 한다.  쿼리의 다른 관계가 그 이름의 열을 갖게 되면, 디파서는
+-- 열 별칭 목록으로 새로 온 쪽을 옆으로 밀어내는데, 이는 USING으로 병합된 열을
+-- 보호하는 것과 같은 방식이다.
 
 CREATE TABLE rpr_pin (id INT, val INT);
 CREATE TABLE rpr_pin_other (id INT);
@@ -2557,7 +2552,7 @@ WINDOW w AS (ORDER BY rpr_pin.id
              PATTERN (A+)
              DEFINE A AS val > 0);
 
--- names reached through a navigation operation are pinned too
+-- 내비게이션 연산을 거쳐 도달하는 이름도 마찬가지로 고정된다
 CREATE VIEW rpr_pin_nav_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_pin, rpr_pin_other
@@ -2567,7 +2562,7 @@ WINDOW w AS (ORDER BY rpr_pin.id
              PATTERN (A+)
              DEFINE A AS PREV(val) < val);
 
--- no collision yet, so no column alias list
+-- 아직 충돌이 없으므로 열 별칭 목록도 없다
 SELECT pg_get_viewdef('rpr_pin_v'::regclass, true);
 
 ALTER TABLE rpr_pin_other ADD COLUMN val INT;
@@ -2575,7 +2570,7 @@ ALTER TABLE rpr_pin_other ADD COLUMN val INT;
 SELECT pg_get_viewdef('rpr_pin_v'::regclass, true);
 SELECT pg_get_viewdef('rpr_pin_nav_v'::regclass, true);
 
--- and the deparsed text builds an identical view
+-- 그리고 디파스된 텍스트는 동일한 뷰를 만든다
 CREATE VIEW rpr_pin_v2 AS
  SELECT count(*) OVER w AS cnt
    FROM rpr_pin,
@@ -2591,9 +2586,9 @@ CREATE VIEW rpr_pin_v2 AS
 SELECT pg_get_viewdef('rpr_pin_v'::regclass, true)
      = pg_get_viewdef('rpr_pin_v2'::regclass, true) AS identical;
 
--- The hazard this section guards against cannot be written in the first
--- place: a whole-row reference through a row constructor is rejected in
--- DEFINE, so no view can carry one as far as the deparser.
+-- 이 절이 막으려는 위험 자체를 애초에 작성할 수 없다: 행 생성자를 통한 전체 행
+-- 참조는 DEFINE에서 거부되므로, 그런 것을 디파서에까지 담아 오는 뷰는 있을
+-- 수 없다.
 CREATE VIEW rpr_pin_row_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_pin, rpr_pin_other
@@ -2603,7 +2598,7 @@ WINDOW w AS (ORDER BY rpr_pin.id
              PATTERN (A+)
              DEFINE A AS ROW(rpr_pin.*) IS NOT NULL);
 
--- a column merged by USING is pinned the same way
+-- USING으로 병합된 열도 같은 방식으로 고정된다
 CREATE TABLE rpr_pin_l (x INT, y INT);
 CREATE TABLE rpr_pin_r (x INT, z INT);
 CREATE TABLE rpr_pin_x (id INT);
@@ -2620,7 +2615,7 @@ ALTER TABLE rpr_pin_x ADD COLUMN x INT;
 
 SELECT pg_get_viewdef('rpr_pin_using_v'::regclass, true);
 
--- a JOIN ... ON behaves the same, and the view keeps returning its rows
+-- JOIN ... ON도 마찬가지이며, 뷰는 계속 자신의 행을 반환한다
 CREATE TABLE rpr_pin_j1 (id INT, price INT);
 CREATE TABLE rpr_pin_j2 (id INT, qty INT);
 INSERT INTO rpr_pin_j1 VALUES (1, 10), (2, 20);
@@ -2639,8 +2634,9 @@ ALTER TABLE rpr_pin_j2 ADD COLUMN price INT;
 SELECT pg_get_viewdef('rpr_pin_on_v'::regclass, true);
 SELECT * FROM rpr_pin_on_v ORDER BY id;
 
--- The same query written fresh is rejected, since nothing pins the name for
--- it.  Pinning is what lets the stored rpr_pin_on_v definition still reparse.
+-- 같은 쿼리를 새로 작성하면 거부된다.  그 이름을 고정해 주는 것이 없기
+-- 때문이다.  고정이 바로 저장된 rpr_pin_on_v 정의가 계속 재파싱될 수 있게
+-- 해주는 요인이다.
 SELECT j1.id, count(*) OVER w AS cnt
 FROM rpr_pin_j1 j1 JOIN rpr_pin_j2 j2 ON j1.id = j2.id
 WINDOW w AS (ORDER BY j1.id
@@ -2648,11 +2644,10 @@ WINDOW w AS (ORDER BY j1.id
              PATTERN (A+)
              DEFINE A AS price > 0);
 
--- An aliased join hides its inputs, so the name that gets printed is
--- the join's own, taken from varnosyn, not the child column the Var
--- carries in varno.
--- Pinning the child instead would reserve a name that never reaches the output
--- and leave the printed one free for a later column to collide with.
+-- 별칭이 붙은 조인은 자신의 입력을 감추므로, 출력되는 이름은 varno가 담고 있는
+-- 하위 열이 아니라 varnosyn에서 가져온 조인 자신의 이름이다.  하위 열을 대신
+-- 고정한다면 출력에 결코 나타나지 않을 이름을 예약해 두는 셈이 되어, 출력되는
+-- 이름은 나중에 오는 열과 충돌할 여지를 남기게 된다.
 CREATE TABLE rpr_pin_a (i INT, x INT);
 CREATE TABLE rpr_pin_b (k INT, y INT);
 CREATE TABLE rpr_pin_c (m INT);
@@ -2674,7 +2669,7 @@ ALTER TABLE rpr_pin_c ADD COLUMN q INT;
 SELECT pg_get_viewdef('rpr_pin_alias_v'::regclass, true);
 SELECT * FROM rpr_pin_alias_v;
 
--- and the deparsed text builds a view that returns the same rows
+-- 그리고 디파스된 텍스트는 같은 행을 반환하는 뷰를 만든다
 CREATE VIEW rpr_pin_alias_v2 AS
 SELECT count(*) OVER w AS cnt
 FROM (rpr_pin_a JOIN rpr_pin_b ON rpr_pin_a.i = rpr_pin_b.k) j(p, q, r, s),
@@ -2688,8 +2683,8 @@ WINDOW w AS (ORDER BY rpr_pin_c.m
 SELECT * FROM rpr_pin_alias_v2;
 DROP VIEW rpr_pin_alias_v2;
 
--- Without a user column alias list the join still keeps the printed name, and
--- the input relation is the one that moves aside.
+-- 사용자 열 별칭 목록이 없어도 조인은 여전히 출력된 이름을 유지하며, 옆으로
+-- 밀려나는 쪽은 입력 관계다.
 CREATE VIEW rpr_pin_alias_v3 AS
 SELECT count(*) OVER w AS cnt
 FROM (rpr_pin_a JOIN rpr_pin_b ON rpr_pin_a.i = rpr_pin_b.k) j, rpr_pin_c
@@ -2703,10 +2698,10 @@ DROP VIEW rpr_pin_alias_v3;
 DROP VIEW rpr_pin_alias_v;
 DROP TABLE rpr_pin_a, rpr_pin_b, rpr_pin_c;
 
--- A relation RTE prints the column alias the user wrote, not the catalog name,
--- so the alias is the name to reserve.  Pinning the catalog name would replace
--- the alias in the printed text and push aside an unrelated column that
--- collides only with a name nobody prints.
+-- 관계 RTE는 사용자가 작성한 열 별칭을 출력하며 카탈로그 이름을 출력하지
+-- 않으므로, 예약해야 할 이름은 그 별칭이다.  카탈로그 이름을 고정한다면 출력
+-- 텍스트에서 별칭을 대체하게 되고, 아무도 출력하지 않는 이름과만 충돌하는
+-- 무관한 열을 옆으로 밀어내게 된다.
 CREATE TABLE rpr_pin_d (i INT, k INT);
 CREATE TABLE rpr_pin_e (m INT);
 INSERT INTO rpr_pin_d VALUES (1, 10), (2, 20);
@@ -2720,12 +2715,12 @@ WINDOW w AS (ORDER BY rpr_pin_e.m
              PATTERN (A)
              DEFINE A AS q > 0);
 
--- a column named after the catalog name is no collision: q is what is printed
+-- 카탈로그 이름을 따서 지은 열은 충돌이 아니다: 출력되는 것은 q이기 때문이다
 ALTER TABLE rpr_pin_e ADD COLUMN k INT;
 
 SELECT pg_get_viewdef('rpr_pin_rel_v'::regclass, true);
 
--- one named after the alias is, and moves aside
+-- 별칭을 따서 지은 열은 충돌이며, 옆으로 밀려난다
 ALTER TABLE rpr_pin_e ADD COLUMN q INT;
 
 SELECT pg_get_viewdef('rpr_pin_rel_v'::regclass, true);
@@ -2734,15 +2729,15 @@ SELECT * FROM rpr_pin_rel_v;
 DROP VIEW rpr_pin_rel_v;
 DROP TABLE rpr_pin_d, rpr_pin_e;
 
--- A name a DEFINE clause reads is the one name in the query that cannot be
--- spelled any other way, the qualifier slot being reserved for a pattern
--- variable.  set_using_names() picks the name of every column merged by USING
--- before it, and is free to pick any name at all, renaming the merged inputs
--- to match.  So the DEFINE names that are settled already are reserved first
--- and the merged names are chosen around them.  Here the second USING would
--- otherwise reach for x_1, the very column the DEFINE clause reads: the
--- anonymous FULL JOIN forces USING names to be unique query-wide, which takes
--- plain x, and x_1 is what the next one counts up to.
+-- DEFINE 절이 읽는 이름은 쿼리 안에서 다른 어떤 식으로도 표기할 수 없는 유일한
+-- 이름이다.  한정자 자리는 패턴 변수를 위해 예약되어 있기 때문이다.
+-- set_using_names()는 USING으로 병합된 모든 열의 이름을 자신보다 먼저
+-- 골라내며, 어떤 이름이든 자유롭게 골라 병합된 입력의 이름을 그에 맞게 바꿀 수
+-- 있다.  그래서 이미 정해진 DEFINE 이름이 먼저 예약되고, 병합된 이름은 그
+-- 주위에서 골라진다.  여기서는 두 번째 USING이 원래대로라면 DEFINE 절이 읽는
+-- 바로 그 열인 x_1 을 골랐을 것이다: 익명 FULL JOIN이 USING 이름을 쿼리
+-- 전체에서 고유하게 만들도록 강제하는데, 이것이 평범한 x를 차지하므로 다음
+-- 것은 x_1 까지 세어 올라간다.
 CREATE TABLE rpr_res_t (x_1 INT, id INT);
 CREATE TABLE rpr_res_l1 (x INT);
 CREATE TABLE rpr_res_r1 (x INT);
@@ -2775,11 +2770,11 @@ SELECT * FROM rpr_res_using_rt;
 DROP VIEW rpr_res_using_rt, rpr_res_using_v;
 DROP TABLE rpr_res_t, rpr_res_l1, rpr_res_r1, rpr_res_l2, rpr_res_r2;
 
--- A merged column keeps its natural name and collides all the same.  This one
--- is the column set_relation_column_names() cannot push aside afterwards: its
--- name was settled and handed to both inputs before that function ran, so the
--- loop there passes over it.  An ordinary column in its place does move aside,
--- which is what the rpr_pin views above cover.
+-- 병합된 열은 자신의 고유한 이름을 유지하며 마찬가지로 충돌한다. 이 열은
+-- set_relation_column_names()가 나중에 옆으로 밀어낼 수 없는 열이다: 그 이름은
+-- 그 함수가 실행되기 전에 정해져 양쪽 입력에 이미 건네졌으므로, 그곳의 루프는
+-- 이 열을 건너뛴다.  평범한 열이 그 자리에 있었다면 옆으로 밀려났을 것이며,
+-- 그것이 위의 rpr_pin 뷰들이 다루는 경우다.
 CREATE TABLE rpr_res_a (j INT, p INT);
 CREATE TABLE rpr_res_b (j INT, q INT);
 CREATE TABLE rpr_res_c (r INT, s INT);
@@ -2795,7 +2790,7 @@ WINDOW w AS (ORDER BY rpr_res_c.s
              INITIAL PATTERN (X Y+)
              DEFINE X AS true, Y AS s > PREV(s));
 
--- the collision arrives only now: the merged column has been named j all along
+-- 충돌은 이제야 나타난다: 병합된 열은 줄곧 j라는 이름이었다
 ALTER TABLE rpr_res_c RENAME COLUMN s TO j;
 
 SELECT pg_get_viewdef('rpr_res_merged_v'::regclass, true);
@@ -2809,10 +2804,10 @@ SELECT * FROM rpr_res_merged_rt;
 DROP VIEW rpr_res_merged_rt, rpr_res_merged_v;
 DROP TABLE rpr_res_a, rpr_res_b, rpr_res_c;
 
--- Naming a merged column renames the columns it merges, and the name can land
--- in an RTE that has a real column of that name already.  The column the
--- DEFINE clause reads is the one that cannot move, so the merge counts past it
--- instead and the RTE prints two distinct aliases.
+-- 병합된 열의 이름을 바꾸면 그것이 병합하는 열들의 이름도 바뀌며, 그 이름은
+-- 이미 같은 이름의 실제 열을 가진 RTE에 떨어질 수 있다.  DEFINE 절이 읽는 열은
+-- 옮길 수 없는 열이므로, 병합은 그것을 건너뛰어 세고 RTE는 서로 다른 별칭 두
+-- 개를 출력한다.
 CREATE TABLE rpr_res_fa (k INT);
 CREATE TABLE rpr_res_fb (k INT);
 CREATE TABLE rpr_res_ga (k INT, k_1 INT);
@@ -2845,10 +2840,10 @@ SELECT * FROM rpr_res_dup_rt;
 DROP VIEW rpr_res_dup_rt, rpr_res_dup_v;
 DROP TABLE rpr_res_fa, rpr_res_fb, rpr_res_ga, rpr_res_gb, rpr_res_ord;
 
--- A merged column a DEFINE clause reads is named by the DEFINE clause: its
--- name is settled before set_using_names() runs, and the USING clause adopts
--- it rather than inventing one.  The merged name therefore stays id here,
--- and the newcomer is the one that moves aside.
+-- DEFINE 절이 읽는 병합된 열은 DEFINE 절이 이름을 정한다: 그 이름은
+-- set_using_names()가 실행되기 전에 정해지며, USING 절은 새로 짓는 대신 그것을
+-- 그대로 받아들인다.  따라서 병합된 이름은 여기서 계속 id로 남고, 옆으로
+-- 밀려나는 쪽은 새로 들어온 것이다.
 CREATE TABLE rpr_res_p (id INT, v INT);
 CREATE TABLE rpr_res_q (id INT, w INT);
 CREATE TABLE rpr_res_s (n INT);
@@ -2877,14 +2872,13 @@ SELECT * FROM rpr_res_full_rt;
 DROP VIEW rpr_res_full_rt, rpr_res_full_v;
 DROP TABLE rpr_res_p, rpr_res_q, rpr_res_s;
 
--- An aliased join answers for its inputs.  The parser gives every column of
--- such a join the join's own varnosyn, so a DEFINE clause reading a column the
--- inputs brought in names the join and not the relation it came from.  The
--- name is settled all the same, the join's USING clause not being the thing
--- that produced it, and so it is reserved: a column of a join that its own
--- USING clause does not name is no more merged than a relation's would be.
--- Left unreserved, the merged name counts up onto it and the join prints the
--- one alias twice, which reparses as an ambiguous column.
+-- 별칭이 붙은 조인은 자신의 입력을 대신하여 책임진다.  파서는 그런 조인의 모든
+-- 열에 조인 자신의 varnosyn을 부여하므로, 그 입력이 들여온 열을 읽는 DEFINE
+-- 절은 원래의 관계가 아니라 조인을 이름으로 지목한다.  이름은 어차피 정해지며,
+-- 조인의 USING 절이 그것을 만든 주체가 아니므로 예약된다: 자신의 USING 절이
+-- 이름을 짓지 않는 조인의 열도 관계의 열과 다를 바 없이 병합된 것이다.  예약해
+-- 두지 않으면 병합된 이름이 그 위로 세어 올라가고 조인은 같은 별칭을 두 번
+-- 출력하는데, 이는 모호한 열로 재파싱된다.
 CREATE TABLE rpr_res_ja (x INT, x_1 INT);
 CREATE TABLE rpr_res_jb (x INT, z INT);
 CREATE TABLE rpr_res_m1 (x INT);
@@ -2915,10 +2909,10 @@ SELECT * FROM rpr_res_alias_v;
 SELECT * FROM rpr_res_alias_rt;
 
 
--- The same through NATURAL JOIN, which names no column in the query text.  The
--- test above reads a join's USING clause to tell a merged column from one that
--- only passes through, and the analyzed tree is where it reads it: the parser
--- works out which columns NATURAL merges and files them there.
+-- 쿼리 텍스트에 어떤 열 이름도 짓지 않는 NATURAL JOIN에서도 마찬가지다.  위
+-- 테스트는 조인의 USING 절을 읽어 병합된 열과 그냥 통과할 뿐인 열을
+-- 구별하는데, 분석된 트리에서는 그것을 그렇게 읽는다: 파서가 NATURAL이 어떤
+-- 열들을 병합하는지 알아내어 그곳에 기록해 두기 때문이다.
 CREATE VIEW rpr_res_nat_v AS
 SELECT count(*) OVER w AS cnt
 FROM (rpr_res_m1 FULL JOIN rpr_res_m2 USING (x)),
@@ -2939,12 +2933,11 @@ DROP VIEW rpr_res_nat_rt, rpr_res_nat_v;
 DROP VIEW rpr_res_alias_rt, rpr_res_alias_v;
 DROP TABLE rpr_res_ja, rpr_res_jb, rpr_res_m1, rpr_res_m2, rpr_res_ordj;
 
--- A column a function's result type grows after the view is made is one the
--- deparser does not see at all: expandRTE() stops at the column count the
--- query was parsed with.  A column it cannot see is one it cannot rename out
--- of the way, and the name it collides with here is the one a DEFINE clause
--- has to resolve to as printed.  So the grown columns are looked up and named
--- too, and printed in full, the alias list being positional.
+-- 뷰를 만든 뒤 함수의 결과 타입이 커지면서 늘어난 열은 디파서가 아예 보지
+-- 못하는 열이다: expandRTE()는 쿼리가 파싱될 당시의 열 개수에서 멈춘다. 보이지
+-- 않는 열은 옆으로 비켜 이름을 바꿔줄 수 없는 열이며, 여기서 그것이 충돌하는
+-- 이름은 DEFINE 절이 출력된 그대로 풀어야 하는 이름이다.  그래서 늘어난 열들도
+-- 찾아 이름이 지어지고, 별칭 목록이 위치 기반이므로 전체가 출력된다.
 CREATE TABLE rpr_res_fn (id INT, val INT);
 INSERT INTO rpr_res_fn VALUES (1, 1), (2, 2), (3, 3);
 CREATE TABLE rpr_res_cfg (a INT);
@@ -2960,7 +2953,7 @@ WINDOW w AS (ORDER BY rpr_res_fn.id
              PATTERN (A+)
              DEFINE A AS val > 0);
 
--- nothing to keep off yet
+-- 아직 막아야 할 것이 없다
 SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
 
 ALTER TABLE rpr_res_cfg ADD COLUMN val INT;
@@ -2973,7 +2966,7 @@ SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true)
 SELECT * FROM rpr_res_fn_v;
 SELECT * FROM rpr_res_fn_rt;
 
--- a grown column that collides with nothing is still on the list
+-- 아무것과도 충돌하지 않는, 늘어난 열도 여전히 목록에 있다
 ALTER TABLE rpr_res_cfg ADD COLUMN spare INT;
 SELECT pg_get_viewdef('rpr_res_fn_v'::regclass, true);
 
@@ -2981,13 +2974,13 @@ DROP VIEW rpr_res_fn_rt, rpr_res_fn_v;
 DROP FUNCTION rpr_res_fcfg();
 DROP TABLE rpr_res_fn, rpr_res_cfg;
 
--- A system column is named from the catalog, not from the deparser's own
--- choice, so there is no alias to pick for it and nothing to exempt from
--- renaming.  Its name still has to be held against the rest of the query, or a
--- column that turns up later answers to it as well.  The function builds its
--- row from the type as it stands when called, so it still returns one after
--- the type grows, with NULL in the grown column; a DEFINE clause that read
--- that column instead of rpr_res_sys.ctid would match no row.
+-- 시스템 열은 디파서가 스스로 고른 것이 아니라 카탈로그에서 이름이 정해지므로,
+-- 그것을 위해 고를 별칭도 없고 이름 바꾸기에서 면제해 줄 것도 없다.  그 이름은
+-- 여전히 쿼리의 나머지와 겹치지 않도록 지켜져야 한다.  그러지 않으면 나중에
+-- 나타나는 열이 그 이름에 응답하게 된다.  함수는 호출될 당시의 타입 그대로
+-- 자신의 행을 만들므로 타입이 커진 뒤에도 여전히 한 행을 반환하며, 늘어난
+-- 열에는 NULL이 들어간다.  rpr_res_sys.ctid 대신 그 열을 읽는 DEFINE 절이
+-- 있다면 어떤 행에도 매치되지 않을 것이다.
 CREATE TABLE rpr_res_sys (id INT, v INT);
 INSERT INTO rpr_res_sys VALUES (1, 1), (2, 2);
 CREATE TYPE rpr_res_ct AS (a INT);
@@ -3017,11 +3010,11 @@ DROP FUNCTION rpr_res_fct();
 DROP TYPE rpr_res_ct;
 DROP TABLE rpr_res_sys;
 
--- Four more corners of the same deparse handling.
+-- 같은 deparse 처리의 네 가지 모서리 경우.
 --
--- An INNER JOIN USING merges to a plain Var of the left input, not to a
--- COALESCE, so there is no merge expression for the DEFINE clause to be
--- collapsed onto; the grouping still makes the deparser look for one.
+-- INNER JOIN USING 은 COALESCE 가 아니라 왼쪽 입력의 평범한 Var 로 병합되므로,
+-- DEFINE 절을 대치해 줄 병합 표현식이 없다; 그래도 그룹화가 있으면 deparser 는
+-- 그것을 찾아본다.
 CREATE TABLE rpr_cov_l (id INT, v INT);
 CREATE TABLE rpr_cov_r (id INT, w INT);
 INSERT INTO rpr_cov_l VALUES (1, 1), (2, 2), (3, 3);
@@ -3046,8 +3039,8 @@ SELECT * FROM rpr_cov_inner_rt ORDER BY idp1;
 
 DROP VIEW rpr_cov_inner_rt, rpr_cov_inner_v;
 
--- A DEFINE clause that reads the same system column in two variables holds its
--- name once; the second reference finds it held already.
+-- 두 변수에서 같은 시스템 컬럼을 읽는 DEFINE 절은 그 이름을 한 번만 보관한다;
+-- 두 번째 참조는 이미 보관된 이름을 만난다.
 CREATE VIEW rpr_cov_sys2_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_cov_l
@@ -3064,8 +3057,8 @@ SELECT pg_get_viewdef('rpr_cov_sys2_v'::regclass, true)
 
 DROP VIEW rpr_cov_sys2_rt, rpr_cov_sys2_v;
 
--- A function with a column definition list has its column set fixed by the
--- list, so no column can have grown since the view was made.
+-- 컬럼 정의 목록이 붙은 함수는 그 목록이 컬럼 집합을 고정하므로, 뷰를 만든
+-- 뒤로 컬럼이 늘어났을 수 없다.
 CREATE VIEW rpr_cov_coldef_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_cov_l, json_to_record('{"a": 1}') AS j(a int)
@@ -3084,10 +3077,9 @@ SELECT * FROM rpr_cov_coldef_rt;
 
 DROP VIEW rpr_cov_coldef_rt, rpr_cov_coldef_v;
 
--- Once a FULL JOIN USING has a merge expression to collapse, every node of the
--- DEFINE clause is looked at, whatever it is.  A function call that is no
--- merge is left as it is, and a navigation without an offset has an empty
--- offset argument to pass over.
+-- FULL JOIN USING 이 대치할 병합 표현식을 가지고 있으면 DEFINE 절의 모든 노드가
+-- 종류를 가리지 않고 검사된다.  병합이 아닌 함수 호출은 그대로 두고, 오프셋
+-- 없는 내비게이션은 건너뛰어야 할 빈 오프셋 인자를 가진다.
 CREATE VIEW rpr_cov_merge_v AS
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_cov_l FULL JOIN rpr_cov_r USING (id)
@@ -3108,11 +3100,12 @@ SELECT * FROM rpr_cov_merge_rt ORDER BY id;
 DROP VIEW rpr_cov_merge_rt, rpr_cov_merge_v;
 DROP TABLE rpr_cov_l, rpr_cov_r;
 
--- A TABLEFUNC RTE writes its column names into the clause that produces them,
--- but it accepts a column alias list like any other RTE, and a rename of one
--- of its columns is printed there.  So a TABLEFUNC column that comes to
--- answer to the name a DEFINE clause reads is renamed like any other column
--- would be, and the DEFINE clause keeps its spelling.
+
+-- TABLEFUNC RTE는 자신의 열 이름을 그것을 만드는 절에 직접 써 넣지만, 다른
+-- RTE와 마찬가지로 열 별칭 목록도 받아들이며, 그 열 중 하나의 이름 바꾸기는
+-- 그곳에 출력된다.  그래서 DEFINE 절이 읽는 이름에 응답하게 된 TABLEFUNC 열도
+-- 다른 어떤 열과 마찬가지로 이름이 바뀌며, DEFINE 절은 자신의 표기를
+-- 그대로 유지한다.
 CREATE TABLE rpr_res_tf (id INT, s INT);
 INSERT INTO rpr_res_tf VALUES (1, 1), (2, 2);
 
@@ -3125,7 +3118,7 @@ WINDOW w AS (ORDER BY rpr_res_tf.id
              PATTERN (A+)
              DEFINE A AS s > 0);
 
--- the collision arrives only now
+-- 충돌은 이제야 나타난다
 ALTER TABLE rpr_res_tf RENAME COLUMN s TO c1;
 
 SELECT pg_get_viewdef('rpr_res_tf_v'::regclass, true);
@@ -3139,13 +3132,13 @@ SELECT * FROM rpr_res_tf_rt;
 DROP VIEW rpr_res_tf_rt, rpr_res_tf_v;
 DROP TABLE rpr_res_tf;
 
--- An aliased join answers for its inputs and hides them, so the DEFINE
--- clause here reads the join's own column x.  That name is reserved across
--- the query level, which reaches the TABLEFUNC column underneath as well:
--- it is renamed on its own alias list, and the join prints x on its list to
--- keep the name the query sees.  Out of reach of an unqualified reference,
--- the TABLEFUNC column would not have collided, but a reserved name is kept
--- off every RTE of the level, as a globally unique USING name is.
+-- 별칭이 붙은 조인은 자신의 입력을 대신하여 책임지고 그것들을 감추므로, 여기서
+-- DEFINE 절은 조인 자신의 열 x를 읽는다.  그 이름은 쿼리 수준 전체에서
+-- 예약되며, 이는 그 아래의 TABLEFUNC 열에도 미친다: 그 열은 자신의 별칭
+-- 목록에서 이름이 바뀌고, 조인은 쿼리가 보는 이름을 유지하기 위해 자신의
+-- 목록에 x를 출력한다.  한정 없는 참조로는 닿지 않았을 TABLEFUNC 열은 충돌하지
+-- 않았을 것이지만, 예약된 이름은 그 수준의 모든 RTE에서 비워두는데, 이는
+-- 전역적으로 고유한 USING 이름과 마찬가지다.
 CREATE TABLE rpr_res_hid (id INT, v INT);
 CREATE TABLE rpr_res_hu (m INT);
 INSERT INTO rpr_res_hid VALUES (1, 1), (2, 2), (3, 3);
@@ -3172,15 +3165,13 @@ SELECT * FROM rpr_res_hid_rt;
 DROP VIEW rpr_res_hid_rt, rpr_res_hid_v;
 DROP TABLE rpr_res_hid, rpr_res_hu;
 
--- A column can come to carry the name a DEFINE clause reads only after the
--- view is made, by being renamed, and from then on the two have to be told
--- apart in the printed text.  The DEFINE column keeps its spelling, being
--- settled first, and the newcomer gets name_N -- whether it sits in the same
--- RTE or in another one where a DEFINE clause reads it too, is the one a
--- USING clause merges, or is not merged but carries the USING clause's
--- spelling, which is no business of the deparser's to guess from.  A USING
--- clause elsewhere that spells the newcomer's new name moves out of the way
--- as well.
+-- 어떤 열이 DEFINE 절이 읽는 이름을 갖게 되는 것은 뷰가 만들어진 후 이름이
+-- 바뀔 때뿐이며, 그때부터 둘은 출력 텍스트에서 구별되어야 한다.  DEFINE 열은
+-- 먼저 정해졌으므로 자신의 표기를 유지하고, 새로 온 열은 name_N 이라는 이름을
+-- 받는다 -- 같은 RTE에 있든, DEFINE 절이 그것도 읽는 다른 RTE에 있든, USING
+-- 절이 병합하는 열이든, 병합되지는 않지만 USING 절의 표기를 그대로 갖고 있어
+-- 디파서가 추측할 일이 아니든 마찬가지다.  새로 온 열의 새 이름을 표기하는
+-- 다른 곳의 USING 절도 마찬가지로 비켜난다.
 CREATE TABLE rpr_res_ren (c INT, d INT);
 INSERT INTO rpr_res_ren VALUES (1, 1), (2, 2);
 CREATE TABLE rpr_res_ren2 (a INT, e INT);
@@ -3198,7 +3189,7 @@ CREATE TABLE rpr_res_renb (id INT, b INT);
 INSERT INTO rpr_res_rena VALUES (1, 1), (2, 2);
 INSERT INTO rpr_res_renb VALUES (1, 5), (2, 0);
 
--- the same RTE, its alias list shorter than the table
+-- 같은 RTE에서, 그 별칭 목록이 테이블보다 짧은 경우
 CREATE VIEW rpr_res_ren_v AS
 SELECT x.a, x.d, count(*) OVER w AS cnt
 FROM rpr_res_ren AS x(a)
@@ -3207,7 +3198,7 @@ WINDOW w AS (ORDER BY x.a
              PATTERN (P Q*)
              DEFINE P AS a > 0, Q AS d > 0);
 
--- the column a USING clause merges
+-- USING 절이 병합하는 열
 CREATE VIEW rpr_res_renu_v AS
 SELECT a, x.d, count(*) OVER w AS cnt
 FROM rpr_res_ren AS x(a) JOIN rpr_res_ren2 USING (a)
@@ -3216,7 +3207,7 @@ WINDOW w AS (ORDER BY a
              PATTERN (P Q*)
              DEFINE P AS d > 0);
 
--- a USING clause elsewhere that spells the name the newcomer is going to get
+-- 새로 온 열이 받게 될 이름을 다른 곳의 USING 절이 표기하는 경우
 CREATE VIEW rpr_res_renx_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_res_ren AS x(a), rpr_res_renl JOIN rpr_res_renr USING (a_1)
@@ -3225,8 +3216,7 @@ WINDOW w AS (ORDER BY x.a
              PATTERN (P Q*)
              DEFINE P AS a > 0, Q AS d > 0);
 
--- a merged column that is renamed away, and a DEFINE column renamed onto
--- the USING clause's spelling
+-- 이름이 바뀌어 옮겨간 병합된 열과, USING 절의 표기로 이름이 바뀐 DEFINE 열
 CREATE VIEW rpr_res_renm_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_res_rs JOIN rpr_res_rr USING (x)
@@ -3235,7 +3225,7 @@ WINDOW w AS (ORDER BY y
              PATTERN (A+)
              DEFINE A AS y > 0);
 
--- another RTE, both of its columns read by the DEFINE clause
+-- 다른 RTE, 그 두 열 모두 DEFINE 절이 읽는 경우
 CREATE VIEW rpr_res_reno_v AS
 SELECT rpr_res_rena.id, count(*) OVER w AS cnt
 FROM rpr_res_rena JOIN rpr_res_renb ON rpr_res_rena.id = rpr_res_renb.id
@@ -3244,7 +3234,7 @@ WINDOW w AS (ORDER BY rpr_res_rena.id
              PATTERN (P Q*)
              DEFINE P AS a > 0, Q AS b > 0);
 
--- the collisions arrive only now
+-- 충돌은 이제야 나타난다
 ALTER TABLE rpr_res_ren RENAME d TO a;
 ALTER TABLE rpr_res_rr RENAME x TO z;
 ALTER TABLE rpr_res_rr RENAME y TO x;
@@ -3299,11 +3289,10 @@ DROP TABLE rpr_res_ren, rpr_res_ren2, rpr_res_renl, rpr_res_renr;
 DROP TABLE rpr_res_rs, rpr_res_rr;
 DROP TABLE rpr_res_rena, rpr_res_renb;
 
--- A merged column an aliased join carries can spell the DEFINE name from the
--- start, and a TABLEFUNC among the join's inputs changes nothing about that:
--- the join's own alias list names the merged column, the inputs answer to
--- it, and the DEFINE column is left alone.  Nor does the order of the FROM
--- list matter.
+-- 별칭이 붙은 조인이 담고 있는 병합된 열은 처음부터 DEFINE 이름을 표기할 수
+-- 있으며, 조인의 입력 중에 TABLEFUNC가 있어도 달라지는 것은 없다: 조인 자신의
+-- 별칭 목록이 병합된 열의 이름을 정하고, 입력들은 그에 응답하며, DEFINE 열은
+-- 그대로 둔다.  FROM 목록의 순서도 문제가 되지 않는다.
 CREATE TABLE rpr_res_tj (id INT, c1 INT);
 INSERT INTO rpr_res_tj VALUES (1, 1), (2, 2);
 CREATE TABLE rpr_res_tb (c1 INT, y INT);
@@ -3331,8 +3320,8 @@ WINDOW w AS (ORDER BY rpr_res_tj.id
              PATTERN (A+)
              DEFINE A AS c1 > 0);
 
--- the join's alias list puts the USING spelling on a column it does not
--- merge, and that column is the one the DEFINE clause reads
+-- 조인의 별칭 목록이 자신이 병합하지 않는 열에 USING 표기를 부여하며, 그 열이
+-- 바로 DEFINE 절이 읽는 열이다
 CREATE VIEW rpr_res_tja_v AS
 SELECT count(*) OVER w AS cnt
 FROM rpr_res_ti,
@@ -3343,7 +3332,7 @@ WINDOW w AS (ORDER BY rpr_res_ti.id
              PATTERN (A+)
              DEFINE A AS c1 > 0);
 
--- the same with the TABLEFUNC on the right
+-- TABLEFUNC가 오른쪽에 있어도 마찬가지다
 CREATE VIEW rpr_res_tjb_v AS
 SELECT count(*) OVER w AS cnt
 FROM (rpr_res_tb JOIN JSON_TABLE(jsonb '[1,2]', '$[*]' COLUMNS (c1 int PATH '$')) AS jt
@@ -3389,10 +3378,10 @@ DROP VIEW rpr_res_tjr_rt, rpr_res_tjr_v;
 DROP VIEW rpr_res_tj_rt, rpr_res_tj_v;
 DROP TABLE rpr_res_tj, rpr_res_tb, rpr_res_ti;
 
--- The name a USING clause is given for an aliased join has to stay clear of
--- the names the join's alias list already carries, and of what a DEFINE
--- clause reads among them.  The anonymous FULL JOIN takes the plain spelling
--- first, so the second USING has to move past both.
+-- 별칭이 붙은 조인에 대해 USING 절에 주어지는 이름은 조인의 별칭 목록이 이미
+-- 갖고 있는 이름들과, 그중 DEFINE 절이 읽는 이름을 모두 피해야 한다.  익명
+-- FULL JOIN이 평범한 표기를 먼저 차지하므로, 두 번째 USING은 둘 다를
+-- 지나쳐야 한다.
 CREATE TABLE rpr_res_fa (x INT);
 CREATE TABLE rpr_res_fb (x INT);
 CREATE TABLE rpr_res_fc (x INT, y INT);
@@ -3421,11 +3410,10 @@ SELECT * FROM rpr_res_fa_rt;
 DROP VIEW rpr_res_fa_rt, rpr_res_fa_v;
 DROP TABLE rpr_res_fa, rpr_res_fb, rpr_res_fc;
 
--- A TABLEFUNC that merges through an aliased join, or that carries a column
--- alias list of its own, is no different: when a relation column is renamed
--- onto the TABLEFUNC's name, it is the TABLEFUNC column that moves, and a
--- third RTE that already spells the name it moves to is left alone, that
--- name being read nowhere unqualified.
+-- 별칭이 붙은 조인을 거쳐 병합되거나 자신의 열 별칭 목록을 가진 TABLEFUNC도
+-- 다를 바 없다: 관계 열의 이름이 TABLEFUNC의 이름으로 바뀌면 옮겨가는 쪽은
+-- TABLEFUNC 열이며, 이미 그 옮겨갈 이름을 표기하고 있는 세 번째 RTE는 그대로
+-- 둔다.  그 이름은 어디서도 한정 없이 읽히지 않기 때문이다.
 CREATE TABLE rpr_res_tk (id INT, y INT);
 INSERT INTO rpr_res_tk VALUES (1, 1), (2, 2);
 CREATE TABLE rpr_res_th (x INT, z INT);
@@ -3497,12 +3485,11 @@ DROP VIEW rpr_res_ta_rt, rpr_res_ta_v;
 DROP VIEW rpr_res_tk_rt, rpr_res_tk_v;
 DROP TABLE rpr_res_tk, rpr_res_th, rpr_res_ta, rpr_res_ts, rpr_res_to;
 
--- A merged column the DEFINE clause reads is named by the DEFINE clause, not
--- by the USING clause: the name settled for it is the one the merge adopts.
--- So a join whose alias list renames the merged column prints the same text
--- with the DEFINE clause as without it, and a merge two joins deep is reached
--- through the input the reference resolves to.  A column that turns up later
--- under the same name elsewhere is the one that moves.
+-- DEFINE 절이 읽는 병합된 열은 USING 절이 아니라 DEFINE 절이 이름을 정한다:
+-- 그것을 위해 정해진 이름을 병합이 그대로 받아들인다.  그래서 병합된 열의
+-- 이름을 바꾸는 조인은 DEFINE 절이 있든 없든 같은 텍스트를 출력하며, 조인 두
+-- 단계 아래의 병합도 참조가 풀리는 입력을 거쳐 도달된다.  나중에 다른 곳에서
+-- 같은 이름으로 나타나는 열이 옮겨가는 쪽이다.
 CREATE TABLE rpr_res_ma (x INT, y INT);
 CREATE TABLE rpr_res_mb (x INT, z INT);
 CREATE TABLE rpr_res_mc (x INT, r INT);
@@ -3551,7 +3538,7 @@ SELECT pg_get_viewdef('rpr_res_mm_v'::regclass, true)
 SELECT * FROM rpr_res_mm_v;
 SELECT * FROM rpr_res_mm_rt;
 
--- the name turns up elsewhere only now
+-- 그 이름은 이제야 다른 곳에서 나타난다
 DROP VIEW rpr_res_mm_rt;
 ALTER TABLE rpr_res_mo RENAME xx TO x;
 
@@ -3567,14 +3554,13 @@ DROP VIEW rpr_res_mm_rt, rpr_res_mm_v;
 DROP VIEW rpr_res_ma_rt, rpr_res_ma_nodef, rpr_res_ma_v;
 DROP TABLE rpr_res_ma, rpr_res_mb, rpr_res_mc, rpr_res_mo;
 
--- Deparsing a query whose DEFINE clause reads the grouping step expands the
--- clause's GROUP Vars into the grouping expressions, and over a column merged
--- by a FULL JOIN USING that expands to the COALESCE the parser built for the
--- merge.  Printed, both arms come out spelled the same -- a DEFINE clause
--- carries no qualifier -- so COALESCE(id, id) says nothing about where either
--- came from, and re-parsing nests one merged column inside another.  The join
--- RTE still holds what it built, so the expansion is folded back into the
--- merged column itself.
+-- DEFINE 절이 그룹화 단계를 읽는 쿼리를 디파스하면 그 절의 GROUP Var들이
+-- 그룹화 표현식으로 펼쳐지며, FULL JOIN USING으로 병합된 열에서는 파서가 그
+-- 병합을 위해 만든 COALESCE로 펼쳐진다.  출력해 보면 양쪽 모두 같은 표기로
+-- 나온다 -- DEFINE 절은 한정자를 갖지 않으므로 -- 그래서 COALESCE(id, id)는
+-- 어느 쪽이 어디서 왔는지 아무것도 말해 주지 않으며, 재파싱하면 병합된 열
+-- 하나가 다른 병합된 열 안에 중첩된다.  조인 RTE는 여전히 자신이 만든 것을
+-- 유지하므로, 펼쳐진 결과는 다시 병합된 열 자체로 접혀 들어간다.
 CREATE TABLE rpr_cds_l (id INT PRIMARY KEY, val INT);
 CREATE TABLE rpr_cds_r (id INT, val INT);
 CREATE TABLE rpr_cds_o (k INT);
@@ -3599,9 +3585,9 @@ SELECT pg_get_viewdef('rpr_cds_v'::regclass, true)
 SELECT * FROM rpr_cds_v ORDER BY idp1;
 SELECT * FROM rpr_cds_rt ORDER BY idp1;
 
--- An outer join above the merge marks the copy the grouping expression
--- carries and not the copy the join RTE keeps.  Neither mark reaches the
--- printed text, so the two still name one column.
+-- 병합 위쪽의 외부 조인은 그룹화 표현식이 담은 사본에는 표시를 남기지만 조인
+-- RTE가 유지하는 사본에는 남기지 않는다.  어느 표시도 출력 텍스트에는 나타나지
+-- 않으므로, 둘은 여전히 같은 열 하나를 가리킨다.
 CREATE VIEW rpr_cds_null_v AS
 SELECT COALESCE(l.id, r.id) + 1 AS idp1, count(*) OVER w AS cnt
 FROM rpr_cds_o LEFT JOIN (rpr_cds_l l FULL JOIN rpr_cds_r r USING (id)) ON true
@@ -3619,8 +3605,8 @@ SELECT pg_get_viewdef('rpr_cds_null_v'::regclass, true)
 SELECT * FROM rpr_cds_null_v ORDER BY idp1;
 SELECT * FROM rpr_cds_null_rt ORDER BY idp1;
 
--- The same nesting under a join that nulls nothing leaves both copies
--- unmarked, and they still name one column.
+-- 아무것도 null로 만들지 않는 조인 아래의 같은 중첩에서는 두 사본 모두 표시가
+-- 없으며, 여전히 같은 열 하나를 가리킨다.
 CREATE VIEW rpr_cds_inner_v AS
 SELECT COALESCE(l.id, r.id) + 1 AS idp1, count(*) OVER w AS cnt
 FROM (rpr_cds_l l FULL JOIN rpr_cds_r r USING (id)) JOIN rpr_cds_o ON true
@@ -3638,10 +3624,10 @@ SELECT pg_get_viewdef('rpr_cds_inner_v'::regclass, true)
 SELECT * FROM rpr_cds_inner_v ORDER BY idp1;
 SELECT * FROM rpr_cds_inner_rt ORDER BY idp1;
 
--- A merge built over another merge -- a FULL JOIN USING above a FULL JOIN
--- USING -- expands to a COALESCE over a COALESCE.  The inner one is folded
--- first, so that the outer one is seen whole and folds in turn; folded
--- inside out, it re-parses to itself rather than to twice the nesting.
+-- FULL JOIN USING 위에 또 다른 FULL JOIN USING을 쌓은 병합 -- 은 COALESCE 위에
+-- 또 다른 COALESCE로 펼쳐진다.  안쪽 것이 먼저 접히므로 바깥쪽 것은 온전한
+-- 상태로 보이고 이어서 접히며, 안에서 밖으로 접혔으므로 중첩이 두 배가 되지
+-- 않고 자기 자신으로 재파싱된다.
 CREATE VIEW rpr_cds_nest_v AS
 SELECT count(*) OVER w AS cnt
 FROM (rpr_cds_l FULL JOIN rpr_cds_r USING (id)) FULL JOIN rpr_cds_r t USING (id)
@@ -3665,12 +3651,12 @@ DROP VIEW rpr_cds_null_rt, rpr_cds_null_v;
 DROP VIEW rpr_cds_rt, rpr_cds_v;
 DROP TABLE rpr_cds_l, rpr_cds_r, rpr_cds_o;
 
--- A rule deparses with varprefix on no matter what its action query looks
--- like, the range table always holding *OLD* and *NEW*, so a DEFINE clause in
--- one would be printed with qualifiers that the parser rejects outright.
--- get_rule_define() turns the prefix off for the clause, and without that a
--- rule holding a row pattern query could not be restored at all -- not even a
--- single-table one, which is what makes this its own case and not the view's.
+-- 규칙은 자신의 액션 쿼리 모양이 어떻든 varprefix를 켠 채로 디파스되며, 레인지
+-- 테이블은 항상 *OLD*와 *NEW*를 담고 있으므로, 그 안의 DEFINE 절은 파서가 딱
+-- 잘라 거부하는 한정자를 붙인 채로 출력될 것이다.  get_rule_define()이 그 절에
+-- 대해서만 접두어를 끄며, 그것이 없다면 행 패턴 쿼리를 담은 규칙은 전혀 복원될
+-- 수 없다 -- 단일 테이블짜리 규칙조차도 그렇다.  바로 그 점이 이를 뷰의 경우와
+-- 다른, 독자적인 사례로 만든다.
 CREATE TABLE rpr_rule_t (id INT, val INT);
 CREATE TABLE rpr_rule_log (id INT, cnt BIGINT);
 
@@ -3684,7 +3670,7 @@ CREATE RULE rpr_rule_r AS ON INSERT TO rpr_rule_t DO ALSO
 
 SELECT pg_get_ruledef(oid, true) FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
 
--- and that text is what has to reparse
+-- 그리고 그 텍스트가 재파싱되어야 하는 대상이다
 CREATE TABLE rpr_rule_saved AS
   SELECT pg_get_ruledef(oid, true) AS def
     FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
@@ -3693,21 +3679,20 @@ SELECT def FROM rpr_rule_saved \gexec
 SELECT (SELECT def FROM rpr_rule_saved) = pg_get_ruledef(oid, true) AS round_trips
   FROM pg_rewrite WHERE rulename = 'rpr_rule_r';
 
--- the restored rule still fires.  A rule action is run against the rows the
--- statement supplies as well as the table, so a two-row INSERT gives the
--- window four rows to order by two distinct ids; sort the result on both
--- columns, the pairs within an id being interchangeable.
+-- 복원된 규칙은 여전히 작동한다.  규칙 액션은 테이블뿐 아니라 문이 공급하는
+-- 행에 대해서도 실행되므로, 두 행짜리 INSERT는 윈도우에 서로 다른 id 두 개로
+-- 정렬할 네 행을 준다.  id가 같은 쌍끼리는 순서를 바꿔도 되므로 결과를 두 열
+-- 모두에 대해 정렬한다.
 INSERT INTO rpr_rule_t VALUES (1, 1), (2, 2);
 SELECT * FROM rpr_rule_log ORDER BY id, cnt;
 
 DROP TABLE rpr_rule_saved;
 DROP TABLE rpr_rule_t, rpr_rule_log;
 
--- A relation alias that happens to spell a pattern variable is the other way
--- the prefix goes wrong.  Printed as up.price it does not come back as a
--- range variable qualifier, which is merely rejected, but as a pattern
--- variable one, which is rejected by a different rule and with a different
--- message.  Two RTEs are what turns the prefix on.
+-- 마침 패턴 변수를 표기하게 되는 관계 별칭이 접두어가 잘못되는 또 다른 경로다.
+-- up.price로 출력되면 그것은 단순히 거부되는 범위 변수 한정자로 돌아오는 것이
+-- 아니라, 다른 규칙에 의해 다른 메시지로 거부되는 패턴 변수 한정자로 돌아온다.
+-- 접두어를 켜는 것은 RTE가 둘일 때다.
 CREATE TABLE rpr_pvar_a (id INT, price INT);
 CREATE TABLE rpr_pvar_b (id INT);
 INSERT INTO rpr_pvar_a VALUES (1, 10), (2, 20), (3, 5);
@@ -3734,7 +3719,7 @@ DROP VIEW rpr_pvar_rt, rpr_pvar_v;
 DROP TABLE rpr_pvar_a, rpr_pvar_b;
 
 
--- Materialized view (if supported)
+-- 구체화된 뷰 (지원되는 경우)
 
 CREATE TABLE rpr_mview (id INT, val INT);
 INSERT INTO rpr_mview VALUES (1, 10), (2, 20), (3, 30);
@@ -3752,11 +3737,11 @@ WINDOW w AS (
 SELECT * FROM rpr_mview_v1 ORDER BY id;
 SELECT pg_get_viewdef('rpr_mview_v1'::regclass);
 
--- Refresh test
+-- 새로 고침 테스트
 REFRESH MATERIALIZED VIEW rpr_mview_v1;
 SELECT * FROM rpr_mview_v1 ORDER BY id;
 
--- CREATE TABLE AS SELECT with RPR
+-- RPR을 사용하는 CREATE TABLE AS SELECT
 CREATE TABLE rpr_ctas (id INT, val INT);
 INSERT INTO rpr_ctas VALUES (1, 10), (2, 20), (3, 15), (4, 25);
 
@@ -3772,7 +3757,7 @@ WINDOW w AS (
 );
 SELECT * FROM rpr_ctas_result ORDER BY id;
 
--- INSERT INTO ... SELECT with RPR
+-- RPR을 사용하는 INSERT INTO ... SELECT
 CREATE TABLE rpr_insert_target (id INT, val INT, cnt BIGINT);
 INSERT INTO rpr_insert_target
 SELECT id, val, count(*) OVER w
@@ -3790,12 +3775,12 @@ DROP TABLE rpr_ctas_result;
 DROP TABLE rpr_insert_target;
 DROP TABLE rpr_ctas;
 
--- Prepared statements (tests copyfuncs.c via the plan cache)
+-- 준비된 문 (플랜 캐시를 거쳐 copyfuncs.c를 테스트)
 
 CREATE TABLE rpr_prep (id INT, val INT);
 INSERT INTO rpr_prep VALUES (1, 10), (2, 20), (3, 30);
 
--- Simple prepared statement
+-- 단순한 준비된 문
 PREPARE rpr_prep_simple AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_prep
@@ -3811,7 +3796,7 @@ EXECUTE rpr_prep_simple;
 
 DEALLOCATE rpr_prep_simple;
 
--- Prepared statement with parameters
+-- 매개변수를 가진 준비된 문
 PREPARE rpr_prep_param(int) AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_prep
@@ -3828,7 +3813,7 @@ EXECUTE rpr_prep_param(3);
 
 DEALLOCATE rpr_prep_param;
 
--- Complex prepared statement
+-- 복합 준비된 문
 PREPARE rpr_prep_complex AS
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_prep
@@ -3850,12 +3835,12 @@ DEALLOCATE rpr_prep_complex;
 
 DROP TABLE rpr_prep;
 
--- CTE and Subquery (tests copyfuncs.c)
+-- CTE와 서브쿼리 (copyfuncs.c 테스트)
 
 CREATE TABLE rpr_copy (id INT, val INT);
 INSERT INTO rpr_copy VALUES (1, 10), (2, 20), (3, 30), (4, 40);
 
--- Simple CTE
+-- 단순 CTE
 WITH rpr_cte AS (
     SELECT id, val, COUNT(*) OVER w as cnt
     FROM rpr_copy
@@ -3868,7 +3853,7 @@ WITH rpr_cte AS (
 )
 SELECT * FROM rpr_cte ORDER BY id;
 
--- CTE with multiple references (not inlined; planned as a CTE scan)
+-- 여러 번 참조되는 CTE (인라인화되지 않고 CTE 스캔으로 계획됨)
 WITH rpr_cte AS (
     SELECT id, val, COUNT(*) OVER w as cnt
     FROM rpr_copy
@@ -3884,7 +3869,7 @@ FROM rpr_cte c1
 JOIN rpr_cte c2 ON c1.id = c2.id
 ORDER BY c1.id;
 
--- Subquery in FROM clause
+-- FROM절 안의 서브쿼리
 SELECT *
 FROM (
     SELECT id, val, COUNT(*) OVER w as cnt
@@ -3898,7 +3883,7 @@ FROM (
 ) sub
 WHERE cnt > 0;
 
--- Nested subqueries
+-- 중첩된 서브쿼리
 SELECT *
 FROM (
     SELECT *
@@ -3917,12 +3902,12 @@ FROM (
 
 DROP TABLE rpr_copy;
 
--- DISTINCT and set operations (tests equalfuncs.c)
+-- DISTINCT와 집합 연산 (equalfuncs.c 테스트)
 
 CREATE TABLE rpr_equal (id INT, val INT);
 INSERT INTO rpr_equal VALUES (1, 10), (2, 20), (3, 10), (4, 20);
 
--- DISTINCT with RPR
+-- RPR과 함께 쓰는 DISTINCT
 SELECT DISTINCT cnt
 FROM (
     SELECT id, val, COUNT(*) OVER w as cnt
@@ -3937,7 +3922,7 @@ FROM (
 ) sub
 ORDER BY cnt;
 
--- UNION with RPR in both sides
+-- 양쪽 모두 RPR을 쓰는 UNION
 SELECT id, val, cnt FROM (
     SELECT id, val, COUNT(*) OVER w as cnt
     FROM rpr_equal
@@ -4015,7 +4000,7 @@ ORDER BY id;
 
 DROP TABLE rpr_equal;
 
--- View with multiple window definitions
+-- 여러 윈도우 정의를 가진 뷰
 
 CREATE TABLE rpr_multiwin (id INT, val INT);
 INSERT INTO rpr_multiwin VALUES (1, 10), (2, 20), (3, 30);
@@ -4044,7 +4029,7 @@ WINDOW
 SELECT * FROM rpr_multiwin_v ORDER BY id;
 SELECT pg_get_viewdef('rpr_multiwin_v'::regclass);
 
--- {n} quantifier display in view
+-- 뷰에서의 {n} 수량자 표시
 CREATE VIEW rpr_quant_n_v AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -4055,7 +4040,7 @@ WINDOW w AS (ORDER BY id
              DEFINE A AS val > 0);
 SELECT pg_get_viewdef('rpr_quant_n_v'::regclass);
 
--- {n,} quantifier display in view
+-- 뷰에서의 {n,} 수량자 표시
 CREATE VIEW rpr_quant_n_plus_v AS
 SELECT id, val, count(*) OVER w
 FROM rpr_serial
@@ -4067,15 +4052,15 @@ WINDOW w AS (ORDER BY id
 SELECT pg_get_viewdef('rpr_quant_n_plus_v'::regclass);
 
 -- ============================================================
--- Glued Quantifier / Alternation Tests
+-- 결합된 수량자 / 교대 테스트
 -- ============================================================
 CREATE TABLE rpr_glue (id INT, val INT);
 INSERT INTO rpr_glue VALUES (1, 5), (2, 8), (3, 9), (4, -1), (5, 6), (6, -2);
--- Quantifier glued to the alternation operator '|' without a space.  The
--- lexer glues the trailing '|' into one Op token; the grammar reattaches it as
--- the lowest-precedence alternation once the surrounding sequence is built.
+-- 공백 없이 교대 연산자 '|'에 결합된 수량자.  렉서는 뒤따르는 '|'를 하나의 Op
+-- 토큰으로 결합하며, 문법은 주변 시퀀스가 완성된 뒤 그것을 최하위 우선순위의
+-- 교대로 다시 붙인다.
 
--- Op-char quantifiers (*, +, ?, *?, +?, ??) glued to '|'.
+-- '|'에 결합된 연산자 문자 수량자 (*, +, ?, *?, +?, ??).
 CREATE VIEW rpr_dp_op AS SELECT
     count(*) OVER w1 AS w1, count(*) OVER w2 AS w2, count(*) OVER w3 AS w3,
     count(*) OVER w4 AS w4, count(*) OVER w5 AS w5, count(*) OVER w6 AS w6
@@ -4088,17 +4073,17 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w6 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A??|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_op'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_op;
--- Spaced reference: the fully-spaced canonical forms.  Identical deparse to
--- the glued rpr_dp_op w1/w4 above completes the
--- glued = spaced = mixed equivalence.
+-- 공백을 둔 참조 표기: 완전히 공백으로 분리된 정규 형태.  위의 결합된
+-- rpr_dp_op w1/w4 와 동일한 디파스 결과가 결합형 = 공백형 = 혼합형의
+-- 동등성을 완성한다.
 CREATE VIEW rpr_dp_spc AS SELECT count(*) OVER w1 AS w1, count(*) OVER w2 AS w2
 FROM rpr_glue
 WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* | B) DEFINE A AS val > 0, B AS val <= 0),
        w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*? | B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_spc'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_spc;
--- Range quantifiers glued to '|': non-reluctant {n}| (} + char '|') and
--- reluctant {n}?| (} + Op "?|").
+-- '|'에 결합된 범위 수량자: 비소극적 {n}| (} + 문자 '|')와 소극적 {n}?|
+-- (} + Op "?|").
 CREATE VIEW rpr_dp_rng AS SELECT
     count(*) OVER w1 AS w1, count(*) OVER w2 AS w2, count(*) OVER w3 AS w3, count(*) OVER w4 AS w4,
     count(*) OVER w5 AS w5, count(*) OVER w6 AS w6, count(*) OVER w7 AS w7, count(*) OVER w8 AS w8
@@ -4113,8 +4098,8 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w8 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2,3}?|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_rng'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_rng;
--- Mixed spacing: a space inside the quantifier with '|' still glued.
--- "A* ?|B" = '*' + Op"?|" = reluctant "A*?" plus alternation.
+-- 혼합된 공백: 수량자 안에 공백이 있어도 '|'는 여전히 결합된다.  "A* ?|B" =
+-- '*' + Op"?|" = 소극적 "A*?"에 교대가 붙은 것.
 CREATE VIEW rpr_dp_mix AS SELECT count(*) OVER w1 AS w1, count(*) OVER w2 AS w2, count(*) OVER w3 AS w3
 FROM rpr_glue
 WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* ?|B) DEFINE A AS val > 0, B AS val <= 0),
@@ -4122,8 +4107,8 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w3 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? ?|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_mix'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_mix;
--- Structure: precedence (| is lowest, so its right operand is the whole
--- following sequence), chaining, concatenation, and grouping.
+-- 구조: 우선순위 (|가 가장 낮으므로 그 오른쪽 피연산자는 뒤따르는 시퀀스
+-- 전체다), 연쇄, 연결, 그리고 그룹화.
 CREATE VIEW rpr_dp_struct AS SELECT
     count(*) OVER w1 AS w1, count(*) OVER w2 AS w2, count(*) OVER w3 AS w3,
     count(*) OVER w4 AS w4, count(*) OVER w5 AS w5, count(*) OVER w6 AS w6
@@ -4136,13 +4121,13 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w6 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A*|B)+) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_struct'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_struct;
--- Execution semantics (deparse cannot show reluctant shortest-match).  The
--- rpr_glue rows -- A rows 1-3 and 5, B rows 4 and 6 -- show when the '|B'
--- alternative is reachable.  With "*" the first branch always succeeds, so B
--- never fires: the greedy form matches the whole run and the reluctant form
--- matches empty, and on a B row the empty match still outranks B.  With "+"
--- the first branch fails on a B row, so there the B alternative fires; on an
--- A row the greedy form matches the run and the reluctant form one row.
+-- 실행 의미론 (디파스로는 소극적 최단 매치를 드러낼 수 없다).  rpr_glue 행들
+-- -- A는 1-3 행과 5 행, B는 4 행과 6 행 -- 은 '|B' 대안이 언제 도달 가능한지를
+-- 보여준다.  "*"에서는 첫 분기가 항상 성공하므로 B는 결코 작동하지 않는다:
+-- 탐욕적 형태는 전체 구간에 매치하고 소극적 형태는 빈 매치가 되며, B 행에서도
+-- 빈 매치가 여전히 B를 이긴다.  "+"에서는 첫 분기가 B 행에서 실패하므로
+-- 그곳에서는 B 대안이 작동한다; A 행에서는 탐욕적 형태가 구간에 매치하고
+-- 소극적 형태는 한 행에 매치한다.
 SELECT id, val,
        count(*) OVER gs AS gstar, count(*) OVER rs AS rstar,
        count(*) OVER gp AS gplus, count(*) OVER rp AS rplus
@@ -4151,15 +4136,14 @@ WINDOW gs AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        rs AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?|B) DEFINE A AS val > 0, B AS val <= 0),
        gp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+|B) DEFINE A AS val > 0, B AS val <= 0),
        rp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A+?|B) DEFINE A AS val > 0, B AS val <= 0);
--- Patterns that must stay rejected.  "&" is an invalid op; a '|' with an empty
--- side (leading, trailing, doubled, or alone in a group) has no operand; "||"
--- and "*||" are doubled pipes; "A* *|B"/"A* *?|B"/"A{2}*?|B" are doubled
--- quantifiers.
+-- 계속 거부되어야 하는 패턴들.  "&"는 유효하지 않은 연산자다; 한쪽이 빈
+-- '|'(앞, 뒤, 중복, 또는 그룹 안에 홀로)는 피연산자가 없다; "||"와 "*||"는
+-- 중복된 파이프다; "A* *|B"/"A* *?|B"/"A{2}*?|B"는 중복된 수량자다.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A&B) DEFINE A AS val > 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|) DEFINE A AS val > 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*| |B) DEFINE A AS val > 0, B AS val <= 0);
--- the dangling operator is blamed on the element it hangs off,
--- not on the first
+-- 매달린 연산자는 그것이 붙어 있는 요소의 탓으로 돌려지며, 첫 번째 요소의
+-- 탓이 아니다
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A B*|) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*||B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A||B) DEFINE A AS val > 0, B AS val <= 0);
@@ -4171,8 +4155,8 @@ SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRE
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A? *?|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2}*?|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A{2} *?|B) DEFINE A AS val > 0, B AS val <= 0);
--- Doubled op-char quantifiers lex as one Op token and are unsupported, whether
--- glued to '|' ("**|", "*+|", "???|") or on their own ("**").
+-- 중복된 연산자 문자 수량자는 하나의 Op 토큰으로 렉싱되며, '|'에
+-- 결합되든("**|", "*+|", "???|") 단독으로 쓰이든("**") 지원되지 않는다.
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A**|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*+|B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A???|B) DEFINE A AS val > 0, B AS val <= 0);
@@ -4180,14 +4164,14 @@ SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRE
 DROP TABLE rpr_glue;
 
 -- ============================================================
--- Error Cases Tests
+-- 오류 사례 테스트
 -- ============================================================
 
 DROP TABLE IF EXISTS rpr_err;
 CREATE TABLE rpr_err (id INT, val INT);
 INSERT INTO rpr_err VALUES (1, 10), (2, 20);
 
--- Invalid quantifier syntax
+-- 잘못된 수량자 구문
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4197,20 +4181,20 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- none of the following queries should be accepted
+-- 아래 쿼리들은 어느 것도 받아들여져서는 안 된다
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A+ !) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A+ ?+) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A* ?+) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A? ??) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A {1,2}??) DEFINE A AS TRUE);
 
--- none of the following 4 range-quantifier queries should be accepted
+-- 아래 4 개의 범위 수량자 쿼리는 어느 것도 받아들여져서는 안 된다
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A{2} !) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A{2,} !) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A{,3} !) DEFINE A AS TRUE);
 SELECT FROM rpr_err WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A{2,3} !) DEFINE A AS TRUE);
 
--- Unmatched parentheses
+-- 짝이 맞지 않는 괄호
 SET client_min_messages = NOTICE;
 DO $$
 BEGIN
@@ -4224,7 +4208,7 @@ EXCEPTION
 END $$;
 SET client_min_messages = WARNING;
 
--- ERROR: empty DEFINE not allowed
+-- ERROR: 빈 DEFINE은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4234,7 +4218,7 @@ WINDOW w AS (
     DEFINE
 );
 
--- ERROR: empty PATTERN not allowed
+-- ERROR: 빈 PATTERN은 허용되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4244,7 +4228,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- ERROR: DEFINE without PATTERN (PATTERN and DEFINE must be used together)
+-- ERROR: PATTERN 없는 DEFINE (PATTERN과 DEFINE은 함께 써야 한다)
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4253,10 +4237,10 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Qualified column references (NOT SUPPORTED)
+-- 한정된 열 참조 (지원되지 않음)
 
--- Pattern variable qualified name: not supported
--- (valid per ISO/IEC 19075-5 6.15 / 4.16, not yet implemented)
+-- 패턴 변수 한정 이름: 지원되지 않음
+-- (ISO/IEC 19075-5 6.15 / 4.16 에서는 유효하지만 아직 구현되지 않음)
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4266,8 +4250,8 @@ WINDOW w AS (
     DEFINE A AS A.val > 0
 );
 
--- PATTERN-only variable qualified name:
--- not supported even without DEFINE entry
+-- PATTERN에만 있는 변수의 한정 이름:
+-- DEFINE 항목이 없어도 지원되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4277,7 +4261,7 @@ WINDOW w AS (
     DEFINE A AS B.val > 0
 );
 
--- DEFINE-only variable used as a qualifier
+-- 한정자로 쓰인, DEFINE에만 있는 변수
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4287,8 +4271,8 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS B.val > 0
 );
 
--- FROM-clause range variable qualified name: not allowed
--- (prohibited by ISO/IEC 19075-5 6.5)
+-- FROM절 범위 변수 한정 이름: 허용되지 않는다
+-- (ISO/IEC 19075-5 6.5 에 의해 금지됨)
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4298,9 +4282,9 @@ WINDOW w AS (
     DEFINE A AS rpr_err.val > 0
 );
 
--- Unknown qualifier (neither pattern var nor range var): rejected like any
--- other qualified name, not reported as a missing FROM-clause entry, since
--- adding one would only lead to the range variable error above
+-- 알 수 없는 한정자 (패턴 변수도 범위 변수도 아님): 다른 한정된 이름과
+-- 마찬가지로 거부되며, 없는 FROM절 항목으로 보고되지는 않는다.  하나를
+-- 추가해도 위의 범위 변수 오류로 이어질 뿐이기 때문이다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4310,8 +4294,8 @@ WINDOW w AS (
     DEFINE A AS nosuch.val > 0
 );
 
--- A three-part name is schema-qualified even when its first part spells a
--- pattern variable, and is rejected as any other qualified name
+-- 3 부분 이름은 첫 부분이 패턴 변수를 표기하더라도 스키마 한정으로 취급되며,
+-- 다른 한정된 이름과 마찬가지로 거부된다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4321,9 +4305,9 @@ WINDOW w AS (
     DEFINE public AS public.rpr_err.val > 0
 );
 
--- Unqualified composite field access in DEFINE works: no qualifier means no
--- pattern/range-var navigation, so the pre-check skips and normal resolution
--- handles "(items).amount" via A_Indirection on the current row.
+-- DEFINE 안의 한정자 없는 복합 필드 접근은 동작한다: 한정자가 없다는 것은
+-- 패턴/범위 변수 내비게이션이 없다는 뜻이므로 사전 검사는 건너뛰고 일반적인
+-- 풀이가 "(items).amount"를 현재 행에 대한 A_Indirection 노드로 처리한다.
 CREATE TYPE rpr_item AS (name TEXT, amount INT);
 CREATE TEMP TABLE rpr_composite (id int, items rpr_item);
 INSERT INTO rpr_composite VALUES (1, ROW('a',5)), (2, ROW('b',15)), (3, ROW('c',25));
@@ -4337,10 +4321,9 @@ WINDOW w AS (
     DEFINE A AS (items).amount > 10
 );
 
--- Composite type field selection (qualified forms):
--- the ColumnRef portion ("A.items" or
--- "rpr_composite.items") is what gets quoted; the trailing ".amount" lives in
--- the surrounding A_Indirection node and is not visible to the pre-check.
+-- 복합 타입 필드 선택 (한정된 형태): 인용되는 것은 ColumnRef 부분
+-- ("A.items" 또는 "rpr_composite.items")이며, 뒤따르는 ".amount"는 주변의
+-- A_Indirection 노드에 있고 사전 검사에는 보이지 않는다.
 SELECT COUNT(*) OVER w
 FROM rpr_composite
 WINDOW w AS (
@@ -4358,9 +4341,9 @@ WINDOW w AS (
     DEFINE A AS (rpr_composite.items).amount > 10
 );
 
--- A trailing star on a composite column is a different thing from a trailing
--- star on a relation: it names no relation, so the row constructor keeps
--- expanding it and the DEFINE restrictions do not apply.
+-- 복합 열 뒤의 별표는 관계 뒤의 별표와는 다른 것이다: 그것은 어떤 관계도
+-- 지칭하지 않으므로 행 생성자는 계속 그것을 펼치며 DEFINE 제약은
+-- 적용되지 않는다.
 SELECT COUNT(*) OVER w
 FROM rpr_composite
 WINDOW w AS (
@@ -4373,10 +4356,9 @@ WINDOW w AS (
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
 
--- A composite value that reaches DEFINE by way of a subquery Var only takes
--- its ROW(...) shape after pullup, and the ORDER BY copy's sortgroupref
--- keeps it from being flattened.  make_window_input_target() adds the fields
--- the split leaves behind.
+-- 서브쿼리 Var를 거쳐 DEFINE에 도달하는 복합값은 풀업된 뒤에야 ROW(...) 모양을
+-- 갖추며, ORDER BY 사본의 sortgroupref가 그것이 평탄화되는 것을 막는다.
+-- make_window_input_target()이 그 분리로 남겨진 필드들을 추가한다.
 CREATE TABLE rpr_ordrow (a int, b int);
 INSERT INTO rpr_ordrow SELECT g, g % 4 FROM generate_series(1, 10) g;
 SELECT count(*) OVER w AS c
@@ -4384,16 +4366,16 @@ FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
 WINDOW w AS (ORDER BY x
              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
--- Control: without ORDER BY, x is flattened normally and this succeeds too.
+-- 대조군: ORDER BY가 없으면 x는 평범하게 평탄화되고 이것도 성공한다.
 SELECT count(*) OVER w AS c
 FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
 DROP TABLE rpr_ordrow;
 
--- The same split by way of a pulled-up composite target, both as a plain
--- subquery and as a view.  Rows with equal a share a partition, so q is
--- tested and DEFINE really reads k.
+-- 풀업된 복합 대상을 거친 같은 분리를, 평범한 서브쿼리로도 뷰로도 실행한다.
+-- a가 같은 행은 같은 파티션을 공유하므로 q가 검사되고 DEFINE은 실제로
+-- k를 읽는다.
 CREATE TABLE rpr_partrow (a int, b int);
 INSERT INTO rpr_partrow VALUES (1, 1), (1, 2), (1, 3), (2, 4);
 SELECT count(*) OVER w
@@ -4407,7 +4389,7 @@ SELECT count(*) OVER w FROM rpr_partrow_v
 WINDOW w AS (PARTITION BY k ORDER BY b
   ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   PATTERN (p q+) DEFINE q AS k IS NOT NULL);
--- Control: PATTERN/DEFINE aside, the same window clause runs fine.
+-- 대조군: PATTERN/DEFINE을 제외하면 같은 윈도우 절도 문제없이 실행된다.
 SELECT count(*) OVER w
 FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
 WINDOW w AS (PARTITION BY k ORDER BY b
@@ -4416,7 +4398,7 @@ DROP VIEW rpr_partrow_v;
 DROP TYPE rpr_partrow_t;
 DROP TABLE rpr_partrow;
 
--- ERROR: undefined column in DEFINE
+-- ERROR: DEFINE 안의 정의되지 않은 열
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4426,7 +4408,7 @@ WINDOW w AS (
     DEFINE A AS nonexistent_column > 0
 );
 
--- ERROR: type mismatch
+-- ERROR: 타입 불일치
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4436,7 +4418,7 @@ WINDOW w AS (
     DEFINE A AS val > 'string'
 );
 
--- ERROR: aggregate function in DEFINE is not supported
+-- ERROR: DEFINE 안의 집계 함수는 지원되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4446,10 +4428,10 @@ WINDOW w AS (
     DEFINE A AS COUNT(*) > 0
 );
 
--- ERROR: grouping operation in DEFINE is not supported.  This shares the
--- EXPR_KIND_RPR_DEFINE arm with the aggregate case above, but takes the
--- GroupingFunc half of it.  parseCheckAggregates() relies on this rejection
--- to leave DEFINE out of finalize_grouping_exprs().
+-- ERROR: DEFINE 안의 그룹화 연산은 지원되지 않는다.  이는 위의 집계 사례와
+-- EXPR_KIND_RPR_DEFINE 분기를 공유하지만, 그중 GroupingFunc 쪽을 탄다.
+-- parseCheckAggregates()는 DEFINE을 finalize_grouping_exprs() 밖에 두기 위해
+-- 이 거부에 의존한다.
 SELECT COUNT(*) OVER w
 FROM rpr_err
 GROUP BY id
@@ -4460,15 +4442,15 @@ WINDOW w AS (
     DEFINE A AS GROUPING(id) = 0
 );
 
--- ERROR: set-returning function in DEFINE is not supported
+-- ERROR: DEFINE 안의 집합 반환 함수는 지원되지 않는다
 SELECT FROM rpr_err
 WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A+) DEFINE A AS 1 > generate_series(1 ,2));
 
--- ERROR: window function in DEFINE is not supported
+-- ERROR: DEFINE 안의 윈도우 함수는 지원되지 않는다
 SELECT FROM rpr_err
 WINDOW w AS ( ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING PATTERN (A+) DEFINE A AS 1 > row_number() OVER ());
 
--- Subquery in DEFINE is not supported
+-- DEFINE 안의 서브쿼리는 지원되지 않는다
 SELECT COUNT(*) OVER w
 FROM rpr_err
 WINDOW w AS (
@@ -4478,7 +4460,7 @@ WINDOW w AS (
     DEFINE A AS val > (SELECT max(val) FROM rpr_err)
 );
 
--- DEFINE variables that do not appear in PATTERN
+-- PATTERN에 나타나지 않는 DEFINE 변수
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_err
 WINDOW w AS (
@@ -4490,12 +4472,12 @@ WINDOW w AS (
 
 DROP TABLE rpr_err;
 
--- NULL handling
+-- NULL 처리
 
 CREATE TABLE rpr_null (id INT, val INT);
 INSERT INTO rpr_null VALUES (1, 10), (2, NULL), (3, 30);
 
--- NULL in DEFINE expression
+-- DEFINE 표현식 안의 NULL
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_null
 WINDOW w AS (
@@ -4505,7 +4487,7 @@ WINDOW w AS (
     DEFINE A AS val > 15
 );
 
--- IS NULL in DEFINE
+-- DEFINE 안의 IS NULL
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_null
 WINDOW w AS (
@@ -4515,7 +4497,7 @@ WINDOW w AS (
     DEFINE N AS val IS NULL
 );
 
--- IS NOT NULL in DEFINE
+-- DEFINE 안의 IS NOT NULL
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_null
 WINDOW w AS (
@@ -4527,7 +4509,8 @@ WINDOW w AS (
 
 DROP TABLE rpr_null;
 
--- Compound navigation: inner nav must be direct arg (not nested in expression)
+-- 복합 내비게이션: 내부 내비게이션은 (표현식에 중첩되지 않은) 직접
+-- 인자여야 한다
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -4536,7 +4519,7 @@ WINDOW w AS (
     DEFINE A AS PREV(v + FIRST(v)) > 0
 );
 
--- FIRST/LAST wrapping FIRST/LAST: prohibited
+-- FIRST/LAST가 FIRST/LAST를 감싸는 경우: 금지됨
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -4545,7 +4528,7 @@ WINDOW w AS (
     DEFINE A AS FIRST(FIRST(v)) > 0
 );
 
--- Triple nesting: prohibited (3-level deep navigation)
+-- 삼중 중첩: 금지됨 (3 단계 깊이의 내비게이션)
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -4554,9 +4537,8 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(PREV(v))) > 0
 );
 
--- Sibling navigations: prohibited, but they are not a deeper nesting,
--- so the inner navigation must be reported as not being the direct
--- argument rather than as a third level.
+-- 형제 관계의 내비게이션: 금지되지만, 이는 더 깊은 중첩이 아니므로 내부
+-- 내비게이션은 3 단계가 아니라 직접 인자가 아니라는 이유로 보고되어야 한다.
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -4565,8 +4547,8 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(v) + LAST(v)) > 0
 );
 
--- Three navigations, but the inner one is again not the whole argument, so
--- that is what gets reported and the depth is not reached
+-- 내비게이션 세 개지만, 내부 것은 이번에도 인자 전체가 아니므로 그것이
+-- 보고되고 깊이까지는 도달하지 않는다
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -4575,7 +4557,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(PREV(v)) + 1) > 0
 );
 
--- A navigation offset must be a run-time constant, not a navigation operation
+-- 내비게이션 오프셋은 실행 시점 상수여야 하며, 내비게이션 연산이면 안 된다
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4609,8 +4591,8 @@ FROM generate_series(1,10) s(v)
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS PREV(v, FIRST(1::bigint)) > 0);
 
--- An unknown literal argument resolves to text;
--- it must still reference a column
+-- 알 수 없는 타입의 리터럴 인자는 text로 풀린다; 그래도 여전히 열을
+-- 참조해야 한다
 SELECT count(*) OVER w
 FROM generate_series(1,5) s(v)
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4628,7 +4610,8 @@ FROM generate_series(1,5) s(v)
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS PREV($1) IS NULL);
 
--- An int2 offset is coerced to int8 like any implicit cast (same as plain 0)
+-- int2 오프셋은 다른 암묵적 캐스트와 마찬가지로 int8 로 강제 변환된다
+-- (평범한 0 과 동일)
 SELECT count(*) OVER w
 FROM generate_series(1,5) s(v)
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4639,303 +4622,302 @@ WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS PREV(v, 0) = v);
 
 -- ============================================================
--- Pattern Optimization Tests
+-- 패턴 최적화 테스트
 -- ============================================================
--- Tests for pattern optimization
--- Use EXPLAIN to verify optimized pattern (shown as "Pattern: ...")
+-- 패턴 최적화를 위한 테스트
+-- 최적화된 패턴을 확인하려면 EXPLAIN을 쓴다 ("Pattern: ..."로 표시됨)
 
 CREATE TABLE rpr_plan (id INT, val INT);
 INSERT INTO rpr_plan VALUES
     (1, 10), (2, 20), (3, 30), (4, 40), (5, 50),
     (6, 60), (7, 70), (8, 80), (9, 90), (10, 100);
 
--- Consecutive VAR merge: A A A -> a{3}
+-- 연속된 VAR 병합: A A A -> a{3}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A A A) DEFINE A AS val > 0);
 
--- Consecutive VAR merge: A{2} A{3} -> a{5}
+-- 연속된 VAR 병합: A{2} A{3} -> a{5}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A{2} A{3}) DEFINE A AS val > 0);
 
--- Consecutive VAR merge: A+ A* -> a+
+-- 연속된 VAR 병합: A+ A* -> a+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+ A*) DEFINE A AS val > 0);
 
--- Consecutive VAR merge: A A+ -> a{2,}
--- where a finite prev (A{1,1}) meets an infinite child (A+).
+-- 연속된 VAR 병합: A A+ -> a{2,}
+-- 유한한 앞쪽 (A{1,1})이 무한한 자식(A+)을 만나는 경우다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A A+) DEFINE A AS val > 0);
 
--- Consecutive VAR merge at the boundary: A{1073741823,} A{1073741823,} ->
--- a{2147483646,}.  The min sum 2147483646 = INT32_MAX - 1 is the largest
--- still-finite bound, so the merge proceeds; a sum of exactly INF instead
--- falls back (see the Optimization Fallback Tests).
+-- 경계에서의 연속된 VAR 병합: A{1073741823,} A{1073741823,} -> a{2147483646,}.
+-- 최솟값 합 2147483646 = INT32_MAX - 1 이 여전히 유한한 한계 중 가장 큰
+-- 값이므로 병합이 진행된다; 합이 정확히 INF가 되면 대신 폴백한다
+-- (최적화 폴백 테스트 참고).
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A{1073741823,} A{1073741823,}) DEFINE A AS val > 0);
 
--- Consecutive GROUP merge with finite quantifiers:
--- ((A B){5}) ((A B){10}) -> merged
+-- 유한한 수량자를 가진 연속 GROUP 병합:
+-- ((A B){5}) ((A B){10}) -> 병합됨
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (((A B){5}) ((A B){10})) DEFINE A AS val <= 50, B AS val > 50);
 
--- Consecutive GROUP merge with unbounded: (A B)+ (A B)+ -> (a b){2,}
+-- 무한 수량자를 가진 연속 GROUP 병합: (A B)+ (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+ (A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- Consecutive GROUP merge: (A B){2} (A B)+ -> (a b){3,}
--- Where a finite prev ((A B){2,2}) meets an infinite child ((A B)+).
+-- 연속 GROUP 병합: (A B){2} (A B)+ -> (a b){3,} 유한한 앞쪽 ((A B){2,2})이
+-- 무한한 자식((A B)+)을 만나는 경우다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B){2} (A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- Consecutive GROUP merge at the boundary:
+-- 경계에서의 연속 GROUP 병합:
 -- (A B){1073741823,} (A B){1073741823,}
--- -> (a b){2147483646,}.  The min sum INT32_MAX - 1 is still finite, so the
--- merge proceeds; a sum of exactly INF instead falls back (see the
--- Optimization Fallback Tests).
+-- -> (a b){2147483646,}.  최솟값 합 INT32_MAX - 1 은 여전히 유한하므로 병합이
+-- 진행된다; 합이 정확히 INF가 되면 대신 폴백한다 (최적화 폴백 테스트 참고).
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B){1073741823,} (A B){1073741823,}) DEFINE A AS val <= 50, B AS val > 50);
 
--- PREFIX merge: A B (A B)+ -> (a b){2,}
+-- PREFIX 병합: A B (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A B (A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- PREFIX and SUFFIX merge: A B (A B)+ A B -> (a b){3,}
+-- PREFIX와 SUFFIX 병합: A B (A B)+ A B -> (a b){3,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A B (A B)+ A B) DEFINE A AS val <= 40, B AS val > 40);
 
--- Flatten nested: A ((B) (C)) -> a b c
+-- 중첩된 것을 평탄화: A ((B) (C)) -> a b c
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A ((B) (C))) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- Data execution: SEQ flatten produces correct results
+-- 데이터 실행: SEQ 평탄화가 올바른 결과를 낸다
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP TO NEXT ROW
              PATTERN (A ((B) (C))) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- ALT flatten: (A | (B | C))+ -> (a | b | c)+
+-- ALT 평탄화: (A | (B | C))+ -> (a | b | c)+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | (B | C))+) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- ALT deduplicate: (A | B | A) -> (a | b)
+-- ALT 중복 제거: (A | B | A) -> (a | b)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | B | A)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- Data execution: ALT dedup produces correct results
+-- 데이터 실행: ALT 중복 제거가 올바른 결과를 낸다
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW
              PATTERN ((A | B | A)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- Quantifier multiply: (A{2}){3} -> a{6}
+-- 수량자 곱셈: (A{2}){3} -> a{6}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){3}) DEFINE A AS val > 0);
 
--- Quantifier multiply: (((A B){2}?){3}) -> (a b){6}
--- {2}? has a fixed count, so reluctance is normalized away and the
--- multiplication that (((A B){2}){3}) gets applies here too
+-- 수량자 곱셈: (((A B){2}?){3}) -> (a b){6}
+-- {2}?는 고정된 개수를 가지므로 소극성이 정규화되어 없어지고,
+-- (((A B){2}){3})에 적용되는 곱셈이 여기에도 적용된다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (((A B){2}?){3}) DEFINE A AS val > 0, B AS val > 0);
 
--- Quantifier multiply control: greedy GROUP (((A B){2}){3}) -> (a b){6}
+-- 수량자 곱셈 대조군: 탐욕적 GROUP (((A B){2}){3}) -> (a b){6}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (((A B){2}){3}) DEFINE A AS val > 0, B AS val > 0);
 
--- Quantifier multiply with child range: (A{2,3}){3} -> a{6,9}
--- outer exact, child range - optimization applies
+-- 자식이 범위인 수량자 곱셈: (A{2,3}){3} -> a{6,9} 바깥은 정확한 값, 자식은
+-- 범위 - 최적화가 적용된다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2,3}){3}) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: (A{2}){2,3} stays as (a{2}){2,3}
--- outer range - gaps would occur (4,6 not 4,5,6), no optimization
+-- 수량자 곱셈 없음: (A{2}){2,3}은 (a{2}){2,3}로 남는다
+-- 바깥이 범위 - 간격이 생긴다 (4,6 이지 4,5,6 이 아님), 최적화 없음
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){2,3}) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: (A{2}){2,} stays as (a{2}){2,}
--- outer unbounded - gaps would occur
--- (4,6,8,... not 4,5,6,...), no optimization
+-- 수량자 곱셈 없음: (A{2}){2,}는 (a{2}){2,}로 남는다 바깥이 무한 - 간격이
+-- 생긴다 (4,6,8,...이지 4,5,6,...이 아님), 최적화 없음
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){2,}) DEFINE A AS val > 0);
 
--- Quantifier multiply: (A){2,} -> a{2,}
--- child exact 1 - no gaps, optimization applies
+-- 수량자 곱셈: (A){2,} -> a{2,}
+-- 자식이 정확히 1 - 간격 없음, 최적화가 적용된다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A){2,}) DEFINE A AS val > 0);
 
--- Quantifier multiply: (A)+ -> a+
--- child exact 1 - no gaps, optimization applies
+-- 수량자 곱셈: (A)+ -> a+
+-- 자식이 정확히 1 - 간격 없음, 최적화가 적용된다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A)+) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: (A{2}){3,5} stays as (a{2}){3,5}
--- outer range, child exact > 1 - gaps would occur (6,8,10 not 6,7,8,9,10)
+-- 수량자 곱셈 없음: (A{2}){3,5}는 (a{2}){3,5}로 남는다
+-- 바깥이 범위, 자식이 1 보다 큰 정확한 값 - 간격이 생긴다
+-- (6,8,10 이지 6,7,8,9,10 이 아님)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}){3,5}) DEFINE A AS val > 0);
 
--- Quantifier multiply refused: (A{2,3}){2,3} stays nested.
--- The counts [4,6] U [6,9] = [4,9] are contiguous, but a bounded child with a
--- lower bound to fall short of makes the nested form prefer a shorter match
--- than a{4,9} would.
+-- 수량자 곱셈 거부: (A{2,3}){2,3}은 중첩된 채로 남는다.
+-- 개수 [4,6] U [6,9] = [4,9]는 이어지지만, 미달할 하한을 가진 유한한 자식
+-- 때문에 중첩된 형태가 a{4,9}보다 더 짧은 매치를 선호하게 된다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2,3}){2,3}) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: (A{4,5}){2,3} stays as (a{4,5}){2,3}
--- outer range, child range with a gap: [8,10] U [12,15] misses 11
+-- 수량자 곱셈 없음: (A{4,5}){2,3}는 (a{4,5}){2,3}로 남는다
+-- 바깥이 범위, 자식이 간격을 가진 범위: [8,10] U [12,15]는 11 을 놓친다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{4,5}){2,3}) DEFINE A AS val > 0);
 
--- Nested unbounded: (A*)* -> a*
+-- 중첩된 무한: (A*)* -> a*
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A*)*) DEFINE A AS val > 0);
 
--- Nested unbounded: (A+)* -> a*
+-- 중첩된 무한: (A+)* -> a*
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+)*) DEFINE A AS val > 0);
 
--- Nested unbounded: (A+)+ -> a+
+-- 중첩된 무한: (A+)+ -> a+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+)+) DEFINE A AS val > 0);
 
--- Quantifier multiply with an unbounded child: an exact outer count (m == n)
--- always folds regardless of the child's max - (A+){3} -> a{3,}
+-- 무한한 자식을 가진 수량자 곱셈: 바깥의 정확한 개수(m == n)는 자식의 최댓값과
+-- 무관하게 항상 접힌다 - (A+){3} -> a{3,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+){3}) DEFINE A AS val > 0);
 
--- (A{2,}){3} -> a{6,}  (m == n, unbounded child with min 2)
+-- (A{2,}){3} -> a{6,}  (m == n, 최솟값이 2 인 무한 자식)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2,}){3}) DEFINE A AS val > 0);
 
--- (A+){2,4} -> a{2,}  (outer range, unbounded child: every interval
--- reaches INF, so they always touch)
+-- (A+){2,4} -> a{2,}  (바깥이 범위, 자식이 무한: 모든 구간이
+-- INF에 도달하므로 항상 맞닿는다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+){2,4}) DEFINE A AS val > 0);
 
--- (A{2,3}){2,4} stays nested like (A{2,3}){2,3} above, even though the counts
--- [4,6] U [6,9] U [8,12] = [4,12] are contiguous.
+-- (A{2,3}){2,4}는 위의 (A{2,3}){2,3}처럼 중첩된 채로 남는다.  비록 개수 [4,6]
+-- U [6,9] U [8,12] = [4,12]가 이어지더라도 그렇다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2,3}){2,4}) DEFINE A AS val > 0);
 
--- Skippable outer (min 0) folds only when the zero case connects to the child
--- range: (A{1,3})? -> a{0,3}
--- (child min <= 1, so {0} U [1,3] = [0,3] is contiguous)
+-- 건너뛸 수 있는 바깥(최솟값 0)은 0 인 경우가 자식의 범위와 이어질 때만
+-- 접힌다: (A{1,3})?  -> a{0,3}
+-- (자식의 최솟값 <= 1 이므로 {0} U [1,3] = [0,3]이 이어진다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{1,3})?) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: (A{2,3})? stays as (a{2,3})?
--- min 0 with child min >= 2: {0} U [2,3] leaves 1 unreachable
--- (intervals touch but the zero case does not connect)
+-- 수량자 곱셈 없음: (A{2,3})?는 (a{2,3})?로 남는다
+-- 최솟값 0 에 자식의 최솟값이 2 이상: {0} U [2,3]은 1 에 도달할 수 없게 남긴다
+-- (구간은 맞닿지만 0 인 경우는 이어지지 않는다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2,3})?) DEFINE A AS val > 0);
 
--- Quantifier NO multiply: (A{3,4})? stays as (a{3,4})?
--- min 0 with child min >= 2: {0} U [3,4] leaves 1,2 unreachable
+-- 수량자 곱셈 없음: (A{3,4})?는 (a{3,4})?로 남는다
+-- 최솟값 0 에 자식의 최솟값이 2 이상: {0} U [3,4]는 1,2 에 도달할 수
+-- 없게 남긴다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{3,4})?) DEFINE A AS val > 0);
 
--- Unwrap GROUP{1,1}: (A) -> a
+-- GROUP{1,1} 풀기: (A) -> a
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A)) DEFINE A AS val > 0);
 
--- Unwrap GROUP{1,1}: (A B) -> a b
+-- GROUP{1,1} 풀기: (A B) -> a b
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)) DEFINE A AS val <= 50, B AS val > 50);
 
--- Combined optimization: A A (B B)+ B B C C C -> a{2} (b{2}){2,} c{3}
+-- 조합된 최적화: A A (B B)+ B B C C C -> a{2} (b{2}){2,} c{3}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A A (B B)+ B B C C C)
              DEFINE A AS val <= 20, B AS val > 20 AND val <= 70, C AS val > 70);
 
--- Unwrapped GROUPs then VAR merge: (A+) (A+) -> a{2,}
+-- GROUP을 푼 뒤 VAR 병합: (A+) (A+) -> a{2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+) (A+)) DEFINE A AS val > 0);
 
--- Quantifier multiply finite: (A{10}){20} -> a{200}
+-- 유한한 수량자 곱셈: (A{10}){20} -> a{200}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{10}){20}) DEFINE A AS val > 0);
 
--- Different GROUP prevents merge: (A B){2} (C D){3}
+-- 서로 다른 GROUP은 병합을 막는다: (A B){2} (C D){3}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4943,33 +4925,33 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              DEFINE A AS val <= 25, B AS val > 25 AND val <= 50,
                     C AS val > 50 AND val <= 75, D AS val > 75);
 
--- Different children count prevents merge: (A B)+ (A B C)+
+-- 자식 개수가 다르면 병합을 막는다: (A B)+ (A B C)+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+ (A B C)+)
              DEFINE A AS val <= 33, B AS val > 33 AND val <= 66, C AS val > 66);
 
--- PREFIX only merge: A B (A B)+ -> (a b){2,}
+-- PREFIX만 병합: A B (A B)+ -> (a b){2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A B (A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- SUFFIX only merge: (A B)+ A B -> (a b){2,}
+-- SUFFIX만 병합: (A B)+ A B -> (a b){2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+ A B) DEFINE A AS val <= 50, B AS val > 50);
 
--- Multiple SUFFIX absorption: (A B)+ A B A B C
+-- 여러 개의 SUFFIX 흡수: (A B)+ A B A B C
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+ A B A B C)
              DEFINE A AS val <= 50, B AS val > 50 AND val <= 75, C AS val > 75);
 
--- PREFIX merge with remaining prefix: A B C D (C D)+  -> A B (C D) {2,}
+-- 남은 PREFIX가 있는 PREFIX 병합: A B C D (C D)+  -> A B (C D) {2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -4977,7 +4959,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              DEFINE A AS val <= 25, B AS val > 25 AND val <= 50,
                     C AS val > 50 AND val <= 75, D AS val > 75);
 
--- cannot merge, prefix is different
+-- 병합할 수 없음, prefix가 다르다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w
 FROM rpr_plan
@@ -4986,14 +4968,14 @@ PATTERN (A B C D C (C D) +)
 DEFINE A AS val <= 25, B AS val > 25,
        C AS val > 50, D AS val > 75);
 
--- PREFIX merge with quantifiers: A B* (A B*)+ -> (a b*){2,}
+-- 수량자를 가진 PREFIX 병합: A B* (A B*)+ -> (a b*){2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A B* (A B*)+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- PREFIX merge with multiple quantifiers:
+-- 여러 수량자를 가진 PREFIX 병합:
 -- A+ B* C? (A+ B* C?)+ -> (a+ b* c?){2,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
@@ -5001,160 +4983,160 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+ B* C? (A+ B* C?)+)
              DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60);
 
--- SUFFIX merge refused: (A B*)+ A B* stays as written.  The body A B* has no
--- fixed row count, so folding the trailing copy into the group would move the
--- group's stop decision ahead of that copy's own choices.  The PREFIX merge
--- just above keeps working on the same kind of body -- a leading copy is
--- mandatory, so it merges without reordering anything.
+-- SUFFIX 병합 거부: (A B*)+ A B*는 그대로 남는다.  본문 A B*는 고정된 행 수를
+-- 갖지 않으므로, 끝의 사본을 그룹 안으로 접어 넣으면 그룹의 정지 판단이 그
+-- 사본 자신의 선택보다 앞서게 된다.  바로 위의 PREFIX 병합은 같은 종류의
+-- 본문에 대해서도 계속 동작한다 -- 앞선 사본은 필수이므로 아무것도 순서를
+-- 바꾸지 않고 병합된다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B*)+ A B*)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Unwrap GROUP{1,1}: ((A | B | C)) -> (a | b | c)
+-- GROUP{1,1} 풀기: ((A | B | C)) -> (a | b | c)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | B | C)) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- Data execution: GROUP unwrap produces correct results
+-- 데이터 실행: GROUP 풀기가 올바른 결과를 낸다
 SELECT id, val, count(*) OVER w AS cnt
 FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP TO NEXT ROW
              PATTERN ((A | B | C)) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- Reluctant optimization bypass: VAR merge
--- A+? A stays as a+? a (greedy A+ A merges to a{2,})
+-- 소극적 최적화 우회: VAR 병합
+-- A+? A는 a+? a로 남는다 (탐욕적 A+ A는 a{2,}로 병합된다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+? A) DEFINE A AS val > 0);
 
--- Reluctant optimization bypass: SUFFIX merge after GROUP{1,1} unwrap
--- (A B)+? (A B) stays as (a b)+? a b (greedy merges to (a b){2,})
+-- 소극적 최적화 우회: GROUP{1,1} 풀기 이후의 SUFFIX 병합 (A B)+?  (A B)는
+-- (a b)+?  a b로 남는다 (탐욕적이면 (a b){2,}로 병합된다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+? (A B)) DEFINE A AS val <= 50, B AS val > 50);
 
--- Reluctant optimization bypass: quantifier multiply (outer reluctant)
--- (A+){2,4}? stays nested where the greedy (A+){2,4} multiplies to a{2,}
+-- 소극적 최적화 우회: 수량자 곱셈 (바깥이 소극적) (A+){2,4}?는 중첩된 채로
+-- 남지만, 탐욕적인 (A+){2,4}는 a{2,}로 곱해진다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A+){2,4}?) DEFINE A AS val > 0);
 
--- Reluctant optimization bypass: quantifier multiply (inner reluctant)
--- (A{2,3}?){3} stays as (a{2,3}?){3} (greedy (A{2,3}){3} merges to a{6,9})
+-- 소극적 최적화 우회: 수량자 곱셈 (안쪽이 소극적) (A{2,3}?){3}는
+-- (a{2,3}?){3}로 남는다 (탐욕적인 (A{2,3}){3}는 a{6,9}로 병합된다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2,3}?){3}) DEFINE A AS val > 0);
 
--- Fixed count normalizes away: (A{2}?){3} -> a{6}, same as (A{2}){3}
+-- 고정 개수는 정규화되어 없어진다: (A{2}?){3} -> a{6}, (A{2}){3}과 같다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A{2}?){3}) DEFINE A AS val > 0);
 
--- {0,} is the only brace spelling that reaches an unbounded min 0
+-- {0,}은 무한한 최솟값 0 에 도달하는 유일한 중괄호 표기다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A{0,}) DEFINE A AS val > 0);
 
--- Bare {1} and {1,1} carry no quantifier, on a VAR or on a GROUP
+-- 맨 {1}과 {1,1}은 VAR에도 GROUP에도 수량자를 남기지 않는다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A{1} B{1,1} (C){1})
              DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- A reluctant {1,1} normalizes to a bare variable
+-- 소극적 {1,1}은 맨 변수로 정규화된다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A{1,1}? (B C){1})
              DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- Reluctant optimization bypass: PREFIX merge
--- A B (A B)+? stays separate (greedy merges to (a b){2,})
+-- 소극적 최적화 우회: PREFIX 병합
+-- A B (A B)+?는 분리된 채로 남는다 (탐욕적이면 (a b){2,}로 병합된다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A B (A B)+?) DEFINE A AS val <= 50, B AS val > 50);
 
--- Reluctant optimization bypass: SUFFIX merge
--- (A B)+? A B stays separate (greedy merges to (a b){2,})
+-- 소극적 최적화 우회: SUFFIX 병합
+-- (A B)+? A B는 분리된 채로 남는다 (탐욕적이면 (a b){2,}로 병합된다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B)+? A B) DEFINE A AS val <= 50, B AS val > 50);
 
--- GROUP unwrap with quantifier propagation: (A)?? B -> a?? b
--- Single VAR child {1,1} receives GROUP's quantifier and reluctant
+-- 수량자 전파를 동반한 GROUP 풀기: (A)?? B -> a?? b
+-- 단일 VAR 자식 {1,1}은 GROUP의 수량자와 소극성을 물려받는다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A)?? B) DEFINE A AS val <= 50, B AS val > 50);
 
--- Reluctant preserved through ALT flatten
--- (A | (B | C))+? flattens to (a | b | c)+? - inner
--- ALT flattened, reluctant kept
+-- ALT 평탄화를 거쳐서도 유지되는 소극성
+-- (A | (B | C))+?는 (a | b | c)+?로 평탄화된다 - 내부 ALT는 평탄화되었지만
+-- 소극성은 유지된다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | (B | C))+?) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
--- Reluctant optimization bypass: absorption flags
--- A+? with SKIP PAST LAST ROW - no absorption markers (greedy A+ gets a+#)
+-- 소극적 최적화 우회: 흡수 플래그
+-- SKIP PAST LAST ROW를 쓴 A+? - 흡수 마커 없음 (탐욕적 A+는 a+#가 된다)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+?) DEFINE A AS val > 0);
 
--- Duplicate GROUP removal: ((A | B)+ | (A | B)+) -> (a | b)+
+-- 중복 GROUP 제거: ((A | B)+ | (A | B)+) -> (a | b)+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | B)+ | (A | B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- Consecutive VAR merge with zero-min: A* A+ -> a+
+-- 최솟값 0 을 가진 연속 VAR 병합: A* A+ -> a+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A* A+) DEFINE A AS val > 0);
 
--- Consecutive VAR merge (4-element): A A{2} A+ A{3} -> a{7,}
+-- 연속 VAR 병합 (요소 4 개): A A{2} A+ A{3} -> a{7,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A A{2} A+ A{3}) DEFINE A AS val > 0);
 
--- PREFIX+SUFFIX merge (5-way): A B A B (A B)+ A B A B -> (a b){5,}
+-- PREFIX+SUFFIX 병합 (5 개 짜리): A B A B (A B)+ A B A B -> (a b){5,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A B A B (A B)+ A B A B)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- PREFIX+SUFFIX merge (5-way): B A B (A B)+ A B A B -> b (a b){4,}
+-- PREFIX+SUFFIX 병합 (5 개 짜리): B A B (A B)+ A B A B -> b (a b){4,}
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (B A B (A B)+ A B A B)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Unwrap single-item ALT after dedup: (A | A)+ -> a+
--- ALT dedup reduces to single-item, then quantifier multiply folds the GROUP
+-- 중복 제거 후 단일 항목 ALT 풀기: (A | A)+ -> a+ ALT 중복 제거가 단일
+-- 항목으로 줄인 뒤, 수량자 곱셈이 GROUP을 접는다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A | A)+) DEFINE A AS val > 0);
 
--- GROUP{1,1} to SEQ with flatten: ((A B)(C D)) -> a b c d
+-- 평탄화를 동반한 GROUP{1,1}을 SEQ로: ((A B)(C D)) -> a b c d
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -5162,7 +5144,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              DEFINE A AS val <= 25, B AS val > 25 AND val <= 50,
                     C AS val > 50 AND val <= 75, D AS val > 75);
 
--- Nested ALT pattern: ((A B) | C) D | A B C
+-- 중첩된 ALT 패턴: ((A B) | C) D | A B C
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -5170,7 +5152,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              DEFINE A AS val <= 25, B AS val > 25 AND val <= 50,
                     C AS val > 50 AND val <= 75, D AS val > 75);
 
--- Nested ALT with unbounded: ((A+ B) | C) D | A B C
+-- 무한을 포함한 중첩 ALT: ((A+ B) | C) D | A B C
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -5179,140 +5161,140 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                     C AS val > 50 AND val <= 75, D AS val > 75);
 
 -- ============================================================
--- Absorption Flag Display Tests
+-- 흡수 플래그 표시 테스트
 -- ============================================================
--- Tests absorption marker display in EXPLAIN output
--- Markers: ~ = branch element, # = comparison point
+-- EXPLAIN 출력에서의 흡수 마커 표시를 테스트한다 마커: ~ = 분기 요소, # =
+-- 비교 지점
 
--- Simple VAR: A+ -> a+# (comparison point)
+-- 단순 VAR: A+ -> a+# (비교 지점)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+) DEFINE A AS val > 0);
 
--- GROUP unbounded: (A B)+ -> (a~ b~)+# (branch + comparison)
+-- 무한 GROUP: (A B)+ -> (a~ b~)+# (분기 + 비교)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A B)+) DEFINE A AS val <= 50, B AS val > 50);
 
--- ALT both absorbable: A+ | B+ -> (a+# | b+#)
+-- 둘 다 흡수 가능한 ALT: A+ | B+ -> (a+# | b+#)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+ | B+) DEFINE A AS val <= 50, B AS val > 50);
 
--- ALT one absorbable: A+ | B -> (a+# | b)
+-- 하나만 흡수 가능한 ALT: A+ | B -> (a+# | b)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+ | B) DEFINE A AS val <= 50, B AS val > 50);
 
--- Sequence with absorbable start: A+ B -> a+# b
+-- 흡수 가능하게 시작하는 시퀀스: A+ B -> a+# b
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+ B) DEFINE A AS val <= 50, B AS val > 50);
 
--- Complex nested: ((A+ B) | C) D | A B C - deeply nested ALT
+-- 복합 중첩: ((A+ B) | C) D | A B C - 깊이 중첩된 ALT
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A+ B) | C) D | A B C)
              DEFINE A AS val <= 30, B AS val <= 60, C AS val <= 80, D AS val > 80);
 
--- ALT branch tail not over-marked: A | (B C)+ (D E)+ -> (a | (b~ c~)+# (d e)+)
+-- ALT 분기 꼬리는 과하게 표시되지 않음: A | (B C)+ (D E)+ ->
+-- (a | (b~ c~)+# (d e)+)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A | (B C)+ (D E)+)
              DEFINE A AS val <= 20, B AS val <= 40, C AS val <= 60, D AS val <= 80, E AS val > 80);
 
--- Nested unbounded: (A+ | B)+ -> (a+# | b)+ (first iteration absorbable)
+-- 중첩된 무한: (A+ | B)+ -> (a+# | b)+ (첫 반복이 흡수 가능)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A+ | B)+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- ALT inside unbounded GROUP: (A+ B | A B)* -> (a+# b | a b)*
--- (first iteration absorbable)
+-- 무한 GROUP 안의 ALT: (A+ B | A B)* -> (a+# b | a b)* (첫 반복이 흡수 가능)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A+ B | A B)*)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Fixed-length group absorbable: (A{2} B{3})+ -> (a{2}~ b{3}~)+#
--- All children have min == max, equivalent to unrolling to {1,1}
+-- 흡수 가능한 고정 길이 그룹: (A{2} B{3})+ -> (a{2}~ b{3}~)+# 모든 자식이 min
+-- == max를 가지며, {1,1}로 풀어 쓴 것과 동등하다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A{2} B{3})+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Nested fixed-length group: (A (B C){2} D)+ -> absorbable
+-- 중첩된 고정 길이 그룹: (A (B C){2} D)+ -> 흡수 가능
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A (B C){2} D)+)
              DEFINE A AS val <= 20, B AS val <= 40, C AS val <= 60, D AS val > 60);
 
--- Nested fixed-length with inner quantifier: ((A{2} B{3}){2})+ -> absorbable
+-- 안쪽에 수량자를 가진 중첩 고정 길이: ((A{2} B{3}){2})+ -> 흡수 가능
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (((A{2} B{3}){2})+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Non-absorbable fixed-length: (A B{2,5})+ -> no markers (min != max)
+-- 흡수 불가능한 고정 길이: (A B{2,5})+ -> 마커 없음 (min != max)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A B{2,5})+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Non-absorbable fixed-length: (A B?)+ -> no markers (min != max)
+-- 흡수 불가능한 고정 길이: (A B?)+ -> 마커 없음 (min != max)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A B?)+)
              DEFINE A AS val <= 50, B AS val > 50);
 
--- Non-absorbable (unbounded not at start): A B+ -> a b+ (no markers)
+-- 흡수 불가능 (무한이 시작이 아님): A B+ -> a b+ (마커 없음)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A B+) DEFINE A AS val <= 50, B AS val > 50);
 
--- Non-absorbable (no unbounded branch):
--- (A | B){2,} -> (a | b){2,} (no markers)
+-- 흡수 불가능 (무한 분기 없음):
+-- (A | B){2,} -> (a | b){2,} (마커 없음)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ((A | B){2,}) DEFINE A AS val <= 50, B AS val > 50);
 
--- Non-absorbable (SKIP TO NEXT ROW): A+ -> a+ (no markers)
+-- 흡수 불가능 (SKIP TO NEXT ROW): A+ -> a+ (마커 없음)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP TO NEXT ROW PATTERN (A+) DEFINE A AS val > 0);
 
--- Non-absorbable (limited frame): A+ -> a+ (no markers)
+-- 흡수 불가능 (제한된 프레임): A+ -> a+ (마커 없음)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (A+) DEFINE A AS val > 0);
 
--- A marker on a quoted variable name lands outside the closing quote: a
--- keyword name takes the comparison point, "select"+ -> "select"+#
+-- 인용된 변수 이름에서 마커는 닫는 따옴표 바깥에 붙는다: 키워드 이름도 비교
+-- 지점을 갖는다, "select"+ -> "select"+#
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN ("select"+ B)
              DEFINE "select" AS val <= 50, B AS val > 50);
 
--- The same for the branch marker, on a name quoted for its space:
+-- 공백 때문에 인용된 이름에서도 분기 마커는 마찬가지다:
 -- ("My Var" A)+ -> ("My Var"~ a~)+#
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
@@ -5320,7 +5302,7 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW PATTERN (("My Var" A)+ B)
              DEFINE "My Var" AS val <= 25, A AS val <= 50, B AS val > 50);
 
--- Reluctant {1}? quantifier: min == max, so the plan normalizes it away
+-- 소극적 {1}? 수량자: min == max이므로 계획이 그것을 정규화해 없앤다
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM rpr_plan
 WINDOW w AS (
@@ -5331,12 +5313,12 @@ WINDOW w AS (
 );
 
 -- ============================================================
--- Absorption Analysis Tests
+-- 흡수 분석 테스트
 -- ============================================================
--- Tests context absorption optimization (O(n^2) -> O(n))
+-- 컨텍스트 흡수 최적화를 테스트한다 (O(n^2) -> O(n))
 
--- Simple Absorbable Pattern: A+ B
--- Pattern starts with unbounded VAR
+-- 단순 흡수 가능 패턴: A+ B
+-- 무한 VAR로 시작하는 패턴
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5348,8 +5330,8 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- Absorbable GROUP Pattern: (A B)+ C
--- Pattern starts with unbounded GROUP
+-- 흡수 가능한 GROUP 패턴: (A B)+ C
+-- 무한 GROUP으로 시작하는 패턴
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5361,8 +5343,8 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
 );
 
--- Non-Absorbable: Unbounded Not at Start
--- Pattern: A B+ (unbounded not at start)
+-- 흡수 불가능: 무한이 시작이 아님
+-- 패턴: A B+ (무한이 시작이 아님)
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5374,8 +5356,8 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- ALT with Absorbable Branches
--- Pattern: (A+ | B+) C - both branches absorbable
+-- 흡수 가능한 분기를 가진 ALT
+-- 패턴: (A+ | B+) C - 두 분기 모두 흡수 가능
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5387,8 +5369,8 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
 );
 
--- ALT with Mixed Branches
--- Pattern: (A+ | B C)+ - only first branch absorbable
+-- 분기가 섞인 ALT
+-- 패턴: (A+ | B C)+ - 첫 분기만 흡수 가능
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5400,8 +5382,8 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
 );
 
--- Non-Absorbable: ALT Inside GROUP
--- Pattern: (A | B){2,} - ALT inside unbounded GROUP
+-- 흡수 불가능: GROUP 안의 ALT
+-- 패턴: (A | B){2,} - 무한 GROUP 안의 ALT
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5413,8 +5395,8 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- Nested Unbounded: only the inner GROUP is absorbable
--- Pattern: ((A B)+ C)+ - inner (A B)+ absorbable on the first iteration
+-- 중첩된 무한: 안쪽 GROUP만 흡수 가능
+-- 패턴: ((A B)+ C)+ - 첫 반복에서 안쪽 (A B)+가 흡수 가능
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5426,8 +5408,8 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30 AND val <= 60, C AS val > 60
 );
 
--- Non-Absorbable: Unbounded Element Inside GROUP
--- Pattern: (A B+){2,} - unbounded inside GROUP
+-- 흡수 불가능: GROUP 안의 무한 요소
+-- 패턴: (A B+){2,} - GROUP 안의 무한
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5439,8 +5421,8 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- Runtime Conditions: SKIP TO NEXT ROW
--- Absorption disabled with SKIP TO NEXT ROW
+-- 실행 시점 조건: SKIP TO NEXT ROW
+-- SKIP TO NEXT ROW에서는 흡수가 비활성화된다
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5452,8 +5434,8 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- Runtime Conditions: Limited Frame
--- Absorption disabled with limited frame end
+-- 실행 시점 조건: 제한된 프레임
+-- 프레임 끝이 제한되면 흡수가 비활성화된다
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5465,9 +5447,10 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- ALT Non-Absorbable Branch Match: A+ B | C
--- C match on the non-absorbable branch (id=2, id=5) must survive absorption of
--- the dominating A+ run, which never completes a match (B is never present)
+-- ALT의 흡수 불가능한 분기 매치: A+ B | C
+-- 흡수 불가능한 분기의 C 매치(id=2, id=5)는 지배적인 A+ 실행의 흡수에서
+-- 살아남아야 한다.  그 A+는 (B가 나타나지 않으므로) 결코 매치를
+-- 완료하지 않는다
 
 WITH test_nonabsorbable_branch AS (
     SELECT * FROM (VALUES
@@ -5494,14 +5477,13 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
--- Measuring a group body for a fixed row count.  The suffix merge measures
--- the body of a group followed by more of the sequence, so each pattern below
--- puts the shape under test inside such a group.  Each measurement must
--- report "not a fixed length": the first because its repetition count is a
--- range, the other two instead of overflowing.  Only the first pattern can
--- match real rows.
+-- 고정된 행 수를 위해 그룹 본문을 측정하기.  SUFFIX 병합은 시퀀스의 나머지가
+-- 뒤따르는 그룹의 본문을 측정하므로, 아래 각 패턴은 검사 대상 모양을 그런 그룹
+-- 안에 넣는다.  각 측정은 "not a fixed length"를 보고해야 한다: 첫 번째는 반복
+-- 횟수가 범위이기 때문이고, 나머지 둘은 오버플로하기 때문이다.  실제 행에
+-- 매치할 수 있는 것은 첫 번째 패턴뿐이다.
 
--- A nested group whose repetition count is a range has no fixed length
+-- 반복 횟수가 범위인 중첩 그룹은 고정 길이를 갖지 않는다
 SELECT id, val, COUNT(*) OVER w AS cnt
 FROM rpr_plan
 WINDOW w AS (
@@ -5512,7 +5494,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30, C AS val > 0, D AS val > 0
 );
 
--- A fixed repetition whose body length times its count reaches the ceiling
+-- 본문 길이 곱하기 횟수가 상한에 도달하는 고정 반복
 SELECT id, val, COUNT(*) OVER w AS cnt
 FROM rpr_plan
 WINDOW w AS (
@@ -5523,7 +5505,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30, C AS val > 0, D AS val > 0
 );
 
--- A body whose members sum past the ceiling
+-- 구성원들의 합이 상한을 넘는 본문
 SELECT id, val, COUNT(*) OVER w AS cnt
 FROM rpr_plan
 WINDOW w AS (
@@ -5534,10 +5516,10 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 30, C AS val > 0
 );
 
--- ALT Both Branches Absorbable: A+ C | B+
--- A+ C never completes (C absent) so its A+ run keeps expanding and dominates;
--- a finalized B+ match on the other branch
--- (id=1, id=6) must survive absorption
+-- 두 분기 모두 흡수 가능한 ALT: A+ C | B+
+-- A+ C는 (C가 없으므로) 결코 완료되지 않아 그 A+ 실행은 계속 확장되며
+-- 지배적이다; 다른 분기의 확정된 B+ 매치
+-- (id=1, id=6)는 흡수에서 살아남아야 한다
 
 WITH test_absorbable_branches AS (
     SELECT * FROM (VALUES
@@ -5568,12 +5550,12 @@ WINDOW w AS (
 );
 
 -- ============================================================
--- Edge Case Tests
+-- 에지 케이스 테스트
 -- ============================================================
--- Tests boundary conditions and complex scenarios
+-- 경계 조건과 복합적인 시나리오를 테스트한다
 
--- Empty Match Prevention
--- Pattern that could match empty: A*
+-- 빈 매치 방지
+-- 빈 매치가 가능할 수 있는 패턴: A*
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5581,11 +5563,11 @@ WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A*)
-    DEFINE A AS val > 1000  -- Never matches
+    DEFINE A AS val > 1000  -- 결코 매치되지 않음
 );
 
--- All Rows Match
--- Pattern where every row matches
+-- 모든 행 매치
+-- 모든 행이 매치되는 패턴
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5593,11 +5575,11 @@ WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
-    DEFINE A AS val >= 0  -- Always true
+    DEFINE A AS val >= 0  -- 항상 참
 );
 
--- Large Quantifiers
--- Pattern: A{100} (large exact quantifier)
+-- 큰 수량자
+-- 패턴: A{100} (큰 정확한 수량자)
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5608,7 +5590,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Pattern: A{10,20} (large range quantifier)
+-- 패턴: A{10,20} (큰 범위 수량자)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
 WINDOW w AS (
@@ -5618,8 +5600,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Complex Multi-Level Nesting
--- Pattern: (((A B) | C)+ D)+
+-- 복합 다단계 중첩
+-- 패턴: (((A B) | C)+ D)+
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5631,8 +5613,8 @@ WINDOW w AS (
            C AS val > 40 AND val <= 60, D AS val > 60
 );
 
--- Long Alternation Chain
--- Pattern: A | B | C | D | E (5-way ALT)
+-- 긴 교대 연쇄
+-- 패턴: A | B | C | D | E (5 방향 ALT)
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5644,8 +5626,8 @@ WINDOW w AS (
            D AS val = 70, E AS val = 90
 );
 
--- Long Sequence
--- Pattern: A B C D E F G H (8-element SEQ)
+-- 긴 시퀀스
+-- 패턴: A B C D E F G H (8 개 요소 SEQ)
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5658,8 +5640,8 @@ WINDOW w AS (
            G AS val >= 70, H AS val >= 80
 );
 
--- Interleaved Quantifiers
--- Pattern: A{2} B+ C{3,5} D* E{1,}
+-- 뒤섞인 수량자
+-- 패턴: A{2} B+ C{3,5} D* E{1,}
 
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_plan
@@ -5672,14 +5654,14 @@ WINDOW w AS (
 );
 
 -- ============================================================
--- Optimization Fallback Tests
+-- 최적화 폴백 테스트
 -- ============================================================
--- Tests for optimization edge cases and fallback behavior
+-- 최적화의 경계 사례와 폴백 동작을 테스트한다
 
 CREATE TABLE rpr_fallback (id INT, val INT);
 INSERT INTO rpr_fallback VALUES (1, 10), (2, 20);
 
--- Min quantifier overflow causes optimization fallback (min == max case)
+-- 최솟값 수량자 오버플로가 최적화 폴백을 일으킨다 (min == max인 경우)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5689,7 +5671,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Max-only quantifier overflow causes optimization fallback
+-- 최댓값만의 수량자 오버플로가 최적화 폴백을 일으킨다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5699,8 +5681,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Max quantifier exceeds valid range
--- (2147483647 = INT_MAX, limit is 2147483646)
+-- 최댓값 수량자가 유효 범위를 넘는다
+-- (2147483647 = INT_MAX, 한계값은 2147483646)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5710,7 +5692,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Nested unbounded with large min causes overflow fallback
+-- 큰 최솟값을 가진 중첩 무한이 오버플로 폴백을 일으킨다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5720,7 +5702,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Prefix mismatch causes optimization fallback
+-- prefix 불일치가 최적화 폴백을 일으킨다
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5730,10 +5712,10 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5, C AS val > 10, D AS val > 15
 );
 
--- Consecutive VAR merge whose min sum is exactly INF causes fallback.
+-- 최솟값 합이 정확히 INF가 되는 연속 VAR 병합은 폴백을 일으킨다.
 -- 1073741824 + 1073741823 = 2147483647 = INT32_MAX = RPR_QUANTITY_INF.
--- Merging would yield a VAR with min == INF, so the merge must fall back and
--- leave the two VARs unmerged (mirrors the multiply path's >= INF guard).
+-- 병합하면 min == INF인 VAR가 생길 것이므로, 병합은 폴백해야 하고 두 VAR는
+-- 병합되지 않은 채로 남아야 한다 (곱셈 경로의 >= INF 가드를 반영한다).
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5743,9 +5725,8 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- One more than that sum does not fit in int32.  The fallback looks the
--- same as the case above; this one reaches the overflow check instead of the
--- >= INF comparison.
+-- 그 합보다 1 큰 값은 int32 에 들어가지 않는다.  폴백은 위 사례와 같아
+-- 보이지만, 이번에는 >= INF 비교가 아니라 오버플로 검사에 걸린다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5755,7 +5736,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- VAR merge falls back when the max sum lands exactly on INF.
+-- 최댓값 합이 정확히 INF에 닿으면 VAR 병합은 폴백한다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5764,7 +5745,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741823} A{1,1073741824})
     DEFINE A AS val > 0
 );
--- One below that sum is the largest max the merge may keep.
+-- 그 합보다 1 작은 값이 병합이 유지할 수 있는 가장 큰 최댓값이다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5773,7 +5754,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741822} A{1,1073741824})
     DEFINE A AS val > 0
 );
--- One above that does not fit in int32; the overflow check rejects it.
+-- 그보다 1 큰 값은 int32 에 들어가지 않는다; 오버플로 검사가 거부한다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5782,7 +5763,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741824} A{1,1073741824})
     DEFINE A AS val > 0
 );
--- An operand that is already unbounded still merges.
+-- 이미 무한인 피연산자는 그래도 병합된다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5791,7 +5772,7 @@ WINDOW w AS (
     PATTERN (A{1,1073741823} A{1,})
     DEFINE A AS val > 0
 );
--- Consecutive GROUP merge whose min sum is exactly INF causes fallback.
+-- 최솟값 합이 정확히 INF가 되는 연속 GROUP 병합은 폴백을 일으킨다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5801,9 +5782,9 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5
 );
 
--- Consecutive GROUP merge whose max sum is exactly INF causes fallback,
--- where one less merges.  Without the guard the merged max would alias INF and
--- a bounded pattern would become unbounded.
+-- 최댓값 합이 정확히 INF가 되는 연속 GROUP 병합은 폴백을 일으키며, 이보다 하나
+-- 적은 값은 병합된다.  가드가 없다면 병합된 최댓값은 INF와 같아져 유한했던
+-- 패턴이 무한이 되어 버린다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5821,8 +5802,8 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5
 );
 
--- The prefix merge adds one iteration, so it declines a min already at
--- INF - 1 and a max already at INF - 1; one less than either merges.
+-- prefix 병합은 반복 1 회를 더하므로, 최솟값이 이미 INF - 1 이거나 최댓값이
+-- 이미 INF - 1 이면 거부한다; 둘 중 하나보다 1 작으면 병합된다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5856,7 +5837,7 @@ WINDOW w AS (
     DEFINE A AS val > 0, B AS val > 5
 );
 
--- The suffix merge has the same boundary as the prefix merge.
+-- suffix 병합도 prefix 병합과 같은 경계를 갖는다.
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_fallback
 WINDOW w AS (
@@ -5877,9 +5858,9 @@ WINDOW w AS (
 DROP TABLE rpr_fallback;
 
 -- ============================================================
--- Planner Integration Tests
+-- 플래너 통합 테스트
 -- ============================================================
--- Tests full planning pipeline and WindowAgg plan node creation
+-- 전체 계획 파이프라인과 WindowAgg 플랜 노드 생성을 테스트한다
 
 CREATE TABLE rpr_planner (id INT, category VARCHAR(10), val INT);
 INSERT INTO rpr_planner VALUES
@@ -5887,7 +5868,7 @@ INSERT INTO rpr_planner VALUES
     (4, 'B', 40), (5, 'B', 50), (6, 'B', 60),
     (7, 'C', 70), (8, 'C', 80), (9, 'C', 90);
 
--- Multiple Window Functions in Same Query
+-- 같은 쿼리 안의 여러 윈도우 함수
 SELECT id, category, val,
        COUNT(*) OVER w1 as cnt1,
        COUNT(*) OVER w2 as cnt2
@@ -5906,7 +5887,7 @@ w2 AS (
     DEFINE B AS val >= 40
 );
 
--- Window Function with PARTITION BY
+-- PARTITION BY를 가진 윈도우 함수
 
 SELECT id, category, val,
        COUNT(*) OVER w as cnt
@@ -5919,7 +5900,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Window Function with Complex ORDER BY
+-- 복합 ORDER BY를 가진 윈도우 함수
 
 SELECT id, category, val,
        COUNT(*) OVER w as cnt
@@ -5931,7 +5912,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Named Window Reference
+-- 이름 붙은 윈도우 참조
 
 SELECT id, category, val,
        COUNT(*) OVER w as cnt
@@ -5943,7 +5924,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Inline Window Definition
+-- 인라인 윈도우 정의
 
 SELECT id, category, val,
        COUNT(*) OVER (
@@ -5955,11 +5936,11 @@ SELECT id, category, val,
 FROM rpr_planner;
 
 -- ============================================================
--- Subquery and CTE Tests
+-- 서브쿼리와 CTE 테스트
 -- ============================================================
--- Tests RPR with subqueries and CTEs
+-- 서브쿼리 및 CTE와 함께 쓰는 RPR을 테스트한다
 
--- RPR in Subquery (FROM clause)
+-- 서브쿼리 안의 RPR (FROM절)
 
 SELECT * FROM (
     SELECT id, category, val,
@@ -5974,7 +5955,7 @@ SELECT * FROM (
 ) sub
 WHERE cnt > 5;
 
--- RPR with Subquery in WHERE
+-- WHERE절의 서브쿼리를 가진 RPR
 
 SELECT id, category, val,
        COUNT(*) OVER w as cnt
@@ -5987,7 +5968,7 @@ WINDOW w AS (
     DEFINE A AS val > 50
 );
 
--- CTE with RPR
+-- RPR을 가진 CTE
 
 WITH rpr_cte AS (
     SELECT id, category, val,
@@ -6002,7 +5983,7 @@ WITH rpr_cte AS (
 )
 SELECT * FROM rpr_cte WHERE cnt > 5 ORDER BY id;
 
--- Multiple CTE References
+-- 여러 번 참조되는 CTE
 
 WITH rpr_cte AS (
     SELECT id, category, val,
@@ -6020,7 +6001,7 @@ FROM rpr_cte c1
 JOIN rpr_cte c2 ON c1.id = c2.id
 ORDER BY c1.id;
 
--- Nested CTEs
+-- 중첩된 CTE
 
 WITH cte1 AS (
     SELECT id, category, val FROM rpr_planner WHERE val > 30
@@ -6039,9 +6020,9 @@ cte2 AS (
 SELECT * FROM cte2 ORDER BY id;
 
 -- ============================================================
--- JOIN Tests
+-- JOIN 테스트
 -- ============================================================
--- Tests RPR with JOINs and multiple table references
+-- JOIN 및 여러 테이블 참조와 함께 쓰는 RPR을 테스트한다
 
 CREATE TABLE rpr_join1 (id INT, val1 INT);
 CREATE TABLE rpr_join2 (id INT, val2 INT);
@@ -6049,7 +6030,7 @@ CREATE TABLE rpr_join2 (id INT, val2 INT);
 INSERT INTO rpr_join1 VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50);
 INSERT INTO rpr_join2 VALUES (1, 100), (2, 200), (3, 300), (4, 400), (5, 500);
 
--- RPR After INNER JOIN
+-- INNER JOIN 뒤의 RPR
 
 SELECT t1.id, t1.val1, t2.val2,
        COUNT(*) OVER w as cnt
@@ -6062,7 +6043,7 @@ WINDOW w AS (
     DEFINE A AS val1 + val2 > 100
 );
 
--- RPR After LEFT JOIN
+-- LEFT JOIN 뒤의 RPR
 
 SELECT t1.id, t1.val1, t2.val2,
        COUNT(*) OVER w as cnt
@@ -6075,7 +6056,7 @@ WINDOW w AS (
     DEFINE A AS val1 > 0
 );
 
--- RPR with Multiple Tables in DEFINE
+-- DEFINE 안에서 여러 테이블을 쓰는 RPR
 
 SELECT t1.id, t1.val1, t2.val2,
        COUNT(*) OVER w as cnt
@@ -6089,7 +6070,7 @@ WINDOW w AS (
            B AS val2 > 200
 );
 
--- RPR After Cross Join
+-- CROSS JOIN 뒤의 RPR
 
 SELECT t1.id as id1, t2.id as id2, t1.val1, t2.val2,
        COUNT(*) OVER w as cnt
@@ -6103,7 +6084,7 @@ WINDOW w AS (
     DEFINE A AS val1 + val2 > 0
 );
 
--- Self-Join with RPR
+-- RPR을 쓰는 셀프 조인
 
 SELECT id, val1, val1_next,
        COUNT(*) OVER w as cnt
@@ -6119,8 +6100,8 @@ WINDOW w AS (
 
 DROP TABLE rpr_join1, rpr_join2;
 
--- A mismatched-type USING merge column used to let the other side's
--- pulled-up constant fold into a navigation argument at plan time.
+-- 타입이 일치하지 않는 USING 병합 열은 예전에는 상대편의 풀업된 상수가 계획
+-- 시점에 내비게이션 인자로 접혀 들어가게 만들곤 했다.
 CREATE TABLE rpr_join4 (k bigint);
 INSERT INTO rpr_join4 VALUES (10);
 
@@ -6132,8 +6113,7 @@ WINDOW w AS (
     DEFINE A AS PREV(k / 0) > 0
 );
 
--- Same, but RIGHT JOIN with the constant subquery on its preserved
--- (right) side.
+-- 같은 상황이지만, 상수 서브쿼리를 보존된(오른쪽) 쪽에 둔 RIGHT JOIN이다.
 SELECT count(*) OVER w AS cnt
 FROM rpr_join4 RIGHT JOIN (SELECT 10 AS k) a USING (k)
 WINDOW w AS (
@@ -6144,8 +6124,8 @@ WINDOW w AS (
 
 DROP TABLE rpr_join4;
 
--- Same shape with real per-row data, confirming navigation still sees
--- each row's own value.
+-- 실제 행마다 다른 데이터를 가진 같은 모양으로, 내비게이션이 여전히 각 행의
+-- 고유한 값을 보는지 확인한다.
 CREATE TABLE rpr_join5 (k int, v int);
 INSERT INTO rpr_join5 VALUES (1, 10), (2, 0), (3, 5);
 CREATE TABLE rpr_join6 (k bigint, w int);
@@ -6164,12 +6144,12 @@ ORDER BY k;
 
 DROP TABLE rpr_join5, rpr_join6;
 
--- A DEFINE clause reading a USING column whose two sides differ in typmod.
--- The merged column stays a join alias Var, pullup leaves its joinaliasvars
--- entry a non-trivial expression, and the outer join's nullingrels wrap that
--- in a PlaceHolderVar.  The target list copy and the DEFINE copy are wrapped
--- by separate calls, so their phids differ and equal() does not match them --
--- the window input has to carry the DEFINE clause's own PlaceHolderVar.
+-- 양쪽 typmod가 다른 USING 열을 읽는 DEFINE 절.  병합된 열은 조인 별칭 Var로
+-- 남고, 풀업은 그 joinaliasvars 항목을 자명하지 않은 표현식으로 남기며, 외부
+-- 조인의 nullingrels는 그것을 PlaceHolderVar 로 감싼다.  타깃 리스트 사본과
+-- DEFINE 사본은 서로 다른 호출로 감싸지므로 phid가 다르고 equal()은 그것들을
+-- 같다고 매칭하지 않는다 -- 윈도우 입력은 DEFINE 절 자신의 PlaceHolderVar 를
+-- 갖고 있어야 한다.
 CREATE TABLE rpr_phv_src (n int);
 CREATE TABLE rpr_phv_dim (c varchar(10), tdate date);
 CREATE TABLE rpr_phv_out (k varchar);
@@ -6187,10 +6167,10 @@ WINDOW w AS (ORDER BY j.tdate
              INITIAL PATTERN (p q+)
              DEFINE p AS TRUE, q AS c > '');
 
--- The same with one more join level above it.  Reaching the window input is
--- not enough on its own: an intermediate join emits only what something above
--- has declared a need for, so what a DEFINE clause reads is marked needed at
--- relation 0 the way the target list's own columns are.
+-- 그 위에 조인 단계를 하나 더 올린 같은 상황.  윈도우 입력에 도달하는
+-- 것만으로는 충분하지 않다: 중간 조인은 그 위의 무언가가 필요하다고 선언한
+-- 것만 출력하므로, DEFINE 절이 읽는 것도 타깃 리스트 자신의 열들처럼 relation
+-- 0 에서 필요하다고 표시되어야 한다.
 SELECT j.c, j.tdate, count(*) OVER w AS cnt
 FROM rpr_phv_out o1
      LEFT JOIN rpr_phv_out o2 ON o1.k = o2.k
@@ -6202,9 +6182,8 @@ WINDOW w AS (ORDER BY j.tdate
              INITIAL PATTERN (p q+)
              DEFINE p AS TRUE, q AS c > '');
 
--- Control: with both sides of USING at the same typmod the merged column is a
--- plain Var of one side, no PlaceHolderVar is built, and neither shape above
--- needs any of this.
+-- 대조군: USING의 양쪽이 같은 typmod이면 병합된 열은 한쪽의 평범한 Var가 되고,
+-- PlaceHolderVar 는 만들어지지 않으며, 위의 두 모양 어느 것도 필요하지 않다.
 SELECT j.c, j.tdate, count(*) OVER w AS cnt
 FROM rpr_phv_out o1
      LEFT JOIN rpr_phv_out o2 ON o1.k = o2.k
@@ -6219,11 +6198,11 @@ WINDOW w AS (ORDER BY j.tdate
 
 DROP TABLE rpr_phv_src, rpr_phv_dim, rpr_phv_out;
 
--- A WINDOW clause no window function names is never executed, so its DEFINE
--- clause is emptied before build_base_rel_tlists() could mark what it reads
--- as needed at relation 0, which would keep the outer join from being
--- removed.  The three plans below are the assertion: no WINDOW clause, a
--- plain one and a row pattern one all lose the join alike.
+-- 윈도우 함수를 이름으로 갖지 않는 WINDOW 절은 결코 실행되지 않으므로,
+-- build_base_rel_tlists()가 그것이 읽는 것을 relation 0 에서 필요하다고
+-- 표시하기 전에 그 DEFINE 절은 비워진다.  그렇지 않으면 외부 조인이 제거되지
+-- 못하게 막을 것이다.  아래 세 계획이 바로 그 단언이다: WINDOW절 없음, 평범한
+-- 절 하나, 행 패턴 절 하나 모두 똑같이 조인을 잃는다.
 CREATE TABLE rpr_jr (id int, v int);
 CREATE TABLE rpr_jr_u (id int PRIMARY KEY, uval int);
 INSERT INTO rpr_jr SELECT g, g * 10 FROM generate_series(1, 5) g;
@@ -6245,14 +6224,14 @@ WINDOW w AS (ORDER BY t.id
 DROP TABLE rpr_jr, rpr_jr_u;
 
 -- ============================================================
--- Complex Expression Tests
+-- 복합 표현식 테스트
 -- ============================================================
--- Tests complex target list expressions
+-- 복합적인 타깃 리스트 표현식을 테스트한다
 
 CREATE TABLE rpr_target (id INT, val INT);
 INSERT INTO rpr_target VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50);
 
--- Expressions in Target List
+-- 타깃 리스트 안의 표현식
 
 SELECT id,
        val * 2 as doubled,
@@ -6266,7 +6245,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- CASE Expression in Target List
+-- 타깃 리스트 안의 CASE 표현식
 
 SELECT id, val,
        CASE
@@ -6283,7 +6262,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Subquery in Target List
+-- 타깃 리스트 안의 서브쿼리
 
 SELECT id, val,
        (SELECT MAX(val) FROM rpr_target) as max_val,
@@ -6296,7 +6275,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Function Calls in Target List
+-- 타깃 리스트 안의 함수 호출
 
 SELECT id, val,
        COALESCE(val, 0) as coalesced,
@@ -6310,7 +6289,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Column Aliases and References
+-- 열 별칭과 참조
 
 SELECT id as row_id,
        val as value,
@@ -6326,9 +6305,9 @@ WINDOW w AS (
 DROP TABLE rpr_target;
 
 -- ============================================================
--- Set Operations Tests
+-- 집합 연산 테스트
 -- ============================================================
--- Tests RPR with UNION, INTERSECT, EXCEPT
+-- UNION, INTERSECT, EXCEPT와 함께 쓰는 RPR을 테스트한다
 
 CREATE TABLE rpr_set1 (id INT, val INT);
 CREATE TABLE rpr_set2 (id INT, val INT);
@@ -6336,7 +6315,7 @@ CREATE TABLE rpr_set2 (id INT, val INT);
 INSERT INTO rpr_set1 VALUES (1, 10), (2, 20), (3, 30);
 INSERT INTO rpr_set2 VALUES (2, 20), (3, 30), (4, 40);
 
--- UNION with RPR
+-- RPR을 쓰는 UNION
 
 (SELECT id, val, COUNT(*) OVER w as cnt
  FROM rpr_set1
@@ -6357,7 +6336,7 @@ UNION
  ))
 ORDER BY id;
 
--- UNION ALL with RPR
+-- RPR을 쓰는 UNION ALL
 
 (SELECT id, val, COUNT(*) OVER w as cnt
  FROM rpr_set1
@@ -6378,7 +6357,7 @@ UNION ALL
  ))
 ORDER BY id, val;
 
--- INTERSECT with RPR
+-- RPR을 쓰는 INTERSECT
 
 (SELECT id, val, COUNT(*) OVER w as cnt
  FROM rpr_set1
@@ -6399,7 +6378,7 @@ INTERSECT
  ))
 ORDER BY id;
 
--- EXCEPT with RPR
+-- RPR을 쓰는 EXCEPT
 
 (SELECT id, val, COUNT(*) OVER w as cnt
  FROM rpr_set1
@@ -6423,16 +6402,16 @@ ORDER BY id;
 DROP TABLE rpr_set1, rpr_set2;
 
 -- ============================================================
--- Sorting and Grouping Tests
+-- 정렬과 그룹화 테스트
 -- ============================================================
--- Tests RPR interaction with sorting and grouping
+-- 정렬 및 그룹화와의 RPR 상호작용을 테스트한다
 
 CREATE TABLE rpr_sort (id INT, category VARCHAR(10), val INT);
 INSERT INTO rpr_sort VALUES
     (1, 'A', 30), (2, 'B', 20), (3, 'A', 10),
     (4, 'B', 40), (5, 'A', 50), (6, 'B', 60);
 
--- RPR with GROUP BY (aggregate in DEFINE -> ERROR before GROUP BY interaction)
+-- GROUP BY를 쓰는 RPR (DEFINE 안의 집계 -> GROUP BY 상호작용 전에 ERROR)
 
 SELECT category,
        COUNT(*) as group_cnt,
@@ -6447,7 +6426,7 @@ WINDOW w AS (
     DEFINE A AS COUNT(*) > 0
 );
 
--- RPR with HAVING (same aggregate-in-DEFINE error)
+-- HAVING을 쓰는 RPR (같은 DEFINE-안-집계 오류)
 
 SELECT category,
        COUNT(*) as group_cnt,
@@ -6462,7 +6441,7 @@ WINDOW w AS (
     DEFINE A AS COUNT(*) > 0
 );
 
--- RPR with DISTINCT
+-- DISTINCT를 쓰는 RPR
 
 SELECT DISTINCT category,
        COUNT(*) OVER w as cnt
@@ -6476,7 +6455,7 @@ WINDOW w AS (
 )
 ORDER BY category;
 
--- RPR with ORDER BY (different from window ORDER BY)
+-- ORDER BY를 쓰는 RPR (윈도우 ORDER BY와는 다름)
 
 SELECT id, category, val,
        COUNT(*) OVER w as cnt
@@ -6489,7 +6468,7 @@ WINDOW w AS (
 )
 ORDER BY val DESC;
 
--- RPR with LIMIT and OFFSET
+-- LIMIT과 OFFSET을 쓰는 RPR
 
 SELECT id, category, val,
        COUNT(*) OVER w as cnt
@@ -6504,18 +6483,18 @@ ORDER BY id
 LIMIT 3 OFFSET 1;
 
 -- ------------------------------------------------------------
--- RPR over grouped input
+-- 그룹화된 입력에 대한 RPR
 -- ------------------------------------------------------------
--- A DEFINE clause is the only part of a WindowClause that holds an
--- expression tree of its own, so parseCheckAggregates() has to substitute
--- its grouped columns separately from the target list's.  These pin the
--- grouping shapes that reach that substitution, and what each returns once
--- a grouping set nulls a column the pattern reads.
+-- DEFINE 절은 WindowClause 중에서 유일하게 자신만의 표현식 트리를 갖는
+-- 부분이므로, parseCheckAggregates()는 타깃 리스트의 그룹화된 열과는 별도로 그
+-- 절의 그룹화된 열을 대입해야 한다.  아래 테스트들은 그 대입에 도달하는 그룹화
+-- 모양들과, 그룹화 집합이 패턴이 읽는 열을 null로 만들 때 각각 무엇을
+-- 반환하는지를 고정한다.
 
 CREATE TABLE rpr_grp (id int PRIMARY KEY, category text, val int);
 INSERT INTO rpr_grp VALUES (1, 'A', 10), (2, 'B', 20);
 
--- Grouped input works; the pattern matches over the grouped rows
+-- 그룹화된 입력도 동작한다; 패턴은 그룹화된 행에 대해 매치된다
 SELECT category, sum(val) AS total, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY category
@@ -6526,7 +6505,7 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category;
 
--- Navigation over a grouping column
+-- 그룹화 열에 대한 내비게이션
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY category
@@ -6537,8 +6516,8 @@ WINDOW w AS (
     DEFINE B AS category > PREV(category))
 ORDER BY category;
 
--- GROUP BY () builds no RTE_GROUP, so there is no grouped column for a
--- DEFINE clause to name and nothing that could diverge
+-- GROUP BY ()는 RTE_GROUP 을 만들지 않으므로, DEFINE 절이 이름으로 쓸 그룹화된
+-- 열도 없고 달라질 것도 없다
 SELECT count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ()
@@ -6547,8 +6526,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS true);
 
--- A single grouping set collapses to a plain GROUP BY and cannot null the
--- column
+-- 단일 그룹화 집합은 평범한 GROUP BY로 축소되며 그 열을 null로 만들 수 없다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY GROUPING SETS ((category))
@@ -6559,7 +6537,7 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category;
 
--- Duplicated sets leave the column in every set, so it is never nulled
+-- 중복된 집합은 그 열을 모든 집합에 남기므로 결코 null이 되지 않는다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY GROUPING SETS ((category), (category))
@@ -6570,7 +6548,7 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category;
 
--- ROLLUP with a DEFINE clause that holds no column reference at all
+-- 열 참조를 전혀 담지 않은 DEFINE 절을 가진 ROLLUP
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6581,8 +6559,8 @@ WINDOW w AS (
     DEFINE A AS true)
 ORDER BY category NULLS LAST;
 
--- The DEFINE clause names only a column that every grouping set contains,
--- so gset_common covers it and no varnullingrels are attached
+-- DEFINE 절은 모든 그룹화 집합이 포함하는 열만 이름으로 쓰므로, gset_common 이
+-- 그것을 포괄하고 varnullingrels는 붙지 않는다
 SELECT category, val, count(*) OVER w AS cnt
 FROM rpr_sort
 WHERE val < 30
@@ -6594,8 +6572,8 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category, val NULLS LAST;
 
--- The window's own PARTITION BY and ORDER BY reference the target list, so
--- a nullable grouping column reaches them unharmed
+-- 윈도우 자신의 PARTITION BY와 ORDER BY는 타깃 리스트를 참조하므로, null이 될
+-- 수 있는 그룹화 열도 손상 없이 그곳에 도달한다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6607,7 +6585,7 @@ WINDOW w AS (
     DEFINE A AS true)
 ORDER BY category NULLS LAST;
 
--- An aggregate query without GROUP BY produces one grouped row
+-- GROUP BY 없는 집계 쿼리는 그룹화된 행 하나를 만든다
 SELECT count(*) OVER w AS cnt
 FROM rpr_sort
 HAVING count(*) > 0
@@ -6623,7 +6601,7 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS true);
 
--- GROUP BY together with HAVING
+-- HAVING과 함께 쓰는 GROUP BY
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY category
@@ -6635,8 +6613,8 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category;
 
--- A grouping key that is not a plain Var does not stand in the way of a
--- DEFINE clause that names a plain-Var grouping key
+-- 평범한 Var가 아닌 그룹화 키는, 평범한 Var 그룹화 키를 이름으로 쓰는 DEFINE
+-- 절을 방해하지 않는다
 SELECT category, val + 1 AS bumped, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY val + 1, category
@@ -6647,7 +6625,7 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category;
 
--- Grouping by the primary key exposes the dependent columns
+-- 기본 키로 그룹화하면 종속된 열들이 드러난다
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY id
@@ -6658,9 +6636,9 @@ WINDOW w AS (
     DEFINE A AS val > 0)
 ORDER BY id;
 
--- An aggregate is available to the window's ORDER BY, and it is the ordering
--- the pattern runs over: sum(val) descending puts B first, so the greedy
--- match starts there.  Ordering by category instead would start at A.
+-- 집계는 윈도우의 ORDER BY에서 쓸 수 있으며, 그것이 바로 패턴이 매치를
+-- 진행하는 순서다: sum(val) 내림차순은 B를 먼저 두므로 탐욕적 매치는 거기서
+-- 시작한다.  대신 category로 정렬했다면 A에서 시작했을 것이다.
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY category
@@ -6671,7 +6649,7 @@ WINDOW w AS (
     DEFINE A AS category IS NOT NULL)
 ORDER BY category;
 
--- Grouping in a subquery leaves the outer RPR window alone
+-- 서브쿼리 안의 그룹화는 바깥의 RPR 윈도우를 건드리지 않는다
 SELECT category, total, count(*) OVER w AS cnt
 FROM (SELECT category, sum(val) AS total FROM rpr_sort GROUP BY category) s
 WINDOW w AS (
@@ -6681,7 +6659,7 @@ WINDOW w AS (
     DEFINE B AS total > PREV(total))
 ORDER BY category;
 
--- A view over grouped input round-trips
+-- 그룹화된 입력에 대한 뷰는 왕복한다
 CREATE VIEW rpr_grp_v AS
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
@@ -6696,9 +6674,8 @@ SELECT pg_get_viewdef('rpr_grp_v'::regclass, true);
 SELECT * FROM rpr_grp_v ORDER BY category;
 DROP VIEW rpr_grp_v;
 
--- ROLLUP, with a DEFINE clause naming a column it can null.  The grouping
--- step's NULL reaches the predicate, which is then false, so the total row
--- is unmatched.
+-- ROLLUP이고, null로 만들 수 있는 열을 이름으로 쓰는 DEFINE 절이다.  그룹화
+-- 단계의 NULL이 조건절에 도달하여 false가 되므로, total 행은 매치되지 않는다.
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6707,8 +6684,8 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS category IS NOT NULL);
 
--- A match that spans several grouped rows, so the reduced frame is not just
--- the current row: A+ is greedy and stops at the row ROLLUP nulled.
+-- 여러 그룹화된 행에 걸친 매치이므로, 축소된 프레임은 현재 행 하나가 아니다:
+-- A+는 탐욕적이며 ROLLUP이 null로 만든 행에서 멈춘다.
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6719,7 +6696,7 @@ WINDOW w AS (
     DEFINE A AS category >= 'A')
 ORDER BY category NULLS LAST;
 
--- The same for CUBE
+-- CUBE에 대해서도 마찬가지다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY CUBE(category)
@@ -6728,7 +6705,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS category IS NOT NULL);
 
--- The same for an explicit set list containing the empty set
+-- 빈 집합을 포함하는 명시적 집합 목록에 대해서도 마찬가지다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY GROUPING SETS ((category), ())
@@ -6737,7 +6714,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS category IS NOT NULL);
 
--- The same when a second set simply omits the column
+-- 두 번째 집합이 단순히 그 열을 생략할 때도 마찬가지다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY GROUPING SETS ((category), (val))
@@ -6746,8 +6723,8 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS category IS NOT NULL);
 
--- Naming val, which ROLLUP can null, works the same way as naming category
--- above: the rows where it is nulled do not match
+-- ROLLUP이 null로 만들 수 있는 val을 이름으로 쓰는 경우도 위의 category와 같은
+-- 방식으로 동작한다: null이 된 행은 매치되지 않는다
 SELECT category, val, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY category, ROLLUP(val)
@@ -6756,7 +6733,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS val > 0);
 
--- A navigation in the DEFINE clause reads the grouped column the same way
+-- DEFINE 절 안의 내비게이션도 그룹화된 열을 같은 방식으로 읽는다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6766,7 +6743,7 @@ WINDOW w AS (
     PATTERN (A B*)
     DEFINE B AS PREV(category) IS NOT NULL);
 
--- The same for a compound navigation
+-- 복합 내비게이션에 대해서도 마찬가지다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6776,7 +6753,7 @@ WINDOW w AS (
     PATTERN (A B*)
     DEFINE B AS PREV(LAST(category)) IS NOT NULL);
 
--- The same one query level down
+-- 쿼리 수준을 한 단계 낮춰도 마찬가지다
 SELECT * FROM (
     SELECT category, count(*) OVER w AS cnt
     FROM rpr_sort
@@ -6786,9 +6763,9 @@ SELECT * FROM (
         PATTERN (A)
         DEFINE A AS category IS NOT NULL)) s;
 
--- And in a view definition.  get_query_def() expands the DEFINE clause's
--- GROUP Vars like the target list's, so the deparsed text names the column
--- rather than the grouping step and the view re-parses.
+-- 그리고 뷰 정의에서도.  get_query_def()는 DEFINE 절의 GROUP Var도 타깃
+-- 리스트와 마찬가지로 펼치므로, 디파스된 텍스트는 그룹화 단계가 아니라 열을
+-- 이름으로 쓰고, 뷰는 재파싱된다.
 CREATE VIEW rpr_grp_v2 AS
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_sort
@@ -6802,10 +6779,10 @@ SELECT pg_get_viewdef('rpr_grp_v2'::regclass, true);
 SELECT * FROM rpr_grp_v2 ORDER BY category NULLS LAST;
 DROP VIEW rpr_grp_v2;
 
--- A DEFINE clause may spell a GROUP BY expression.  The planner stops at an
--- expression the window's input target already computes whole rather than
--- asking for the columns underneath it on their own, which grouping does not
--- make available; the DEFINE copy then resolves against that same column.
+-- DEFINE 절은 GROUP BY 표현식을 그대로 표기할 수 있다.  플래너는 그 아래의
+-- 열들을 따로 요구하는 대신, 윈도우 입력 타깃이 이미 통째로 계산해 둔
+-- 표현식에서 멈춘다.  그룹화는 그 아래의 열을 이용할 수 있게 해주지 않기
+-- 때문이다; DEFINE 사본은 그다음 그 같은 열을 대상으로 풀린다.
 SELECT val + 1 AS bumped, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY val + 1
@@ -6816,11 +6793,10 @@ WINDOW w AS (
     DEFINE A AS val + 1 > 0)
 ORDER BY bumped;
 
--- A volatile expression that GROUP BY spells too is not rejected: the DEFINE
--- copy becomes a GROUP Var, and the pattern match reads the value the
--- grouping step computed, once per input row, not the expression.  The
--- sequence advancing by the number of input rows, not by the number of
--- DEFINE evaluations, shows that.
+-- GROUP BY도 그대로 표기하는 휘발성 표현식은 거부되지 않는다: DEFINE 사본은
+-- GROUP Var가 되고, 패턴 매치는 표현식이 아니라 그룹화 단계가 계산한 값을 입력
+-- 행마다 한 번씩 읽는다.  DEFINE 평가 횟수가 아니라 입력 행 수만큼 시퀀스가
+-- 진행된다는 사실이 그것을 보여준다.
 CREATE SEQUENCE rpr_grp_seq;
 SELECT val, count(*) OVER w AS cnt
 FROM rpr_grp
@@ -6835,7 +6811,7 @@ SELECT last_value = (SELECT count(*) FROM rpr_grp) AS once_per_row
 FROM rpr_grp_seq;
 DROP SEQUENCE rpr_grp_seq;
 
--- The same for a function call
+-- 함수 호출에 대해서도 마찬가지다
 SELECT upper(category) AS u, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY upper(category)
@@ -6846,7 +6822,7 @@ WINDOW w AS (
     DEFINE A AS upper(category) = 'A')
 ORDER BY u;
 
--- The same for a cast
+-- 캐스트에 대해서도 마찬가지다
 SELECT val::text AS t, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY val::text
@@ -6857,7 +6833,7 @@ WINDOW w AS (
     DEFINE A AS val::text > '0')
 ORDER BY t;
 
--- And through a navigation operation, whose argument is read the same way
+-- 그리고 인자를 같은 방식으로 읽는 내비게이션 연산을 거쳐서도 마찬가지다
 SELECT val + 1 AS bumped, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY val + 1
@@ -6868,8 +6844,8 @@ WINDOW w AS (
     DEFINE B AS PREV(val + 1) > 0)
 ORDER BY bumped;
 
--- The same under a grouping set, where the row the set nulls leaves the
--- predicate unknown and so unmatched.
+-- 그룹화 집합 아래에서도 마찬가지이며, 그 집합이 null로 만드는 행에서는
+-- 조건절이 알 수 없음(unknown)이 되어 매치되지 않는다.
 SELECT val + 1 AS bumped, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY ROLLUP(val + 1)
@@ -6878,12 +6854,11 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS val + 1 > 0);
 
--- A DEFINE clause may repeat an expression the window itself orders by, with
--- no grouping in sight.  Adding the bare Vars a DEFINE clause reads to the
--- window's input target is what makes this hold: the DEFINE copy of
--- ROW(val, 1) IS NOT NULL is broken into per field tests before the plan is
--- built, and the bare val the break leaves behind is added to the input on
--- its own, next to the whole ROW(val, 1) the window orders by.
+-- DEFINE 절은 그룹화 없이도 윈도우 자신이 정렬 기준으로 쓰는 표현식을 그대로
+-- 반복할 수 있다.  DEFINE 절이 읽는 맨 Var들을 윈도우 입력 타깃에 추가하는
+-- 것이 이를 가능하게 만든다: ROW(val, 1) IS NOT NULL의 DEFINE 사본은 계획을
+-- 세우기 전에 필드별 테스트로 쪼개지고, 그 분리가 남긴 맨 val은 윈도우가 정렬
+-- 기준으로 쓰는 ROW(val, 1) 전체 옆에 별도로 입력에 추가된다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_grp
 WINDOW w AS (
@@ -6893,8 +6868,8 @@ WINDOW w AS (
     DEFINE A AS ROW(val, 1) IS NOT NULL)
 ORDER BY id;
 
--- ERROR: the bare column is another matter; grouping by an expression does
--- not make the columns inside it available on their own
+-- ERROR: 맨 열은 다른 문제다; 표현식으로 그룹화한다고 해서 그 안의 열들을 따로
+-- 이용할 수 있게 되는 것은 아니다
 SELECT val + 1 AS bumped, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY val + 1
@@ -6903,7 +6878,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS val > 0);
 
--- ERROR: a column that was never grouped is still reported as one
+-- ERROR: 한 번도 그룹화되지 않은 열도 그룹화된 것처럼 보고된다
 SELECT category, count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY category
@@ -6912,8 +6887,8 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS val > 0);
 
--- An inline OVER (...) carries a window clause of its own, and the
--- substitution reaches it the same way
+-- 인라인 OVER (...)는 자신만의 윈도우 절을 가지며, 대입은 그곳에도 같은
+-- 방식으로 도달한다
 SELECT category,
        count(*) OVER (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                       PATTERN (A)
@@ -6921,8 +6896,8 @@ SELECT category,
 FROM rpr_sort
 GROUP BY ROLLUP(category);
 
--- The substitution visits every window clause, not just the first.  Here
--- the first window is a plain one and the row pattern is on the second.
+-- 대입은 첫 번째뿐 아니라 모든 윈도우 절을 방문한다.  여기서는 첫 윈도우가
+-- 평범한 것이고 행 패턴은 두 번째에 있다.
 SELECT category, count(*) OVER w1 AS plain, count(*) OVER w2 AS rpr
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6932,9 +6907,9 @@ WINDOW w1 AS (ORDER BY category),
     PATTERN (A)
     DEFINE A AS category IS NOT NULL);
 
--- ERROR: an unreferenced window is substituted like any other, so its
--- DEFINE clause still cannot read a column that is not grouped, even
--- though the planner later drops the window
+-- ERROR: 참조되지 않는 윈도우도 다른 것과 똑같이 대입되므로, 나중에 플래너가
+-- 그 윈도우를 버리더라도 그 DEFINE 절은 여전히 그룹화되지 않은 열을 읽을
+-- 수 없다
 SELECT category
 FROM rpr_sort
 GROUP BY ROLLUP(category)
@@ -6943,9 +6918,9 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS val > 0);
 
--- An inner join's USING column of matching types is just the left input's
--- column, not a join alias Var, so plain grouping matches the DEFINE clause's
--- reference to it directly and the pattern reads it unharmed.
+-- 타입이 일치하는 내부 조인의 USING 열은 조인 별칭 Var가 아니라 그냥 왼쪽
+-- 입력의 열이므로, 평범한 그룹화가 그것을 참조하는 DEFINE 절과 바로 매칭되고
+-- 패턴은 손상 없이 그것을 읽는다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_grp JOIN rpr_sort USING (id)
 GROUP BY id
@@ -6956,8 +6931,8 @@ WINDOW w AS (
     DEFINE A AS id > 0)
 ORDER BY id;
 
--- The same query through the join, with a grouping set that can null the
--- column the pattern reads
+-- 같은 쿼리를 조인을 거쳐서, 패턴이 읽는 열을 null로 만들 수 있는 그룹화
+-- 집합과 함께
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_grp JOIN rpr_sort USING (id)
 GROUP BY ROLLUP(id)
@@ -6968,11 +6943,11 @@ WINDOW w AS (
     DEFINE A AS id > 0)
 ORDER BY id;
 
--- A FULL JOIN's USING column is a merged column -- a COALESCE over the two
--- sides rather than either one -- so a DEFINE clause naming it holds a join
--- alias Var, and only flatten_join_alias_for_parser() turns that into
--- something the grouped target list can be matched against.  The inner joins
--- above reach the pattern without that step.
+-- FULL JOIN의 USING 열은 병합된 열이다 -- 양쪽 어느 하나가 아니라 둘에 대한
+-- COALESCE다 -- 그래서 그것을 이름으로 쓰는 DEFINE 절은 조인 별칭 Var를
+-- 가지며, flatten_join_alias_for_parser()만이 그것을 그룹화된 타깃 리스트와
+-- 매칭할 수 있는 것으로 바꾼다.  위의 내부 조인들은 그 단계 없이도
+-- 패턴에 도달한다.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_grp FULL JOIN rpr_sort USING (id)
 GROUP BY ROLLUP(id)
@@ -6983,8 +6958,8 @@ WINDOW w AS (
     DEFINE A AS id > 0)
 ORDER BY id NULLS LAST;
 
--- A grouping set list holding only the empty set builds no RTE_GROUP
--- either, just like GROUP BY ()
+-- 빈 집합만 담은 그룹화 집합 목록도 GROUP BY ()와 마찬가지로 RTE_GROUP 을
+-- 만들지 않는다
 SELECT count(*) OVER w AS cnt
 FROM rpr_grp
 GROUP BY GROUPING SETS (())
@@ -6993,9 +6968,9 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS true);
 
--- GROUP BY spelled as the merged column's COALESCE expansion, rather than the
--- join's own name, while DEFINE reads that same column: the two spellings
--- must compare equal despite the different tree shapes.
+-- 조인 자신의 이름이 아니라 병합된 열의 COALESCE 전개로 표기된 GROUP BY,
+-- 그리고 같은 열을 읽는 DEFINE: 트리 모양은 다르지만 두 표기는 같다고
+-- 비교되어야 한다.
 SELECT id + 1 AS b, count(*) OVER w AS cnt
 FROM rpr_grp FULL JOIN rpr_sort USING (id)
 GROUP BY COALESCE(rpr_grp.id, rpr_sort.id) + 1
@@ -7004,9 +6979,9 @@ WINDOW w AS (
     PATTERN (A) DEFINE A AS (id + 1) > 0)
 ORDER BY 1;
 
--- Same construct as a view: the DEFINE clause must deparse to the plain
--- join column, not the two-sided COALESCE GROUP BY computed, or the printed
--- text would not re-parse.
+-- 같은 구성을 뷰로: DEFINE 절은 그룹화가 계산한 양쪽짜리 COALESCE가 아니라
+-- 평범한 조인 열로 디파스되어야 한다.  그러지 않으면 출력된 텍스트가
+-- 재파싱되지 않는다.
 CREATE VIEW rpr_fjcoal_v AS
 SELECT COALESCE(rpr_grp.id, rpr_sort.id) + 1 AS idp1, count(*) OVER w AS cnt
 FROM rpr_grp FULL JOIN rpr_sort USING (id)
@@ -7020,7 +6995,7 @@ WINDOW w AS (
 SELECT pg_get_viewdef('rpr_fjcoal_v'::regclass, true);
 SELECT * FROM rpr_fjcoal_v ORDER BY 1;
 
--- The deparsed definition re-parses into an identical view.
+-- 디파스된 정의는 동일한 뷰로 재파싱된다.
 CREATE VIEW rpr_fjcoal_v2 AS
  SELECT COALESCE(rpr_grp.id, rpr_sort.id) + 1 AS idp1,
     count(*) OVER w AS cnt
@@ -7044,8 +7019,8 @@ DROP TABLE rpr_grp;
 
 DROP TABLE rpr_sort;
 
--- SQL function inlining: $1 in DEFINE must be substituted by
--- substitute_actual_parameters_in_from via query_tree_mutator.
+-- SQL 함수 인라인화: DEFINE 안의 $1 은 query_tree_mutator 를 거쳐
+-- substitute_actual_parameters_in_from 함수가 대입해야 한다.
 CREATE TABLE rpr_srf_t (v int);
 INSERT INTO rpr_srf_t SELECT generate_series(1, 5);
 
@@ -7069,12 +7044,11 @@ DROP FUNCTION rpr_srf_inline(int);
 
 DROP TABLE rpr_planner;
 
--- A DEFINE clause reading a compound GROUP BY expression.  After grouping
--- only the expression itself exists, so make_window_input_target() has to
--- take it whole and stop: asking for the Vars underneath would ask the
--- grouping step for columns it cannot produce.  "((a + b))" alone on the
--- Output lines, with no bare a or b anywhere above the HashAggregate, is the
--- assertion.
+-- 복합 GROUP BY 표현식을 읽는 DEFINE 절.  그룹화 후에는 그 표현식 자체만
+-- 존재하므로, make_window_input_target()은 그것을 통째로 받아 멈춰야 한다: 그
+-- 아래 Var를 요구하는 것은 그룹화 단계에 만들어 낼 수 없는 열을 요구하는 셈이
+-- 된다.  Output 줄에 맨 a도 맨 b도 HashAggregate 위 어디에도 없이
+-- "((a + b))"만 있는 것이 바로 그 단언이다.
 CREATE TABLE rpr_gexp (a int, b int);
 INSERT INTO rpr_gexp VALUES (1, 1), (2, 2), (3, 3), (4, 4);
 
@@ -7093,8 +7067,8 @@ WINDOW w AS (ORDER BY a + b
              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (X+) DEFINE X AS a + b > 2);
 
--- Reaching below the grouping expression is rejected, as it would be in any
--- other clause evaluated after grouping.
+-- 그룹화 표현식 아래로 내려가는 것은, 그룹화 후에 평가되는 다른 어떤 절에서도
+-- 그렇듯 거부된다.
 SELECT a + b AS ab, count(*) OVER w AS c
 FROM rpr_gexp
 GROUP BY a + b
@@ -7105,14 +7079,14 @@ WINDOW w AS (ORDER BY a + b
 DROP TABLE rpr_gexp;
 
 -- ============================================================
--- Stress Tests
+-- 스트레스 테스트
 -- ============================================================
--- Edge cases and stress scenarios
+-- 경계 사례와 스트레스 시나리오
 
 CREATE TABLE rpr_stress (id INT, val INT);
 INSERT INTO rpr_stress SELECT i, i * 10 FROM generate_series(1, 20) i;
 
--- Very Long Query with Many Windows
+-- 윈도우가 많은 매우 긴 쿼리
 SELECT id, val,
        COUNT(*) OVER w1 as cnt1,
        COUNT(*) OVER w2 as cnt2,
@@ -7137,7 +7111,7 @@ w3 AS (
     DEFINE C AS val > 100
 );
 
--- Deeply Nested Subqueries with RPR
+-- RPR을 쓰는 깊이 중첩된 서브쿼리
 
 SELECT * FROM (
     SELECT * FROM (
@@ -7156,7 +7130,7 @@ SELECT * FROM (
 ) sub3
 WHERE cnt > 10;
 
--- Complex Expression in DEFINE Clause
+-- DEFINE 절 안의 복합 표현식
 
 SELECT id, val,
        COUNT(*) OVER w as cnt
@@ -7169,12 +7143,12 @@ WINDOW w AS (
            B AS (val * 2 > 100 AND val / 2 < 100)
 );
 
--- Window with No Matching Rows
+-- 매치되는 행이 없는 윈도우
 
 SELECT id, val,
        COUNT(*) OVER w as cnt
 FROM rpr_stress
-WHERE val > 1000  -- No rows match
+WHERE val > 1000  -- 매치되는 행 없음
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -7182,7 +7156,7 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- Window on Single Row
+-- 한 행짜리 윈도우
 
 SELECT id, val,
        COUNT(*) OVER w as cnt
@@ -7198,14 +7172,14 @@ WINDOW w AS (
 DROP TABLE rpr_stress;
 
 -- ============================================================
--- Error Limit Tests
+-- 오류 한계 테스트
 -- ============================================================
--- Tests for error conditions in parse_rpr.c and rpr.c
+-- parse_rpr.c와 rpr.c의 오류 조건을 테스트한다
 
 CREATE TABLE rpr_errors (id INT, val INT);
 INSERT INTO rpr_errors VALUES (1, 10), (2, 20);
 
--- DEFINE variable not in PATTERN (error)
+-- PATTERN에 없는 DEFINE 변수 (오류)
 SELECT id, val, COUNT(*) OVER w FROM rpr_errors
 WINDOW w AS (
     ORDER BY id
@@ -7215,17 +7189,16 @@ WINDOW w AS (
       B AS TRUE
 );
 
--- Row pattern variable-count boundary: 240 variables are accepted, 241
--- rejected.  A varId is one byte and the high nibble (0xF0-0xFF) is reserved
--- for control elements, so RPR_VARID_MAX is 0xEF and the 241st distinct
--- variable would fall into that reserved range.
--- The rejecting case names V241 in PATTERN only.  The limit counts distinct
--- PATTERN variables whether or not DEFINE names them, so V241 is still
--- counted, and that is what carries the total past the limit.
--- ECHO is silenced so the generated 240-variable clauses do not flood the
--- expected output.
---   240 variables -> maximum, accepted.
---   241 variables -> over maximum, rejected.
+-- 행 패턴 변수 개수 경계: 240 개 변수는 허용되고, 241 개는 거부된다.  varId 는
+-- 1 바이트이고 상위 니블(0xF0-0xFF)은 제어 요소용으로 예약되어 있으므로
+-- RPR_VARID_MAX 는 0xEF이며, 241 번째로 구별되는 변수는 그 예약된 범위에
+-- 들어가게 된다.
+-- 거부되는 사례는 PATTERN에만 V241 을 이름으로 쓴다. 이 한계는 DEFINE이 그것을
+-- 이름으로 쓰든 말든 구별되는 PATTERN 변수 수를 세므로, V241 도 여전히
+-- 세어지고 그것이 총합을 한계 너머로 밀어낸다.
+-- 생성된 240 개 변수짜리 절이 예상 출력을 넘치게 만들지 않도록 ECHO를 끈다.
+--   변수 240 개 -> 최대, 허용됨.
+--   변수 241 개 -> 최대 초과, 거부됨.
 \set ECHO none
 SELECT format($$SELECT COUNT(*) OVER w FROM rpr_errors
   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -7243,13 +7216,12 @@ SELECT format($$SELECT COUNT(*) OVER w FROM rpr_errors
      FROM generate_series(1, 240) i)) \gexec
 \set ECHO all
 
--- Pattern nesting-depth boundary: 254 levels are accepted, 255 rejected.
--- Reluctant quantifiers are not subject to quantifier multiplication, so the
--- nesting survives optimization and still reaches the depth check.
--- ECHO is silenced so the generated deeply nested patterns do not flood the
--- expected output.
---   254 nested GROUP{3,7}? -> depth 254 = maximum, accepted.
---   255 nested GROUP{3,7}? -> depth 255 > maximum, rejected.
+-- 패턴 중첩 깊이 경계: 254 단계는 허용되고, 255 단계는 거부된다.  소극적
+-- 수량자는 수량자 곱셈의 대상이 아니므로, 중첩은 최적화에서 살아남아 여전히
+-- 깊이 검사에 도달한다.  생성된 깊이 중첩 패턴이 예상 출력을 넘치게 만들지
+-- 않도록 ECHO를 끈다.
+--   중첩된 GROUP{3,7}?  254 개 -> 깊이 254 = 최대, 허용됨.  중첩된 GROUP{3,7}?
+--   255 개 -> 깊이 255 > 최대, 거부됨.
 \set ECHO none
 SELECT format($$SELECT id, val, COUNT(*) OVER w FROM rpr_errors
   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -7264,10 +7236,10 @@ SELECT format($$SELECT id, val, COUNT(*) OVER w FROM rpr_errors
 DROP TABLE rpr_errors;
 
 -- ============================================================
--- Basic Pattern Matching
+-- 기본 패턴 매칭
 -- ============================================================
 
--- A? (optional, greedy)
+-- A? (선택적, 탐욕적)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7278,7 +7250,7 @@ WINDOW w AS (
     DEFINE A AS val > 50
 );
 
--- A{2} (exact count)
+-- A{2} (정확한 개수)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7289,7 +7261,7 @@ WINDOW w AS (
     DEFINE A AS val <= 50
 );
 
--- A{1,3} (bounded range, greedy)
+-- A{1,3} (한계 있는 범위, 탐욕적)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7300,7 +7272,7 @@ WINDOW w AS (
     DEFINE A AS val <= 50
 );
 
--- A | B (simple alternation)
+-- A | B (단순 교대)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7311,7 +7283,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val > 70
 );
 
--- A | B | C (three-way alternation)
+-- A | B | C (3 방향 교대)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7322,7 +7294,7 @@ WINDOW w AS (
     DEFINE A AS val <= 20, B AS val BETWEEN 40 AND 60, C AS val > 80
 );
 
--- A B C (concatenation)
+-- A B C (연결)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7333,7 +7305,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val BETWEEN 31 AND 60, C AS val > 60
 );
 
--- A B? C (optional middle)
+-- A B? C (선택적 중간)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7344,7 +7316,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val BETWEEN 31 AND 60, C AS val > 60
 );
 
--- (A B)+ (grouped quantifier)
+-- (A B)+ (그룹화된 수량자)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7355,7 +7327,7 @@ WINDOW w AS (
     DEFINE A AS val <= 50, B AS val > 50
 );
 
--- (A | B)+ C (alternation with quantifier)
+-- (A | B)+ C (수량자를 가진 교대)
 SELECT id, val, count(*) OVER w AS c
 FROM rpr_plan
 WINDOW w AS (
@@ -7366,7 +7338,7 @@ WINDOW w AS (
     DEFINE A AS val <= 30, B AS val BETWEEN 31 AND 60, C AS val > 80
 );
 
--- (A+ | (A | B)+)* - nested alternation inside quantified group
+-- (A+ | (A | B)+)* - 수량자가 붙은 그룹 안의 중첩 교대
 SELECT id, flags, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
 FROM (VALUES
     (1, ARRAY['A', 'B']),
@@ -7384,11 +7356,11 @@ WINDOW w AS (
 );
 
 -- ============================================================
--- Pathological Patterns
+-- 병리적 패턴
 -- ============================================================
--- Nested unbounded quantifiers that the optimizer collapses.
+-- 최적화기가 축약하는 중첩된 무한 수량자들.
 
--- (A*)* - nested unbounded (optimized to A*)
+-- (A*)* - 중첩된 무한 (A*로 최적화됨)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -7399,7 +7371,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- (A*)+ - inner nullable (optimized to A*)
+-- (A*)+ - 안쪽이 nullable (A*로 최적화됨)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -7410,7 +7382,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- (A+)* - outer nullable (optimized to A*)
+-- (A+)* - 바깥이 nullable (A*로 최적화됨)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -7421,7 +7393,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- (A+)+ - both require match (optimized to A+)
+-- (A+)+ - 둘 다 매치를 요구 (A+로 최적화됨)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 5) v)
 WINDOW w AS (
@@ -7432,7 +7404,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- (((A)*)*)*  - triple nested (optimized to A*)
+-- (((A)*)*)*  - 삼중 중첩 (A*로 최적화됨)
 SELECT v, count(*) OVER w AS c
 FROM (SELECT generate_series(1, 3) v)
 WINDOW w AS (
@@ -7443,8 +7415,8 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );
 
--- Optional group with alternation: A ((B | C) (D | E))* F?
--- When only A matches, the * group matches 0 times and F? matches 0 times
+-- 교대를 포함한 선택적 그룹: A ((B | C) (D | E))* F?
+-- A만 매치될 때, * 그룹은 0 번 매치하고 F?도 0 번 매치한다
 SELECT id, val, match_len
 FROM (SELECT id, val,
              COUNT(*) OVER w AS match_len

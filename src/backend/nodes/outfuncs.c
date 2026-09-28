@@ -728,9 +728,9 @@ _outRPRPattern(StringInfo str, const RPRPattern *node)
 	WRITE_INT_FIELD(numElements);
 
 	/*
-	 * Write varNames array as list of strings.  makeRPRPattern() guarantees
-	 * the array, so the list has exactly one spelling and the read side has
-	 * no second shape to interpret.
+	 * varNames 배열을 문자열 리스트로 기록한다.  makeRPRPattern()이 이 배열을
+	 * 보장하므로 리스트는 철자가 정확히 하나뿐이고, 읽는 쪽이 해석해야 할 두
+	 * 번째 모양은 없다.
 	 */
 	appendStringInfoString(str, " :varNames");
 	Assert(node->numVars > 0 && node->varNames != NULL);
@@ -744,9 +744,9 @@ _outRPRPattern(StringInfo str, const RPRPattern *node)
 	appendStringInfoChar(str, ')');
 
 	/*
-	 * Write elements array (makeRPRPattern guarantees numElements >= 2).
-	 * Seven fields go out; the reserved byte is padding and stays behind --
-	 * see RPRPatternElement in plannodes.h.
+	 * elements 배열을 기록한다(numElements >= 2 는 makeRPRPattern 이
+	 * 보장한다).  일곱 필드가 나가며, reserved 바이트는 패딩이라 남겨 둔다 --
+	 * plannodes.h의 RPRPatternElement 를 참고하라.
 	 */
 	appendStringInfoString(str, " :elements");
 	Assert(node->numElements > 0 && node->elements != NULL);

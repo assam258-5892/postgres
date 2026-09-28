@@ -568,14 +568,14 @@ _readRPRPattern(ReadNodeContext *ctx)
 	READ_INT_FIELD(numElements);
 
 	/*
-	 * Read varNames array.  _outRPRPattern() always writes the list, so every
-	 * token here has one spelling and any other input is malformed. The
-	 * delimiters are checked rather than counted on, because a numVars that
-	 * disagrees with the list would otherwise leave the token stream off by
-	 * one for everything that follows.
+	 * varNames 배열을 읽는다.  _outRPRPattern()이 항상 이 리스트를 쓰므로
+	 * 여기서 모든 토큰은 철자가 하나뿐이며, 그 외의 입력은 모두 잘못된
+	 * 것이다.  구분자를 그냥 믿지 않고 직접 검사하는 이유는, 리스트와
+	 * 어긋나는 numVars 값이 있으면 그 뒤에 오는 모든 것에 대해 토큰 스트림이
+	 * 한 칸씩 밀려버리기 때문이다.
 	 */
-	token = pg_strtok(ctx, &length);	/* skip :varNames */
-	token = pg_strtok(ctx, &length);	/* get '(' */
+	token = pg_strtok(ctx, &length);	/* :varNames 건너뛰기 */
+	token = pg_strtok(ctx, &length);	/* '(' 읽기 */
 	if (local_node->numVars <= 0 || token == NULL || token[0] != '(')
 		elog(ERROR, "unexpected varNames in RPRPattern");
 	local_node->varNames = palloc_array(char *, local_node->numVars);
@@ -586,17 +586,18 @@ _readRPRPattern(ReadNodeContext *ctx)
 			elog(ERROR, "unexpected end of RPRPattern varNames");
 		local_node->varNames[i] = nullable_string(token, length);
 	}
-	token = pg_strtok(ctx, &length);	/* get ')' */
+	token = pg_strtok(ctx, &length);	/* ')' 읽기 */
 	if (token == NULL || token[0] != ')')
 		elog(ERROR, "unterminated varNames in RPRPattern");
 
-	/* Read elements array */
-	token = pg_strtok(ctx, &length);	/* skip :elements */
-	token = pg_strtok(ctx, &length);	/* get '(' */
-	/* out always emits the array (makeRPRPattern guarantees numElements >= 2) */
+	/* elements 배열을 읽는다 */
+	token = pg_strtok(ctx, &length);	/* :elements 건너뛰기 */
+	token = pg_strtok(ctx, &length);	/* '(' 읽기 */
+	/* out은 항상 배열을 출력한다(numElements >= 2 는
+	 * makeRPRPattern 이 보장) */
 	if (local_node->numElements <= 0 || token == NULL || token[0] != '(')
 		elog(ERROR, "unexpected elements in RPRPattern");
-	/* palloc0 also zeroes reserved, which the round trip drops */
+	/* palloc0은 reserved도 0으로 채우는데, 라운드 트립에서는 이 값을 버린다 */
 	local_node->elements = palloc0_array(RPRPatternElement, local_node->numElements);
 	for (int i = 0; i < local_node->numElements; i++)
 	{
@@ -607,9 +608,9 @@ _readRPRPattern(ReadNodeContext *ctx)
 					max,
 					next,
 					jump;
-		unsigned int flags;		/* written with %u, unlike the others */
+		unsigned int flags;		/* 다른 것과 달리 %u로 기록된다 */
 
-		/* Parse "(varId depth flags min max next jump)" */
+		/* "(varId depth flags min max next jump)"를 파싱한다 */
 		token = pg_strtok(ctx, &length);
 		varId = atoi(token);
 		token = pg_strtok(ctx, &length);
@@ -624,7 +625,7 @@ _readRPRPattern(ReadNodeContext *ctx)
 		next = atoi(token);
 		token = pg_strtok(ctx, &length);
 		jump = atoi(token);
-		token = pg_strtok(ctx, &length);	/* get ')' */
+		token = pg_strtok(ctx, &length);	/* ')' 읽기 */
 		if (token == NULL || token[0] != ')')
 			elog(ERROR, "unterminated element in RPRPattern");
 
@@ -636,10 +637,10 @@ _readRPRPattern(ReadNodeContext *ctx)
 		elem->next = (RPRElemIdx) next;
 		elem->jump = (RPRElemIdx) jump;
 
-		/* Read next element's '(' or end */
+		/* 다음 요소의 '(' 또는 끝을 읽는다 */
 		if (i < local_node->numElements - 1)
 		{
-			token = pg_strtok(ctx, &length);	/* get '(' */
+			token = pg_strtok(ctx, &length);	/* '(' 읽기 */
 			if (token == NULL || token[0] != '(')
 				elog(ERROR, "unexpected end of RPRPattern elements");
 		}

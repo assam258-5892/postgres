@@ -386,7 +386,7 @@ SELECT calls, query FROM pg_stat_statements ORDER BY query COLLATE "C";
 
 DROP TABLE pgss_a, pgss_b CASCADE;
 --
--- queries with a row pattern recognition window
+-- 행 패턴 인식(RPR) 윈도우를 사용하는 쿼리
 --
 CREATE TABLE pgss_rpr (id integer);
 SELECT pg_stat_statements_reset() IS NOT NULL AS t;
@@ -395,8 +395,8 @@ SELECT pg_stat_statements_reset() IS NOT NULL AS t;
  t
 (1 row)
 
--- DEFINE lists that differ only in which variable name gets which condition
--- must not collide on one query id
+-- 어떤 변수 이름에 어떤 조건이 붙는지만 다른 DEFINE 목록도 하나의 쿼리 ID로
+-- 충돌해서는 안 된다
 SELECT count(*) OVER w FROM pgss_rpr
 WINDOW w AS (
   ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING

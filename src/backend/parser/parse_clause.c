@@ -2830,8 +2830,9 @@ transformWindowDefinitions(ParseState *pstate,
 		 * And prepare the new WindowClause.
 		 */
 		wc = makeNode(WindowClause);
-		wc->rpSkipTo = ST_NONE; /* ST_NONE marks this as a non-RPR window;
-								 * overridden by transformRPR() if RPR is used */
+		wc->rpSkipTo = ST_NONE; /* ST_NONE 은 이 윈도우가 RPR 이 아님을
+								 * 표시한다; RPR 을 쓰면 transformRPR() 가
+								 * 덮어쓴다 */
 		wc->name = windef->name;
 		wc->refname = windef->refname;
 
@@ -2961,7 +2962,7 @@ transformWindowDefinitions(ParseState *pstate,
 											 &wc->endInRangeFunc,
 											 windef->endOffset);
 
-		/* Process Row Pattern Recognition related clauses */
+		/* 행 패턴 인식(Row Pattern Recognition) 관련 절을 처리한다 */
 		transformRPR(pstate, wc, windef);
 
 		wc->winref = winref;

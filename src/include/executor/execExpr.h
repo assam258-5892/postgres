@@ -274,7 +274,7 @@ typedef enum ExprEvalOp
 	EEOP_MERGE_SUPPORT_FUNC,
 	EEOP_SUBPLAN,
 
-	/* row pattern navigation (all eight RPRNavKind kinds) */
+	/* 행 패턴 내비게이션 (RPRNavKind 의 여덟 가지 종류 전부) */
 	EEOP_RPR_NAV_SET,
 	EEOP_RPR_NAV_RESTORE,
 
@@ -699,7 +699,7 @@ typedef struct ExprEvalStep
 			SubPlanState *sstate;
 		}			subplan;
 
-		/* for EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE */
+		/* EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE 용 */
 		struct
 		{
 			RPRNavState *rprnavstate;

@@ -243,9 +243,8 @@ add_other_rels_to_query(PlannerInfo *root)
 
 /*
  * build_base_rel_tlists
- *	  Add targetlist entries for each var needed in the query's final tlist
- *	  (and HAVING clause and row pattern DEFINE clauses, if any) to the
- *	  appropriate base relations.
+ *	  질의의 최종 tlist(및 있다면 HAVING 절과 행 패턴 DEFINE 절)에 필요한 각
+ *	  var에 대해 적절한 기저 릴레이션에 타깃 리스트 엔트리를 추가한다.
  *
  * We mark such vars as needed by "relation 0" to ensure that they will
  * propagate up through all join plan steps.
@@ -283,11 +282,11 @@ build_base_rel_tlists(PlannerInfo *root, List *final_tlist)
 	}
 
 	/*
-	 * A row pattern DEFINE clause is not in the target list, so nothing above
-	 * has asked for the columns it reads.  The WindowAgg evaluates it all the
-	 * same, and setrefs.c has to resolve it against the window's input, so
-	 * mark those columns needed here and let them propagate up through the
-	 * join steps the way the target list's own columns do.
+	 * 행 패턴 DEFINE 절은 타깃 리스트에 들어 있지 않으므로, 위쪽 어디서도
+	 * 그것이 읽는 열을 요청하지 않는다.  그래도 WindowAgg 는 이를 그대로
+	 * 평가하고, setrefs.c는 이를 윈도우의 입력과 대조해 풀어야 하므로, 여기서
+	 * 그 열들을 필요한 것으로 표시해서 타깃 리스트 자신의 열이 그러하듯 조인
+	 * 단계를 거쳐 위로 전파되게 한다.
 	 */
 	foreach_node(WindowClause, wc, root->parse->windowClause)
 	{
@@ -297,8 +296,8 @@ build_base_rel_tlists(PlannerInfo *root, List *final_tlist)
 			continue;
 
 		/*
-		 * PVC_INCLUDE_PLACEHOLDERS is the only flag needed: DEFINE rejects
-		 * aggregates, window functions and subqueries at parse time.
+		 * 필요한 플래그는 PVC_INCLUDE_PLACEHOLDERS 하나뿐이다: DEFINE은 집계,
+		 * 윈도우 함수, 서브쿼리를 파싱 시점에 거부한다.
 		 */
 		define_vars = pull_var_clause((Node *) wc->defineClause,
 									  PVC_INCLUDE_PLACEHOLDERS);

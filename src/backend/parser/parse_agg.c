@@ -1332,20 +1332,19 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 								   &func_grouped_rels);
 
 	/*
-	 * A row pattern DEFINE clause is the one part of a WindowClause holding
-	 * an expression tree of its own, so it needs the substitution too:
-	 * partitionClause and orderClause carry just a sortgroupref into the
-	 * target list, and the frame offsets are checked to be Var-free.  Without
-	 * this its Vars would stay plain relation Vars while the target list
-	 * copies of the same columns become Vars of the RTE_GROUP RTE, and a
-	 * grouping set that nulls one of those columns would make the two copies
-	 * disagree in varnullingrels, which setrefs.c reports as an internal
-	 * error.
+	 * 행 패턴 DEFINE 절은 WindowClause 중에서 자기 자신의 표현식 트리를 담는
+	 * 유일한 부분이므로, 이 치환도 필요하다: partitionClause 와
+	 * orderClause 는 타깃 리스트로 sortgroupref 만 옮겨 나르고, 프레임
+	 * offset 은 Var 가 없는지만 검사한다. 이 치환이 없으면, 같은 컬럼의 타깃
+	 * 리스트 사본은 RTE_GROUP RTE 의 Var 가 되는데 DEFINE 의 Var 는 평범한
+	 * 릴레이션 Var 로 남아, 그 컬럼 중 하나를 NULL 로 만드는 그룹화 집합이 두
+	 * 사본을 varnullingrels 에서 서로 어긋나게 만들고, 이를 setrefs.c 가 내부
+	 * 오류로 보고하게 된다.
 	 *
-	 * No finalize_grouping_exprs() goes with it.  That call finalizes
-	 * GROUPING expressions, and a DEFINE clause cannot hold one --
-	 * transformExpr() rejects a GroupingFunc under EXPR_KIND_RPR_DEFINE
-	 * before we get here.
+	 * finalize_grouping_exprs() 는 여기 같이 오지 않는다.  그 함수는 GROUPING
+	 * 표현식을 마무리하는데, DEFINE 절은 그런 표현식을 담을 수 없다 --
+	 * transformExpr() 가 EXPR_KIND_RPR_DEFINE 아래에서 GroupingFunc 를 여기
+	 * 도달하기 전에 거부하기 때문이다.
 	 */
 	foreach_node(WindowClause, wc, qry->windowClause)
 	{
