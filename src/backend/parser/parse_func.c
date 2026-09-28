@@ -234,12 +234,7 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 		pstate->p_rpr_define &&
 		list_length(funcname) == 1)
 	{
-		const char *name = strVal(linitial(funcname));
-
-		if (strcmp(name, "prev") == 0 ||
-			strcmp(name, "next") == 0 ||
-			strcmp(name, "first") == 0 ||
-			strcmp(name, "last") == 0)
+		if (is_rpr_navigation_name(strVal(linitial(funcname))))
 			could_be_rpr_nav = true;
 	}
 
@@ -2137,6 +2132,24 @@ FuncNameAsType(List *funcname)
 
 	ReleaseSysCache(typtup);
 	return result;
+}
+
+/*
+ * is_rpr_navigation_name
+ *		Is this unqualified, parser-downcased name a row pattern navigation
+ *		operation inside a DEFINE clause?
+ *
+ * ruleutils.c asks the same question to decide when a user function of one
+ * of these names has to be printed schema-qualified, so both sides share the
+ * one list.
+ */
+bool
+is_rpr_navigation_name(const char *name)
+{
+	return strcmp(name, "prev") == 0 ||
+		strcmp(name, "next") == 0 ||
+		strcmp(name, "first") == 0 ||
+		strcmp(name, "last") == 0;
 }
 
 /*
