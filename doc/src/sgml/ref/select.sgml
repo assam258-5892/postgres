@@ -1223,6 +1223,18 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    </para>
 
    <para>
+    Two planner optimizations are not applied to a window that uses row
+    pattern recognition.  A filter on the result of a monotonic window
+    function, such as <literal>rn &lt;= 3</literal> on
+    a <function>row_number()</function> computed in a subquery, is not
+    pushed down into the window as a run condition, so the window is
+    evaluated to the end of the partition instead of stopping early.  And
+    the frame clause is not replaced with a cheaper one, even when the
+    window functions using it do not depend on the frame.  Query results
+    are not affected, only the cost of evaluating the window.
+   </para>
+
+   <para>
     The purpose of a <literal>WINDOW</literal> clause is to specify the
     behavior of <firstterm>window functions</firstterm> appearing in the query's
     <link linkend="sql-select-list"><command>SELECT</command> list</link> or
