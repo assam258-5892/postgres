@@ -6851,6 +6851,53 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS true);
 
+-- GROUP BY spelled as the merged column's COALESCE expansion, rather than
+-- the join's own name, while DEFINE reads that same column: the two spellings
+-- must compare equal despite the different tree shapes.
+SELECT id + 1 AS b, count(*) OVER w AS cnt
+FROM rpr_grp FULL JOIN rpr_sort USING (id)
+GROUP BY COALESCE(rpr_grp.id, rpr_sort.id) + 1
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A) DEFINE A AS (id + 1) > 0)
+ORDER BY 1;
+
+-- Same construct as a view: the DEFINE clause must deparse to the plain
+-- join column, not the two-sided COALESCE GROUP BY computed, or the printed
+-- text would not re-parse.
+CREATE VIEW rpr_fjcoal_v AS
+SELECT COALESCE(rpr_grp.id, rpr_sort.id) + 1 AS idp1, count(*) OVER w AS cnt
+FROM rpr_grp FULL JOIN rpr_sort USING (id)
+GROUP BY COALESCE(rpr_grp.id, rpr_sort.id) + 1
+WINDOW w AS (
+    ORDER BY COALESCE(rpr_grp.id, rpr_sort.id) + 1
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS id + 1 > 0);
+
+SELECT pg_get_viewdef('rpr_fjcoal_v'::regclass, true);
+SELECT * FROM rpr_fjcoal_v ORDER BY 1;
+
+-- The deparsed definition re-parses into an identical view.
+CREATE VIEW rpr_fjcoal_v2 AS
+ SELECT COALESCE(rpr_grp.id, rpr_sort.id) + 1 AS idp1,
+    count(*) OVER w AS cnt
+   FROM rpr_grp
+     FULL JOIN rpr_sort USING (id)
+   GROUP BY (COALESCE(rpr_grp.id, rpr_sort.id) + 1)
+   WINDOW w AS (ORDER BY (COALESCE(rpr_grp.id, rpr_sort.id) + 1) ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+   AFTER MATCH SKIP PAST LAST ROW
+   INITIAL
+   PATTERN (a+)
+   DEFINE
+   a AS (id + 1) > 0);
+
+SELECT pg_get_viewdef('rpr_fjcoal_v2'::regclass, true) =
+      pg_get_viewdef('rpr_fjcoal_v'::regclass, true) AS same_definition;
+
+DROP VIEW rpr_fjcoal_v2;
+DROP VIEW rpr_fjcoal_v;
+
 DROP TABLE rpr_grp;
 
 DROP TABLE rpr_sort;
