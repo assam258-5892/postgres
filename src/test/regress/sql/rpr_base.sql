@@ -3068,10 +3068,11 @@ DROP TABLE rpr_res_hid, rpr_res_hu;
 -- view is made, by being renamed, and from then on the two have to be told
 -- apart in the printed text.  The DEFINE column keeps its spelling, being
 -- settled first, and the newcomer gets name_N -- whether it sits in the same
--- RTE, is the one a USING clause merges, or is not merged but carries the
--- USING clause's spelling, which is no business of the deparser's to guess
--- from.  A USING clause elsewhere that spells the newcomer's new name moves
--- out of the way as well.
+-- RTE or in another one where a DEFINE clause reads it too, is the one a
+-- USING clause merges, or is not merged but carries the USING clause's
+-- spelling, which is no business of the deparser's to guess from.  A USING
+-- clause elsewhere that spells the newcomer's new name moves out of the way
+-- as well.
 CREATE TABLE rpr_res_ren (c INT, d INT);
 INSERT INTO rpr_res_ren VALUES (1, 1), (2, 2);
 CREATE TABLE rpr_res_ren2 (a INT, e INT);
@@ -3084,6 +3085,10 @@ CREATE TABLE rpr_res_rs (x INT);
 CREATE TABLE rpr_res_rr (x INT, y INT);
 INSERT INTO rpr_res_rs VALUES (1), (2);
 INSERT INTO rpr_res_rr VALUES (1, 5), (2, 6);
+CREATE TABLE rpr_res_rena (id INT, a INT);
+CREATE TABLE rpr_res_renb (id INT, b INT);
+INSERT INTO rpr_res_rena VALUES (1, 1), (2, 2);
+INSERT INTO rpr_res_renb VALUES (1, 5), (2, 0);
 
 -- the same RTE, its alias list shorter than the table
 CREATE VIEW rpr_res_ren_v AS
@@ -3122,10 +3127,20 @@ WINDOW w AS (ORDER BY y
              PATTERN (A+)
              DEFINE A AS y > 0);
 
+-- another RTE, both of its columns read by the DEFINE clause
+CREATE VIEW rpr_res_reno_v AS
+SELECT rpr_res_rena.id, count(*) OVER w AS cnt
+FROM rpr_res_rena JOIN rpr_res_renb ON rpr_res_rena.id = rpr_res_renb.id
+WINDOW w AS (ORDER BY rpr_res_rena.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (P Q*)
+             DEFINE P AS a > 0, Q AS b > 0);
+
 -- the collisions arrive only now
 ALTER TABLE rpr_res_ren RENAME d TO a;
 ALTER TABLE rpr_res_rr RENAME x TO z;
 ALTER TABLE rpr_res_rr RENAME y TO x;
+ALTER TABLE rpr_res_renb RENAME b TO a;
 
 SELECT pg_get_viewdef('rpr_res_ren_v'::regclass, true);
 SELECT 'CREATE VIEW rpr_res_ren_rt AS '
@@ -3159,12 +3174,22 @@ SELECT pg_get_viewdef('rpr_res_renm_v'::regclass, true)
 SELECT * FROM rpr_res_renm_v;
 SELECT * FROM rpr_res_renm_rt;
 
+SELECT pg_get_viewdef('rpr_res_reno_v'::regclass, true);
+SELECT 'CREATE VIEW rpr_res_reno_rt AS '
+       || pg_get_viewdef('rpr_res_reno_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_res_reno_v'::regclass, true)
+       = pg_get_viewdef('rpr_res_reno_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_res_reno_v;
+SELECT * FROM rpr_res_reno_rt;
+
+DROP VIEW rpr_res_reno_rt, rpr_res_reno_v;
 DROP VIEW rpr_res_renm_rt, rpr_res_renm_v;
 DROP VIEW rpr_res_renx_rt, rpr_res_renx_v;
 DROP VIEW rpr_res_renu_rt, rpr_res_renu_v;
 DROP VIEW rpr_res_ren_rt, rpr_res_ren_v;
 DROP TABLE rpr_res_ren, rpr_res_ren2, rpr_res_renl, rpr_res_renr;
 DROP TABLE rpr_res_rs, rpr_res_rr;
+DROP TABLE rpr_res_rena, rpr_res_renb;
 
 -- A merged column an aliased join carries can spell the DEFINE name from the
 -- start, and a TABLEFUNC among the join's inputs changes nothing about that:

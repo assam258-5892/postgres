@@ -333,6 +333,7 @@ typedef struct
 {
 	List	   *exprs;			/* merge expressions, nulling marks cleared */
 	List	   *vars;			/* the Var naming each merged column */
+	Bitmapset  *relids;			/* every rtindex, to clear nulling marks */
 } collapse_define_context;
 
 /* Callback signature for resolve_special_varno() */
@@ -406,8 +407,6 @@ static List *function_rte_late_colnames(RangeTblEntry *rte);
 static void collapse_define_join_vars(Query *query);
 static Node *collapse_define_join_vars_mutator(Node *node,
 											   collapse_define_context *context);
-static Node *strip_nullingrels(Node *node);
-static Node *strip_nullingrels_mutator(Node *node, void *context);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -4086,6 +4085,7 @@ collapse_define_join_vars(Query *query)
 	/* Collect the merge expressions once; most queries have none */
 	context.exprs = NIL;
 	context.vars = NIL;
+	context.relids = bms_add_range(NULL, 1, list_length(query->rtable));
 	foreach(lc, query->rtable)
 	{
 		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
@@ -4107,7 +4107,10 @@ collapse_define_join_vars(Query *query)
 			if (aliasvar == NULL || IsA(aliasvar, Var))
 				continue;
 
-			context.exprs = lappend(context.exprs, strip_nullingrels(aliasvar));
+			context.exprs = lappend(context.exprs,
+									remove_nulling_relids(aliasvar,
+														  context.relids,
+														  NULL));
 			context.vars = lappend(context.vars,
 								   makeVar(rtindex, attno, exprType(aliasvar),
 										   exprTypmod(aliasvar),
@@ -4153,7 +4156,8 @@ collapse_define_join_vars_mutator(Node *node, collapse_define_context *context)
 		 * the grouping expression carries and not the copy the join RTE
 		 * keeps, and neither mark reaches the printed text.
 		 */
-		Node	   *stripped = strip_nullingrels(node);
+		Node	   *stripped = remove_nulling_relids(node, context->relids,
+													 NULL);
 		ListCell   *lc;
 		ListCell   *lc2;
 
@@ -4165,30 +4169,6 @@ collapse_define_join_vars_mutator(Node *node, collapse_define_context *context)
 	}
 
 	return node;
-}
-
-/*
- * strip_nullingrels: a copy of the expression with the nulling marks cleared
- */
-static Node *
-strip_nullingrels(Node *node)
-{
-	return strip_nullingrels_mutator(node, NULL);
-}
-
-static Node *
-strip_nullingrels_mutator(Node *node, void *context)
-{
-	if (node == NULL)
-		return NULL;
-	if (IsA(node, Var))
-	{
-		Var		   *var = (Var *) copyObject(node);
-
-		var->varnullingrels = NULL;
-		return (Node *) var;
-	}
-	return expression_tree_mutator(node, strip_nullingrels_mutator, context);
 }
 
 /*
@@ -4975,8 +4955,6 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	 */
 	expand_colnames_array_to(colinfo, ncolumns);
 	Assert(colinfo->num_cols == ncolumns);
-
-	/* Without grown columns, every column is one the query was parsed with */
 
 	/*
 	 * Make sufficiently large new_colnames and is_new_col arrays, too.
