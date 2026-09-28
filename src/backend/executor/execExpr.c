@@ -1171,12 +1171,11 @@ ExecInitExprRec(Expr *node, ExprState *state,
 		case T_RPRNavExpr:
 			{
 				/*
-				 * RPR navigation functions (PREV/NEXT/FIRST/LAST) are
-				 * compiled into EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE
-				 * opcodes instead of a normal function call.  The SET opcode
-				 * swaps ecxt_outertuple to the target row, the argument
-				 * expression is compiled normally (reads from the swapped
-				 * slot), and the RESTORE opcode restores the original slot.
+				 RPR 내비게이션 함수(PREV/NEXT/FIRST/LAST)는 일반적인 함수
+				 호출이 아니라 EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE opcode로
+				 컴파일된다. SET opcode가 ecxt_outertuple 을 대상 행으로
+				 교체하면, 인자 표현식은 (교체된 슬롯에서 값을 읽으며)
+				 정상적으로 컴파일되고, RESTORE opcode가 원래 슬롯을 복구한다.
 				 */
 				RPRNavState *rprnavstate;
 				RPRNavOffsets *entry;
@@ -1188,10 +1187,10 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				winstate = (WindowAggState *) state->parent;
 
 				/*
-				 * The offsets live in executor state, not on the RPRNavExpr,
-				 * because the plan tree is read-only.  navno indexes the list
-				 * build_define_offsets() filled at startup; the values in it
-				 * are settled per scan by resolve_nav_offsets().
+				 플랜 트리는 읽기 전용이므로, 오프셋은 RPRNavExpr 이 아니라
+				 실행기 상태에 있다. navno는 시작 시점에
+				 build_define_offsets()가 채운 리스트를 인덱싱하며, 그 안의
+				 값은 스캔마다 resolve_nav_offsets()가 확정한다.
 				 */
 				Assert(nav->navno >= 0 &&
 					   nav->navno < list_length(winstate->rprNavOffsets));
@@ -1200,42 +1199,41 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				Assert(entry->nav == nav);
 				rprnavstate = entry->rprnavstate;
 
-				/* Emit SET opcode: swap slot to target row */
+				/* SET opcode를 내보낸다: 슬롯을 대상 행으로 교체한다 */
 				scratch.opcode = EEOP_RPR_NAV_SET;
 				scratch.d.rpr_nav.rprnavstate = rprnavstate;
 
 				ExprEvalPushStep(state, &scratch);
 
 				/*
-				 * If the target row does not exist, skip evaluation of the
-				 * argument expression and go straight to RESTORE.  The
-				 * EEOP_RPR_NAV_SET step writes a definitive resnull (false
-				 * when the target row exists), so the jump condition is
-				 * always up to date.
+				 대상 행이 존재하지 않으면 인자 표현식의 평가를 건너뛰고 곧바로
+				 RESTORE 로 간다. EEOP_RPR_NAV_SET 단계가 (대상 행이 존재하면
+				 false인) 확정적인 resnull을 기록하므로, 이 점프 조건은 항상
+				 최신 상태를 반영한다.
 				 */
 				skip_arg_step = state->steps_len;
 				scratch.opcode = EEOP_JUMP_IF_NULL;
 				scratch.resvalue = resv;
 				scratch.resnull = resnull;
-				scratch.d.jump.jumpdone = -1;	/* set below */
+				scratch.d.jump.jumpdone = -1;	/* 아래에서 설정 */
 				ExprEvalPushStep(state, &scratch);
 
-				/* Compile the argument expression normally */
+				/* 인자 표현식을 정상적으로 컴파일한다 */
 				ExecInitExprRec(nav->arg, state, resv, resnull);
 
-				/* out-of-range jump lands on the RESTORE step */
+				/* 범위를 벗어난 점프는 RESTORE 단계로 이동한다 */
 				state->steps[skip_arg_step].d.jump.jumpdone = state->steps_len;
 
-				/* Emit RESTORE opcode: restore original slot */
+				/* RESTORE opcode를 내보낸다: 원래 슬롯을 복구한다 */
 				scratch.opcode = EEOP_RPR_NAV_RESTORE;
 				scratch.resvalue = resv;
 				scratch.resnull = resnull;
 				scratch.d.rpr_nav.rprnavstate = rprnavstate;
 
 				/*
-				 * The state is shared with the offsets entry, but resulttype
-				 * belongs to the plan node, so every compilation of this
-				 * navigation writes the same pair.
+				 상태는 오프셋 엔트리와 공유하지만, resulttype은 플랜 노드에
+				 속하므로 이 내비게이션을 컴파일할 때마다 항상 같은 값의 쌍을
+				 기록한다.
 				 */
 				get_typlenbyval(nav->resulttype,
 								&rprnavstate->resulttyplen,

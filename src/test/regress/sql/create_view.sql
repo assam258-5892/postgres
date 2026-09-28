@@ -409,12 +409,12 @@ select pg_get_viewdef('view_of_joins_2b', true);
 select pg_get_viewdef('view_of_joins_2c', true);
 select pg_get_viewdef('view_of_joins_2d', true);
 
--- A TABLEFUNC RTE names its columns in the clause that produces them, but it
--- accepts a column alias list like any other RTE, and that list is where a
--- rename of one of its columns has to be printed: the ON clause below refers
--- to the column by the name the query sees, and without the list the two
--- would not agree.  The anonymous FULL JOIN is what forces USING names to be
--- unique query-wide, which is what pushes the JSON_TABLE column aside.
+-- TABLEFUNC RTE는 컬럼을 만들어내는 절에서 그 컬럼에 이름을 붙이지만, 다른
+-- RTE와 마찬가지로 컬럼 별칭 목록을 받아들이며, 그 컬럼 중 하나의 이름을
+-- 바꾸면 그 결과가 출력되는 곳도 바로 이 목록이다.  아래 ON절은 질의가 보는
+-- 이름으로 컬럼을 가리키므로, 이 목록이 없으면 둘의 이름이 일치하지 않는다.
+-- 익명 FULL JOIN은 USING 이름을 질의 전체에서 유일하게 만들도록 강제하는데, 이
+-- 때문에 JSON_TABLE 컬럼이 밀려난다.
 create table tblnr (m int);
 create table tblnu (x int, m int);
 create table tblnl (x int);
@@ -430,15 +430,15 @@ from (tblnl full join tblnm using (x)),
 
 select pg_get_viewdef('view_of_unrenamable', true);
 
--- and that text is what has to reparse
+-- 그리고 그 텍스트가 재파싱되어야 하는 대상이다
 select 'create view view_of_unrenamable_2 as '
        || pg_get_viewdef('view_of_unrenamable', true) \gexec
 select pg_get_viewdef('view_of_unrenamable', true)
      = pg_get_viewdef('view_of_unrenamable_2', true) as round_trips;
 
--- The name of a merged column is the other place a rename lands, and it lands
--- on both sides at once: whatever is picked, each input has to answer to it,
--- the TABLEFUNC through its alias list like the table through its own.
+-- 병합된 컬럼의 이름은 rename이 향하는 또 다른 곳이며, 양쪽에 동시에 적용된다:
+-- 어떤 이름이 선택되든 각 입력은 그 이름에 맞춰야 하며, TABLEFUNC는 테이블이
+-- 자신의 별칭 목록으로 그러듯 자신의 별칭 목록으로 그렇게 한다.
 create view view_of_unrenamable_using as
 select j.m
 from (tblnl full join tblnm using (x)),
@@ -452,9 +452,9 @@ select 'create view view_of_unrenamable_using_2 as '
 select pg_get_viewdef('view_of_unrenamable_using', true)
      = pg_get_viewdef('view_of_unrenamable_using_2', true) as round_trips;
 
--- The far side of an INNER or LEFT JOIN is as much a side as the near one:
--- the merged column's expression names only the near input, but the rename
--- reaches both.
+-- INNER JOIN이나 LEFT JOIN에서 먼 쪽도 가까운 쪽 못지않게 하나의 입력이다:
+-- 병합된 컬럼의 표현식은 가까운 입력만 이름으로 가리키지만, rename은 양쪽
+-- 모두에 미친다.
 create view view_of_unrenamable_right as
 select j.m
 from (tblnl full join tblnm using (x)),
@@ -479,10 +479,10 @@ select 'create view view_of_unrenamable_left_2 as '
 select pg_get_viewdef('view_of_unrenamable_left', true)
      = pg_get_viewdef('view_of_unrenamable_left_2', true) as round_trips;
 
--- An aliased join hides its inputs, and a USING name above it is taken by
--- the join's own column: the join renames it on its alias list, and the
--- TABLEFUNC underneath, being held to the query-wide USING names as well,
--- renames its column on its own list.
+-- 별칭이 붙은 join은 자신의 입력을 감추므로, 그 위에서 쓰인 USING 이름은 join
+-- 자신의 컬럼으로 취급된다: join은 자신의 별칭 목록에서 그 이름을 바꾸고, 그
+-- 아래의 TABLEFUNC도 질의 전체의 USING 이름을 따라야 하므로 자신의 목록에서
+-- 자기 컬럼의 이름을 바꾼다.
 create view view_of_unrenamable_hidden as
 select j.m
 from (tblnl full join tblnm using (x)),
@@ -495,8 +495,8 @@ select 'create view view_of_unrenamable_hidden_2 as '
 select pg_get_viewdef('view_of_unrenamable_hidden', true)
      = pg_get_viewdef('view_of_unrenamable_hidden_2', true) as round_trips;
 
--- A name a parent join pushes down onto a merged column has to be unique in
--- the input it lands in, whatever the USING clause underneath spells.
+-- 상위 join이 병합된 컬럼에 밀어넣는 이름은, 그 아래의 USING절이 무엇을 쓰든
+-- 그 이름이 놓이는 입력 안에서 유일해야 한다.
 create view view_of_unrenamable_pushed as
 select j2.d
 from (tblnv join (tblnw join json_table(jsonb '[1]', '$[*]' columns (a int path '$')) x
@@ -508,8 +508,8 @@ select 'create view view_of_unrenamable_pushed_2 as '
 select pg_get_viewdef('view_of_unrenamable_pushed', true)
      = pg_get_viewdef('view_of_unrenamable_pushed_2', true) as round_trips;
 
--- Two anonymous FULL JOINs merging the same name through a TABLEFUNC each
--- still get distinct names.
+-- TABLEFUNC를 통해 같은 이름을 병합하는 두 개의 익명 FULL JOIN도 여전히 서로
+-- 다른 이름을 얻는다.
 create view view_of_unrenamable_twice as
 select count(*) as n
 from (tblnl full join json_table(jsonb '[1]', '$[*]' columns (x int path '$')) jt1
@@ -523,7 +523,7 @@ select 'create view view_of_unrenamable_twice_2 as '
 select pg_get_viewdef('view_of_unrenamable_twice', true)
      = pg_get_viewdef('view_of_unrenamable_twice_2', true) as round_trips;
 
--- and a column alias list the user wrote on a TABLEFUNC is part of the query
+-- 그리고 사용자가 TABLEFUNC에 작성한 컬럼 별칭 목록도 질의의 일부다
 create view view_of_tablefunc_alias as
 select t.a from json_table(jsonb '[1]', '$[*]' columns (c int path '$')) as t(a);
 
@@ -543,11 +543,11 @@ drop view view_of_unrenamable_using_2, view_of_unrenamable_using;
 drop view view_of_unrenamable_2, view_of_unrenamable;
 drop table tblnr, tblnu, tblnl, tblnm, tblnw, tblnv;
 
--- The columns a function's result type grows after the view is made are
--- columns the RTE has now, and the alias list being positional they are
--- printed in full: an aliased join above lays its own list over its inputs'
--- lists end to end, so a grown column left off would shift the input after
--- it, and a reference into that input would silently land on another column.
+-- 뷰가 만들어진 뒤 함수의 결과 타입이 늘어나 생긴 컬럼도 지금 RTE가 가진
+-- 컬럼이며, 별칭 목록은 위치로 대응되므로 전체가 출력된다: 위에 있는 별칭 붙은
+-- join은 자신의 목록을 입력들의 목록 위에 순서대로 겹쳐 놓으므로, 늘어난
+-- 컬럼을 빠뜨리면 그 뒤의 입력이 밀려나고, 그 입력을 가리키는 참조는 소리 없이
+-- 다른 컬럼을 가리키게 된다.
 create table tblfc (a int, z int);
 insert into tblfc values (1, 5);
 create function tblfc_f() returns setof tblfc language sql
@@ -572,9 +572,9 @@ select * from view_of_grown_input_2;
 
 drop view view_of_grown_input_2;
 
--- A grown column that is dropped again still takes up its place in the
--- positional alias list, as a dropped column; a column grown after it must
--- not slide into that place.
+-- 늘어났다가 다시 drop된 컬럼도 위치 기반 별칭 목록에서 drop된 컬럼으로서
+-- 여전히 자기 자리를 차지한다; 그 뒤에 늘어난 컬럼이 그 자리로 밀려 들어가면
+-- 안 된다.
 alter table tblfc drop column val;
 alter table tblfc add column val int;
 

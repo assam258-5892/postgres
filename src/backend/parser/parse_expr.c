@@ -614,33 +614,32 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	}
 
 	/*----------
-	 * A pattern variable qualifier (e.g. UP.price) is valid per ISO/IEC
-	 * 19075-5 6.15 / 4.16 but not yet implemented, and has to be recognized
-	 * here: a pattern variable names no range table entry, so leaving it to
-	 * normal resolution would reject it as a qualified expression instead.
+	 * 패턴 변수 한정자(예: UP.price) 는 ISO/IEC 19075-5 6.15 / 4.16
+	 * 기준으로는 유효하지만 아직 구현되어 있지 않으며, 여기서 인식해야 한다:
+	 * 패턴 변수는 어떤 레인지 테이블 엔트리도 가리키지 않으므로, 일반적인
+	 * 결정에 맡기면 대신 수식된 표현식으로 거부되어 버린다.
 	 *
-	 * Like every other rule below, this one only reaches names the ref hooks
-	 * left for the query parser to resolve.  A PL that answers a name first
-	 * keeps it: under "#variable_conflict use_variable" PL/pgSQL claims any
-	 * name one of its variables owns, so a PL/pgSQL variable sharing a name
-	 * with a pattern variable takes A.price, exactly as it takes a name a
-	 * table column would otherwise own.  That is what asking for
-	 * use_variable means, and the DEFINE rules do not override it.
+	 * 아래의 다른 규칙들과 마찬가지로, 이 규칙 역시 ref 훅들이 질의 파서가
+	 * 처리하도록 남겨둔 이름에만 도달한다.  이름에 먼저 답하는 PL 은 그
+	 * 이름을 차지한다: "#variable_conflict use_variable" 아래에서 PL/pgSQL 은
+	 * 자신의 변수 중 하나가 소유한 이름을 모두 차지하므로, 패턴 변수와 이름이
+	 * 겹치는 PL/pgSQL 변수는 테이블 컬럼이 본래 가져갔을 이름을 가져가는 것과
+	 * 똑같이 A.price 를 가져간다.  그것이 use_variable 을 요청한다는 것의
+	 * 의미이며, DEFINE 규칙은 이를 무시하지 않는다.
 	 *
-	 * Only a two-part name has that shape.  A longer name whose first part
-	 * happens to spell a pattern variable is schema- or catalog-qualified,
-	 * and goes the way of the other qualified forms.
+	 * 이런 형태를 가지는 것은 두 부분짜리 이름뿐이다.  첫 부분이 우연히 패턴
+	 * 변수 철자와 같은 더 긴 이름은 스키마 또는 카탈로그로 수식된 것이며,
+	 * 다른 수식된 형태들과 같은 길을 간다.
 	 *
-	 * The other qualified forms DEFINE disallows are diagnosed after the
-	 * reference resolves, below.  Classifying them here on the qualifier
-	 * alone would report a misspelled column as a problem with the qualifier
-	 * and lose the "Perhaps you meant" hint normal resolution offers.
+	 * DEFINE 이 허용하지 않는 다른 수식된 형태는 참조가 해석된 뒤 아래에서
+	 * 진단한다.  여기서 한정자만으로 이들을 분류하면 철자가 틀린 컬럼을
+	 * 한정자 문제로 잘못 보고하고, 일반 결정이 제공하는 "Perhaps you meant"
+	 * 힌트를 잃게 된다.
 	 *
-	 * The quoted text reflects only the ColumnRef portion; a trailing field
-	 * selection on a composite type (e.g. ".amount" in "(A.items).amount")
-	 * lives in the surrounding A_Indirection node and is not included here.
-	 * That can be revisited when MEASURES support adds indirection-aware
-	 * traversal.
+	 * 인용된 텍스트는 ColumnRef 부분만 반영한다; 복합 타입에 대한 후행 필드
+	 * 선택(예: "(A.items).amount"의 ".amount") 은 주변 A_Indirection 노드에
+	 * 있으며 여기에는 포함되지 않는다.  MEASURES 지원이 인다이렉션을 인식하는
+	 * 순회를 추가하면 이 부분을 다시 살펴볼 수 있다.
 	 *----------
 	 */
 	if (pstate->p_rpr_define &&
@@ -662,9 +661,9 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 		}
 
 		/*
-		 * A whole-row reference is barred by its form alone: no qualifier
-		 * makes one legal here, so resolving it first would only choose which
-		 * rejection it gets.
+		 * 전체 행 참조는 그 형태만으로 이미 금지된다: 어떤 한정자를 붙여도
+		 * 여기서 합법이 되지 않으므로, 먼저 해석해 봐야 어떤 거부 사유를
+		 * 받을지만 정해질 뿐이다.
 		 */
 		if (IsA(llast(cref->fields), A_Star))
 			ereport(ERROR,
@@ -727,9 +726,8 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 					if (nsitem)
 					{
 						/*
-						 * A lone name that resolves as a range variable is a
-						 * whole-row reference without the star, which the
-						 * rule above has no A_Star to match on.
+						 * 범위 변수로 해석되는 단독 이름은 별표 없는 전체 행
+						 * 참조이며, 위 규칙은 매칭할 A_Star 가 없다.
 						 */
 						if (pstate->p_rpr_define)
 							ereport(ERROR,
@@ -937,15 +935,15 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 			case CRERR_NO_RTE:
 
 				/*
-				 * ISO/IEC 19075-5 6.5 reserves the qualifier slot in a DEFINE
-				 * clause for a row pattern variable, so a qualifier naming
-				 * nothing is rejected for occupying it, the same as one that
-				 * names something.  Reporting a missing FROM-clause entry
-				 * would point at a repair that does not exist: adding the
-				 * relation only moves the reference to one of the rejections
-				 * below, the range variable one for a two-part name and the
-				 * qualified expression one for a longer name, or the outer
-				 * column one if the relation is added to an outer query.
+				 * ISO/IEC 19075-5 6.5 는 DEFINE 절의 한정자 자리를 행 패턴
+				 * 변수를 위해 예약해 두므로, 아무것도 가리키지 않는 한정자도
+				 * 무언가를 가리키는 한정자와 마찬가지로 그 자리를 차지했다는
+				 * 이유로 거부된다.  FROM 절 엔트리가 없다고 보고하는 것은
+				 * 존재하지 않는 해결책을 가리키는 셈이다: 릴레이션을 추가해
+				 * 봐야 참조는 아래의 거부 사유 중 하나로 옮겨갈 뿐이다 -- 두
+				 * 부분짜리 이름이면 범위 변수 쪽으로, 더 긴 이름이면 수식된
+				 * 표현식 쪽으로, 릴레이션이 외부 질의에 추가된 것이면 외부
+				 * 컬럼 쪽으로 옮겨간다.
 				 */
 				if (pstate->p_rpr_define)
 					ereport(ERROR,
@@ -975,16 +973,16 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	}
 
 	/*
-	 * Restrict column references in a row pattern DEFINE clause.  node is now
-	 * a successfully resolved reference, so the qualified forms RPR does not
-	 * allow can be rejected without mistaking a name that does not resolve at
-	 * all for one of them: a correlated reference to an outer query's column,
-	 * a range variable qualifier, and a schema/catalog-qualified reference.
+	 * 행 패턴 DEFINE 절의 열 참조를 제한한다.  node 는 이제 성공적으로 해석된
+	 * 참조이므로, 전혀 해석되지 않는 이름을 RPR 이 허용하지 않는 수식된 형태
+	 * 중 하나로 착각하는 일 없이 그 형태들을 거부할 수 있다: 외부 질의 컬럼에
+	 * 대한 상관 참조, 범위 변수 한정자, 그리고 스키마/카탈로그로 수식된
+	 * 참조가 그것이다.
 	 *
-	 * The error class follows the division the neighbouring restrictions use:
-	 * ERRCODE_FEATURE_NOT_SUPPORTED for what the standard allows and this
-	 * implementation does not, ERRCODE_SYNTAX_ERROR for every other rejected
-	 * spelling, whether the standard forbids it or never gave it at all.
+	 * 오류 클래스는 이웃한 제약들이 쓰는 구분을 따른다: 표준이 허용하지만 이
+	 * 구현이 지원하지 않는 것에는 ERRCODE_FEATURE_NOT_SUPPORTED 를, 표준이
+	 * 금지했든 아예 언급하지 않았든 그 밖에 거부되는 모든 철자에는
+	 * ERRCODE_SYNTAX_ERROR 를 쓴다.
 	 */
 	if (pstate->p_rpr_define)
 	{
@@ -998,14 +996,14 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 											   &qual_levels_up);
 
 		/*
-		 * Ask which level the qualifier resolved at, not merely whether it
-		 * resolved.  A two-part name whose second part is not a column is
-		 * retried as a function call on the whole row, and that yields a
-		 * FuncExpr rather than a Var, so the outer reference its argument
-		 * carries is invisible to the varlevelsup test.
+		 * 한정자가 해석되었는지 여부만이 아니라 몇 단계에서 해석되었는지를
+		 * 묻는다.  두 번째 부분이 컬럼이 아닌 두 부분짜리 이름은 전체 행에
+		 * 대한 함수 호출로 다시 시도되며, 그 결과는 Var 가 아니라
+		 * FuncExpr 이므로 그 인수가 담고 있는 외부 참조는 varlevelsup 검사에
+		 * 보이지 않는다.
 		 *
-		 * The level counts levels searched, not levels found, so it means
-		 * nothing unless the search succeeded.
+		 * 이 레벨은 찾아낸 레벨이 아니라 탐색한 레벨 수를 세므로, 탐색이
+		 * 성공하지 않으면 아무 의미가 없다.
 		 */
 		if ((IsA(node, Var) && ((Var *) node)->varlevelsup > 0) ||
 			(qual_nsitem != NULL && qual_levels_up > 0))
@@ -1022,23 +1020,23 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 					parser_errposition(pstate, cref->location));
 
 		/*
-		 * ISO/IEC 19075-5 6.5 reserves the qualifier slot for a row pattern
-		 * variable, so a name is rejected for occupying it whatever the
-		 * qualifier turns out to name.  What is left here resolved through
-		 * p_post_columnref_hook, which reads a two-part name as a routine's
-		 * parameter or variable, or as a field of a composite one, and the
-		 * hook is public enough that an extension may add readings of its
-		 * own; the message names none of them.  Selecting a field from an
-		 * unqualified value, written "(x).f", occupies no qualifier slot and
-		 * remains the way to reach a composite.
+		 * ISO/IEC 19075-5 6.5 는 한정자 자리를 행 패턴 변수를 위해 예약해
+		 * 두므로, 한정자가 실제로 무엇을 가리키든 그 자리를 차지했다는 이유로
+		 * 이름이 거부된다.  여기 남은 것은 p_post_columnref_hook 을 통해
+		 * 해석되는데, 이 훅은 두 부분짜리 이름을 루틴의 매개변수나 변수로,
+		 * 또는 복합 값의 필드로 읽어들이며, 이 훅은 확장이 자체적인 해석
+		 * 방식을 추가할 수 있을 만큼 공개되어 있다; 메시지는 그 중 어느 것도
+		 * 이름으로 언급하지 않는다.  한정자 없는 값에서 필드를 선택하는
+		 * "(x).f" 표기는 어떤 한정자 자리도 차지하지 않으며, 여전히 복합 값에
+		 * 도달하는 방법으로 남는다.
 		 *
-		 * The pre hook's readings never arrive here, so this rule is not the
-		 * last word on a qualified name: in a PL/pgSQL function written with
-		 * "#variable_conflict use_variable", plpgsql_pre_column_ref() answers
-		 * fn.var and rec.field itself and returns before any of this runs,
-		 * leaving those spellings usable there.  The pragma redirects name
-		 * resolution wholesale -- it takes names a table column would
-		 * otherwise own too -- and DEFINE does not carve itself out of it.
+		 * pre 훅의 해석 결과는 여기까지 도달하지 않으므로, 이 규칙이 수식된
+		 * 이름에 대한 최종 결론은 아니다: "#variable_conflict use_variable"로
+		 * 작성된 PL/pgSQL 함수에서는 plpgsql_pre_column_ref() 가 fn.var 와
+		 * rec.field 자체를 직접 답하고 이 로직이 실행되기 전에 반환하므로,
+		 * 그곳에서는 그런 철자를 계속 쓸 수 있다. 이 프라그마는 이름 해석을
+		 * 통째로 재지정한다 -- 테이블 컬럼이 본래 가져갔을 이름도 가져간다 --
+		 * 그리고 DEFINE 은 여기서 스스로를 예외로 두지 않는다.
 		 */
 		if (list_length(cref->fields) == 2)
 			ereport(ERROR,
@@ -1968,9 +1966,9 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 	 * allow sublinks everywhere in SELECT/INSERT/UPDATE/DELETE/MERGE, but
 	 * generally not in utility statements.
 	 *
-	 * A row pattern DEFINE condition rejects a sublink wherever in the
-	 * condition it stands, so its scope is asked about ahead of p_expr_kind,
-	 * which by here may name a clause nested in the condition instead.
+	 * 행 패턴 DEFINE 조건은 조건 안 어디에 있든 서브링크를 거부하므로, 그
+	 * 스코프를 p_expr_kind 보다 먼저 확인한다. 이 시점에서 p_expr_kind 는
+	 * 조건 안에 중첩된 절의 이름을 대신 가리키고 있을 수 있기 때문이다.
 	 */
 	err = NULL;
 	switch (pstate->p_rpr_define ? EXPR_KIND_RPR_DEFINE : pstate->p_expr_kind)
@@ -2054,32 +2052,29 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 			break;
 
 			/*----------
-			 * XXX SQL/RPR (ISO/IEC 19075-5 6.17.4 / 4.18.4; R020 / R010)
-			 * permits a subquery nested in a DEFINE expression provided
-			 * that:
-			 *   (a) the subquery does not itself perform row pattern
-			 *       recognition, and
-			 *   (b) the subquery does not reference a row pattern variable
-			 *       of the outer query.
+			 * XXX SQL/RPR (ISO/IEC 19075-5 6.17.4 / 4.18.4; R020 / R010) 은
+			 * 다음 조건을 만족하면 DEFINE 표현식 안에 중첩된
+			 * 서브쿼리를 허용한다:
+			 *   (a) 서브쿼리 자신은 행 패턴 인식을 수행하지 않고, 그리고
+			 *   (b) 서브쿼리는 외부 질의의 행 패턴 변수를 참조하지 않는다.
 			 *
-			 * We reject all subqueries here for now.  Implementing the
-			 * case distinction would mean walking the analyzed subquery
-			 * Query tree for nested RPR window clauses to enforce (a),
-			 * and walking it for ColumnRef qualifiers matching any
-			 * ancestor's p_rpr_pattern_vars to enforce (b).  Both checks
-			 * are doable with the existing infrastructure -- they are
-			 * left as future work, not blocked on any other feature.
-			 * Until then this blanket rejection is intentional
-			 * over-rejection, not a standard fit.
+			 * 지금은 여기서 모든 서브쿼리를 거부한다. 이 경우 구분을
+			 * 구현하려면, (a) 를 강제하기 위해 분석된 서브쿼리 Query 트리를
+			 * 순회하며 중첩된 RPR 윈도우 절을 찾고, (b) 를 강제하기 위해
+			 * 조상의 p_rpr_pattern_vars 와 일치하는 ColumnRef 한정자를 찾도록
+			 * 순회해야 한다.  두 검사 모두 기존 인프라로 구현 가능하다 --
+			 * 다른 기능에 막혀서가 아니라 향후 작업으로 남겨둔 것이다.
+			 * 그때까지는 이 일괄 거부가 표준에 맞춘 것이 아니라 의도적인
+			 * 과잉 거부다.
 			 *
-			 * It rejects the SubLink, which is not the same as keeping
-			 * the subquery unanalyzed: a construct that analyzes its
-			 * query before building the SubLink, as
-			 * transformJsonArrayQueryConstructor() does, has already
-			 * resolved names and opened relations inside it by the time
-			 * we get here, and reports its own errors first.  Whoever
-			 * implements (a) and (b) must not read this rejection as
-			 * proof that nothing inside a DEFINE subquery runs.
+			 * 이는 SubLink 를 거부하는 것이며, 서브쿼리를 분석하지 않은 채로
+			 * 남겨두는 것과는 다르다:
+			 * transformJsonArrayQueryConstructor() 가 하듯이 SubLink 를
+			 * 만들기 전에 자신의 질의를 분석하는 구성체는 여기에 도달할 때
+			 * 이미 그 안의 이름을 해석하고 릴레이션을 열어 두었으며, 자신의
+			 * 오류를 먼저 보고한다.  (a) 와 (b) 를 구현하는 사람은 이 거부를
+			 * DEFINE 서브쿼리 안에서 아무것도 실행되지 않는다는 증거로
+			 * 읽어서는 안 된다.
 			 *----------
 			 */
 		case EXPR_KIND_RPR_DEFINE:

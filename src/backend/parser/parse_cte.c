@@ -96,10 +96,10 @@ static void checkWellFormedRecursion(CteState *cstate);
 static bool checkWellFormedRecursionWalker(Node *node, CteState *cstate);
 static void checkWellFormedSelectStmt(SelectStmt *stmt, CteState *cstate);
 
-/* Recursive-WITH RPR rejection */
+/* 재귀 WITH 의 RPR 거부 */
 typedef struct
 {
-	ParseLoc	location;		/* location of first RPR window, or -1 */
+	ParseLoc	location;		/* 첫 RPR 윈도우의 위치, 없으면 -1 */
 } ContainRPRContext;
 
 static bool contain_rpr_walker(Node *node, void *context);
@@ -173,14 +173,15 @@ transformWithClause(ParseState *pstate, WithClause *withClause)
 		int			i;
 
 		/*
-		 * Per ISO/IEC 9075-2:2016 7.17 Syntax Rule 3)e)f), every <with list
-		 * element> in a WITH RECURSIVE clause is "potentially recursive" and
-		 * shall not contain a <row pattern common syntax>.  (PostgreSQL does
-		 * not implement <row pattern measures>, so only the common syntax
-		 * needs to be checked.)  ISO/IEC 19075-5 6.17.5 (R020) and 4.18.5
-		 * (R010) restate the prohibition for CREATE RECURSIVE VIEW, which is
-		 * rewritten to WITH RECURSIVE by makeRecursiveViewSelect() and so
-		 * flows through here as well.
+		 * ISO/IEC 9075-2:2016 7.17 Syntax Rule 3)e)f) 에 따르면, WITH
+		 * RECURSIVE 절의 모든 <with list element>는
+		 * "potentially recursive"이며 <row pattern common syntax>를
+		 * 포함해서는 안 된다.  (PostgreSQL 은 <row pattern measures>를
+		 * 구현하지 않으므로, common syntax 만 검사하면 된다.) ISO/IEC 19075-5
+		 * 6.17.5 (R020) 와
+		 * 4.18.5 (R010) 는 CREATE RECURSIVE VIEW 에 대해서도 같은 금지를 재차
+		 * 규정하는데, 이는 makeRecursiveViewSelect() 가 WITH RECURSIVE 로
+		 * 재작성하므로 여기도 거치게 된다.
 		 */
 		foreach_node(CommonTableExpr, cte, withClause->ctes)
 		{
@@ -1302,8 +1303,8 @@ checkWellFormedSelectStmt(SelectStmt *stmt, CteState *cstate)
 
 /*
  * contain_rpr_walker
- *	  Returns true if the raw parse tree contains any <row pattern common
- *	  syntax> -- i.e., any WindowDef with PATTERN/DEFINE attached.
+ *	  원시 파스 트리에 <row pattern common syntax>가 하나라도 있으면 true 를
+ *	  반환한다 -- 즉, PATTERN/DEFINE 이 붙은 WindowDef 가 있는지 본다.
  */
 static bool
 contain_rpr_walker(Node *node, void *context)

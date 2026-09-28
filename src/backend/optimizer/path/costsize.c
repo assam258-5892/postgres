@@ -3261,8 +3261,8 @@ cost_windowagg(Path *path, PlannerInfo *root,
 	 * any case, it's a good estimate for all the built-in window functions,
 	 * so we'll just do this for now.
 	 *
-	 * Moreover, if row pattern recognition is used, we charge the DEFINE
-	 * expressions once per tuple for each DEFINE variable.
+	 * 게다가 행 패턴 인식을 쓰는 경우, DEFINE 변수마다 DEFINE 표현식을 튜플당
+	 * 한 번씩 청구한다.
 	 */
 	if (winclause->rpPattern)
 	{

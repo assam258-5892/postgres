@@ -647,24 +647,23 @@ typedef struct WindowFuncRunCondition
 /*
  * RPRNavExpr
  *
- * Represents a PREV/NEXT/FIRST/LAST navigation call in an RPR DEFINE clause.
- * At expression compile time this is translated into EEOP_RPR_NAV_SET /
- * EEOP_RPR_NAV_RESTORE opcodes rather than a normal function call.
+ * RPR DEFINE 절 안의 PREV/NEXT/FIRST/LAST 내비게이션 호출을 나타낸다.  표현식
+ * 컴파일 시점에 이는 일반 함수 호출이 아니라 EEOP_RPR_NAV_SET /
+ * EEOP_RPR_NAV_RESTORE 옵코드로 변환된다.
  *
- * Simple navigation (PREV/NEXT/FIRST/LAST):
- *   kind:       RPR_NAV_PREV, RPR_NAV_NEXT, RPR_NAV_FIRST, or RPR_NAV_LAST
- *   arg:        the expression to evaluate against the target row
- *   offset_arg: optional explicit offset expression (2-arg form); NULL for
- *               the 1-arg form (implicit offset: 1 for PREV/NEXT, 0 for
- *               FIRST/LAST)
+ * 단순 내비게이션(PREV/NEXT/FIRST/LAST):
+ *   kind: RPR_NAV_PREV, RPR_NAV_NEXT, RPR_NAV_FIRST, 또는 RPR_NAV_LAST arg:
+ *   대상 행에 대해 평가할 표현식
+ *   offset_arg: 명시적 오프셋 표현식(선택, 2-인자 형태); 1-인자
+ *               형태에서는 NULL(암묵적 오프셋: PREV/NEXT는 1, FIRST/LAST는 0)
  *
- * Compound navigation (PREV/NEXT wrapping FIRST/LAST):
+ * 복합 내비게이션(FIRST/LAST를 감싸는 PREV/NEXT):
  *   kind:              RPR_NAV_PREV_FIRST, PREV_LAST, NEXT_FIRST, NEXT_LAST
- *   arg:               the expression to evaluate against the final target row
- *   offset_arg:        inner offset (FIRST/LAST), NULL = implicit default
- *   compound_offset_arg: outer offset (PREV/NEXT), NULL = implicit default
+ *   arg: 최종 대상 행에 대해 평가할 표현식 offset_arg: 내부
+ *   오프셋(FIRST/LAST), NULL = 암묵적 기본값 compound_offset_arg: 외부
+ *   오프셋(PREV/NEXT), NULL = 암묵적 기본값
  *
- * Compound target computation:
+ * 복합 대상 계산:
  *   PREV_FIRST: (match_start + inner) - outer
  *   NEXT_FIRST: (match_start + inner) + outer
  *   PREV_LAST:  (currentpos  - inner) - outer
@@ -672,34 +671,34 @@ typedef struct WindowFuncRunCondition
  */
 typedef enum RPRNavKind
 {
-	RPR_NAV_PREV,				/* offset default: 1 */
-	RPR_NAV_NEXT,				/* offset default: 1 */
-	RPR_NAV_FIRST,				/* offset default: 0 */
-	RPR_NAV_LAST,				/* offset default: 0 */
-	/* compound: outer(inner(arg)) */
-	RPR_NAV_PREV_FIRST,			/* (offset, compound_offset) default: (0, 1) */
-	RPR_NAV_PREV_LAST,			/* (offset, compound_offset) default: (0, 1) */
-	RPR_NAV_NEXT_FIRST,			/* (offset, compound_offset) default: (0, 1) */
-	RPR_NAV_NEXT_LAST,			/* (offset, compound_offset) default: (0, 1) */
+	RPR_NAV_PREV,				/* 오프셋 기본값: 1 */
+	RPR_NAV_NEXT,				/* 오프셋 기본값: 1 */
+	RPR_NAV_FIRST,				/* 오프셋 기본값: 0 */
+	RPR_NAV_LAST,				/* 오프셋 기본값: 0 */
+	/* 복합: outer(inner(arg)) */
+	RPR_NAV_PREV_FIRST,			/* (offset, compound_offset) 기본값: (0, 1) */
+	RPR_NAV_PREV_LAST,			/* (offset, compound_offset) 기본값: (0, 1) */
+	RPR_NAV_NEXT_FIRST,			/* (offset, compound_offset) 기본값: (0, 1) */
+	RPR_NAV_NEXT_LAST,			/* (offset, compound_offset) 기본값: (0, 1) */
 } RPRNavKind;
 
 typedef struct RPRNavExpr
 {
 	Expr		xpr;
-	RPRNavKind	kind;			/* navigation kind */
-	Expr	   *arg;			/* argument expression */
-	Expr	   *offset_arg;		/* offset expression, or NULL for default */
-	Expr	   *compound_offset_arg;	/* outer offset for compound nav, or
-										 * NULL for its default */
+	RPRNavKind	kind;			/* 내비게이션 종류 */
+	Expr	   *arg;			/* 인자 표현식 */
+	Expr	   *offset_arg;		/* 오프셋 표현식, 기본값이면 NULL */
+	Expr	   *compound_offset_arg;	/* 복합 내비게이션의 외부 오프셋,
+										 * 기본값이면 NULL */
 
-	/* unique ID within the WindowAgg; -1 until the planner assigns it */
+	/* WindowAgg 내에서 고유한 ID; 플래너가 배정하기 전까지는 -1 */
 	int			navno pg_node_attr(query_jumble_ignore);
 
-	/* result type (same as arg's type) */
+	/* 결과 타입(arg의 타입과 동일) */
 	Oid			resulttype pg_node_attr(query_jumble_ignore);
-	/* OID of collation of result */
+	/* 결과의 collation OID */
 	Oid			resultcollid pg_node_attr(query_jumble_ignore);
-	/* token location, or -1 if unknown */
+	/* 토큰 위치, 알 수 없으면 -1 */
 	ParseLoc	location;
 } RPRNavExpr;
 

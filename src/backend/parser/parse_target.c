@@ -153,7 +153,7 @@ transformTargetList(ParseState *pstate, List *targetlist,
 					/* It is something.*, expand into multiple items */
 					items = ExpandColumnRefStar(pstate, cref, true,
 												&expanded);
-					/* only a DEFINE condition declines, and this is not one */
+					/* DEFINE 조건만 거부하며, 이는 그런 경우가 아니다 */
 					Assert(expanded);
 					p_target = list_concat(p_target, items);
 					continue;
@@ -245,11 +245,11 @@ transformExpressionList(ParseState *pstate, List *exprlist,
 				List	   *items;
 
 				/*
-				 * It is something.*, expand into multiple items -- unless
-				 * ExpandColumnRefStar() declines, which it does for a
-				 * reference a row pattern DEFINE condition may not expand.
-				 * Fall through then and let transformExpr() have the
-				 * reference, which is where that is diagnosed.
+				 * something.* 형태이므로 여러 항목으로 펼친다 -- 단,
+				 * ExpandColumnRefStar() 가 거부하는 경우는 예외인데, 이는 행
+				 * 패턴 DEFINE 조건이 펼칠 수 없는 참조에 대해 일어난다.  그럴
+				 * 때는 그대로 통과시켜 transformExpr() 가 그 참조를 받게
+				 * 하며, 거기서 이를 진단한다.
 				 */
 				items = ExpandColumnRefStar(pstate, cref, false, &expanded);
 				if (expanded)
@@ -266,16 +266,16 @@ transformExpressionList(ParseState *pstate, List *exprlist,
 			if (IsA(llast(ind->indirection), A_Star))
 			{
 				/*
-				 * It is something.*, expand into multiple items.
+				 * something.* 형태이므로 여러 항목으로 펼친다.
 				 *
-				 * No DEFINE test is needed here, unlike the ColumnRef arm
-				 * above.  ExpandIndirectionStar() transforms the
-				 * parenthesized argument with p_rpr_define still set, so
-				 * transformColumnRef() still rejects a range variable before
-				 * it becomes a whole-row reference; what survives is field
-				 * selection on a value, "(x).*", which occupies no qualifier
-				 * slot and is allowed in DEFINE for the same reason "(x).f"
-				 * is.
+				 * 위의 ColumnRef 분기와 달리 여기서는 DEFINE 검사가 필요
+				 * 없다.  ExpandIndirectionStar() 는 p_rpr_define 이 여전히
+				 * 설정된 채로 괄호로 묶인 인수를 변환하므로,
+				 * transformColumnRef() 는 그것이 전체 행 참조가 되기 전에
+				 * 범위 변수를 여전히 거부한다; 살아남는 것은 값에 대한 필드
+				 * 선택 "(x).*"뿐이며, 이는 어떤 한정자 자리도 차지하지
+				 * 않으므로 "(x).f"가 DEFINE 에서 허용되는 것과 같은
+				 * 이유로 허용된다.
 				 */
 				result = list_concat(result,
 									 ExpandIndirectionStar(pstate, ind,
@@ -1146,11 +1146,11 @@ checkInsertTargets(ParseState *pstate, List *cols, List **attrnos)
  *
  * The referenced columns are marked as requiring SELECT access.
  *
- * *expanded is set false, and NIL returned, if the reference is one this
- * refuses to expand; the caller is then to leave it to transformExpr().  A
- * row pattern DEFINE condition is the only thing that brings that about, and
- * the DEFINE branch below says why.  It is a separate flag because NIL is
- * also what expanding a relation with no columns of its own returns.
+ * 이 함수가 펼치기를 거부하는 참조라면 *expanded 를 false 로 설정하고 NIL 을
+ * 반환한다; 그러면 호출자는 그 처리를 transformExpr() 에 맡긴다.  그런 일을
+ * 일으키는 것은 행 패턴 DEFINE 조건뿐이며, 아래의 DEFINE 분기가 그 이유를
+ * 설명한다.  자체 컬럼이 없는 릴레이션을 펼칠 때도 NIL 을 반환하므로, 이를
+ * 구분하기 위해 별도의 플래그를 둔다.
  */
 static List *
 ExpandColumnRefStar(ParseState *pstate, ColumnRef *cref,
@@ -1281,24 +1281,23 @@ ExpandColumnRefStar(ParseState *pstate, ColumnRef *cref,
 		}
 
 		/*
-		 * Both hooks have had their shot, so what is left is a reference to a
-		 * FROM-clause relation, or a name that resolves to nothing at all. A
-		 * row pattern DEFINE condition may have neither, and expanding one
-		 * here binds it by RTE rather than by name, past the checks in
-		 * transformColumnRef().  Decline, so that the caller hands the whole
-		 * reference to transformExpr() and it is diagnosed there, where every
-		 * other DEFINE spelling is: a pattern variable as the qualifier it
-		 * reserves, and any other name, resolved or not, as the whole-row
-		 * reference its form makes it.
+		 * 두 훅 모두 이미 기회를 가졌으므로, 남은 것은 FROM 절 릴레이션에
+		 * 대한 참조이거나 아무것도 해석되지 않는 이름이다.  행 패턴 DEFINE
+		 * 조건은 둘 다 가질 수 없으며, 여기서 이를 펼치면
+		 * transformColumnRef() 의 검사를 거치지 않고 이름이 아닌 RTE 로
+		 * 바인딩해 버린다.  그러므로 거부해서 호출자가 그 참조 전체를
+		 * transformExpr() 에 넘기게 하고, 거기서 다른 모든 DEFINE 철자와
+		 * 마찬가지로 진단하게 한다: 패턴 변수는 그것이 예약하는 한정자로서,
+		 * 그 밖의 모든 이름은 해석되든 안 되든 그 형태가 만드는 전체 행
+		 * 참조로서 진단된다.
 		 *
-		 * A name a hook owns has returned above, which is the point of
-		 * deciding here rather than in the caller.  Withholding the expansion
-		 * would not reject such a name -- none of those checks has anything
-		 * to say about one the query parser never resolves -- it would leave
-		 * transformColumnRef() to read "rec.*" as the single whole value
-		 * "rec", which is a different condition rather than a refused one,
-		 * and differs silently wherever a row constructor is not counting its
-		 * entries.
+		 * 훅이 소유한 이름은 이미 위에서 반환되었으며, 이것이 호출자가 아니라
+		 * 여기서 판단하는 이유다.  펼치기를 보류한다고 해서 그런 이름이
+		 * 거부되는 것은 아니다 -- 질의 파서가 결코 해석하지 않는 이름에
+		 * 대해서는 그런 검사들이 아무 말도 하지 않는다 -- 오히려
+		 * transformColumnRef() 가 "rec.*"를 단일한 전체 값 "rec"로 읽도록
+		 * 남겨두게 되는데, 이는 거부된 것이 아니라 다른 조건이며, 행 생성자가
+		 * 자신의 항목 수를 세지 않는 모든 곳에서 조용히 달라진다.
 		 */
 		if (pstate->p_rpr_define)
 		{
