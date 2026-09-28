@@ -493,11 +493,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  FRAME must start at CURRENT ROW when using row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
             ^
-DETAIL:  Current frame starts with UNBOUNDED PRECEDING.
-HINT:  Use: ROWS BETWEEN CURRENT ROW AND ...
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- EXCLUDE options
 -- EXCLUDE not permitted
 SELECT COUNT(*) OVER w
@@ -509,11 +508,9 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use EXCLUDE options with row pattern recognition
+ERROR:  cannot use EXCLUDE with row pattern recognition
 LINE 6:     EXCLUDE CURRENT ROW
             ^
-DETAIL:  Frame definition includes EXCLUDE CURRENT ROW.
-HINT:  Remove the EXCLUDE clause from the window definition.
 -- EXCLUDE GROUP not permitted
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -524,11 +521,9 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use EXCLUDE options with row pattern recognition
+ERROR:  cannot use EXCLUDE with row pattern recognition
 LINE 6:     EXCLUDE GROUP
             ^
-DETAIL:  Frame definition includes EXCLUDE GROUP.
-HINT:  Remove the EXCLUDE clause from the window definition.
 -- EXCLUDE TIES not permitted
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -539,11 +534,24 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use EXCLUDE options with row pattern recognition
+ERROR:  cannot use EXCLUDE with row pattern recognition
 LINE 6:     EXCLUDE TIES
             ^
-DETAIL:  Frame definition includes EXCLUDE TIES.
-HINT:  Remove the EXCLUDE clause from the window definition.
+-- Both rules broken at once.  The frame shape is settled first, so the
+-- report names the shape; the EXCLUDE clause may not survive the rewrite.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    EXCLUDE TIES
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+ERROR:  unsupported frame for row pattern recognition
+LINE 5:     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ^
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- range frame is not allowed with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -553,10 +561,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use FRAME option RANGE with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWIN...
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- GROUPS frame is not allowed with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -566,10 +574,24 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  cannot use FRAME option GROUPS with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     GROUPS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWI...
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
+-- omitting the frame clause leaves the standard default, RANGE BETWEEN
+-- UNBOUNDED PRECEDING AND CURRENT ROW, which breaks three of the rules at
+-- once.  One report, stating what the frame has to be.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+ERROR:  unsupported frame for row pattern recognition
+LINE 3: WINDOW w AS (
+                    ^
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- ERROR: frame must start at current row when row pattern recognition is used
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -579,11 +601,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  FRAME must start at CURRENT ROW when using row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN 1 PRECEDING AND UNBOUNDED FOLLOWING
             ^
-DETAIL:  Current frame starts with offset PRECEDING.
-HINT:  Use: ROWS BETWEEN CURRENT ROW AND ...
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- ERROR: frame must start at current row with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -593,11 +614,10 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS val > 0
 );
-ERROR:  FRAME must start at CURRENT ROW when using row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
             ^
-DETAIL:  Current frame starts with offset FOLLOWING.
-HINT:  Use: ROWS BETWEEN CURRENT ROW AND ...
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- ERROR: end before start: CURRENT ROW AND 1 PRECEDING
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -634,10 +654,10 @@ WINDOW w AS (
     DEFINE A AS val > 0
 )
 ORDER BY id;
-ERROR:  cannot use CURRENT ROW as frame end with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     ROWS BETWEEN CURRENT ROW AND CURRENT ROW
             ^
-HINT:  Use UNBOUNDED FOLLOWING or a positive offset FOLLOWING.
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- Zero offset: CURRENT ROW AND 0 FOLLOWING denotes the same one-row frame
 -- and is likewise rejected (caught at execution time).
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -756,10 +776,10 @@ WINDOW w AS (
     DEFINE A AS val >= 0, B AS val >= 0
 )
 ORDER BY id;
-ERROR:  cannot use FRAME option RANGE with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     RANGE BETWEEN CURRENT ROW AND 10 FOLLOWING
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 -- GROUPS frame with RPR (not permitted)
 SELECT id, val, COUNT(*) OVER w as cnt
 FROM rpr_frame
@@ -771,10 +791,10 @@ WINDOW w AS (
     DEFINE A AS val >= 0, B AS val >= 0
 )
 ORDER BY id;
-ERROR:  cannot use FRAME option GROUPS with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 5:     GROUPS BETWEEN CURRENT ROW AND 1 FOLLOWING
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 DROP TABLE rpr_frame;
 -- ============================================================
 -- PARTITION BY + FRAME Tests
@@ -818,10 +838,10 @@ WINDOW w AS (
     DEFINE A AS val >= 10, B AS val >= 20
 )
 ORDER BY id;
-ERROR:  cannot use FRAME option RANGE with row pattern recognition
+ERROR:  unsupported frame for row pattern recognition
 LINE 6:     RANGE BETWEEN CURRENT ROW AND 10 FOLLOWING
             ^
-HINT:  Use ROWS instead.
+DETAIL:  The frame must be "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" or "ROWS BETWEEN CURRENT ROW AND offset FOLLOWING".
 DROP TABLE rpr_partition;
 -- ============================================================
 -- PATTERN Syntax Tests
@@ -1632,8 +1652,10 @@ ERROR:  invalid token "?" after "*?" quantifier
 LINE 6:     PATTERN (A *? ?)
                           ^
 HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
--- The first token is quoted as typed: stripping its "|" would name "*", and
--- "A* ?" is accepted, so the error would describe a pair the grammar takes
+-- A first token ending in "|" is a quantifier plus the alternation operator,
+-- so what follows it has to be a pattern and an Op never is one.  The report
+-- names the alternation rather than the pair: "A* ?" is accepted, so naming
+-- that pair would describe something the grammar takes.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
@@ -1642,10 +1664,22 @@ WINDOW w AS (
     PATTERN (A *| ?)
     DEFINE A AS val > 0
 );
-ERROR:  invalid token "?" after "*|" quantifier
+ERROR:  alternation operator "|" requires a pattern on both sides
 LINE 6:     PATTERN (A *| ?)
                           ^
-HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by "?" for the reluctant version.
+-- the same for a glued two-character quantifier, where naming the pair would
+-- have to invent "*?" out of "*?|"
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *?| ??)
+    DEFINE A AS val > 0
+);
+ERROR:  alternation operator "|" requires a pattern on both sides
+LINE 6:     PATTERN (A *?| ??)
+                           ^
 -- A first token that is no quantifier at all is itself the offending one, so it
 -- is reported the same way as when it stands alone
 SELECT COUNT(*) OVER w
@@ -4671,9 +4705,22 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS nosuch.val > 0
 );
-ERROR:  missing FROM-clause entry for table "nosuch"
+ERROR:  qualified expression "nosuch.val" is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS nosuch.val > 0
                         ^
+-- A three-part name is schema-qualified even when its first part spells a
+-- pattern variable, and is rejected as any other qualified name
+SELECT COUNT(*) OVER w
+FROM rpr_err
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (public+)
+    DEFINE public AS public.rpr_err.val > 0
+);
+ERROR:  qualified expression "public.rpr_err.val" is not allowed in DEFINE clause
+LINE 7:     DEFINE public AS public.rpr_err.val > 0
+                             ^
 -- Unqualified composite field access in DEFINE works: no qualifier means no
 -- pattern/range-var navigation, so the pre-check skips and normal resolution
 -- handles "(items).amount" via A_Indirection on the current row.
@@ -4721,6 +4768,24 @@ WINDOW w AS (
 ERROR:  range variable qualified expression "rpr_composite.items" is not allowed in DEFINE clause
 LINE 7:     DEFINE A AS (rpr_composite.items).amount > 10
                          ^
+-- A trailing star on a composite column is a different thing from a trailing
+-- star on a relation: it names no relation, so the row constructor keeps
+-- expanding it and the DEFINE restrictions do not apply.
+SELECT COUNT(*) OVER w
+FROM rpr_composite
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS ROW((items).*) IS NOT NULL
+);
+ count 
+-------
+     3
+     0
+     0
+(3 rows)
+
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
 -- ERROR: undefined column in DEFINE

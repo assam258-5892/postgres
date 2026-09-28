@@ -565,8 +565,8 @@ WHERE pos &lt; 3;
     it must return <literal>TRUE</literal>, <literal>FALSE</literal>
     or <literal>NULL</literal>. The expression may comprise column references
     and non-volatile functions. Window functions, aggregate functions,
-    set-returning functions and subqueries are not allowed. An example
-    of <literal>DEFINE</literal> is as follows.
+    set-returning functions, whole-row references and subqueries are not
+    allowed. An example of <literal>DEFINE</literal> is as follows.
 
 <programlisting>
 DEFINE

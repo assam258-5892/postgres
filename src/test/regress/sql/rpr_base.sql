@@ -439,6 +439,18 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
+-- Both rules broken at once.  The frame shape is settled first, so the
+-- report names the shape; the EXCLUDE clause may not survive the rewrite.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    EXCLUDE TIES
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+
 -- range frame is not allowed with RPR
 SELECT COUNT(*) OVER w
 FROM rpr_frame
@@ -455,6 +467,17 @@ FROM rpr_frame
 WINDOW w AS (
     ORDER BY id
     GROUPS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS val > 0
+);
+
+-- omitting the frame clause leaves the standard default, RANGE BETWEEN
+-- UNBOUNDED PRECEDING AND CURRENT ROW, which breaks three of the rules at
+-- once.  One report, stating what the frame has to be.
+SELECT COUNT(*) OVER w
+FROM rpr_frame
+WINDOW w AS (
+    ORDER BY id
     PATTERN (A+)
     DEFINE A AS val > 0
 );
@@ -1171,14 +1194,27 @@ WINDOW w AS (
     DEFINE A AS val > 0
 );
 
--- The first token is quoted as typed: stripping its "|" would name "*", and
--- "A* ?" is accepted, so the error would describe a pair the grammar takes
+-- A first token ending in "|" is a quantifier plus the alternation operator,
+-- so what follows it has to be a pattern and an Op never is one.  The report
+-- names the alternation rather than the pair: "A* ?" is accepted, so naming
+-- that pair would describe something the grammar takes.
 SELECT COUNT(*) OVER w
 FROM rpr_reluctant
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A *| ?)
+    DEFINE A AS val > 0
+);
+
+-- the same for a glued two-character quantifier, where naming the pair would
+-- have to invent "*?" out of "*?|"
+SELECT COUNT(*) OVER w
+FROM rpr_reluctant
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A *?| ??)
     DEFINE A AS val > 0
 );
 
@@ -2995,6 +3031,17 @@ WINDOW w AS (
     DEFINE A AS nosuch.val > 0
 );
 
+-- A three-part name is schema-qualified even when its first part spells a
+-- pattern variable, and is rejected as any other qualified name
+SELECT COUNT(*) OVER w
+FROM rpr_err
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (public+)
+    DEFINE public AS public.rpr_err.val > 0
+);
+
 -- Unqualified composite field access in DEFINE works: no qualifier means no
 -- pattern/range-var navigation, so the pre-check skips and normal resolution
 -- handles "(items).amount" via A_Indirection on the current row.
@@ -3029,6 +3076,18 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+)
     DEFINE A AS (rpr_composite.items).amount > 10
+);
+
+-- A trailing star on a composite column is a different thing from a trailing
+-- star on a relation: it names no relation, so the row constructor keeps
+-- expanding it and the DEFINE restrictions do not apply.
+SELECT COUNT(*) OVER w
+FROM rpr_composite
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+)
+    DEFINE A AS ROW((items).*) IS NOT NULL
 );
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
