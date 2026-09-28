@@ -1,13 +1,11 @@
 ============================================================================
-  PostgreSQL Row Pattern Recognition: Flat-Array Stream NFA Guide
+  PostgreSQL Row Pattern Recognition (RPR): Flat-Array Stream NFA Guide
 ============================================================================
 
-  This README's target audience is developers with a basic
-  understanding of the PostgreSQL executor and planner architecture.
-  Also it would be better for them to understand the specification of
-  the row pattern recognition in the SQL standard [1][2]. If you do
-  not have access to the SQL standard, Oracle's manual or Trino's
-  manual can be alternatives for them.
+  Readers should understand the specification of row pattern
+  recognition in the SQL standard [1][2].  If you do not have access
+  to the SQL standard, Oracle's manual or Trino's manual can be
+  alternatives.
 
   This README's scope is the entire process from PATTERN/DEFINE clause
   parsing to NFA runtime execution, together with the contracts the
@@ -88,8 +86,8 @@ base refer to that document.  Where Chapters 4 (FROM clause) and 6 (WINDOW
 clause) describe parallel material, this implementation cites the Chapter 6
 subclause first because it targets Feature R020.
 
-Row Pattern Recognition (hereafter RPR) is a feature introduced in SQL:2016
-that matches regex-based patterns against ordered row sets.
+RPR is a feature introduced in SQL:2016 that matches regex-based
+patterns against ordered row sets.
 
 The SQL standard defines two forms:
 
@@ -111,12 +109,15 @@ The basic syntax is as follows:
   OVER (
     PARTITION BY ...
     ORDER BY ...
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    ROWS BETWEEN CURRENT ROW AND [UNBOUNDED | offset] FOLLOWING
     AFTER MATCH SKIP TO NEXT ROW | SKIP PAST LAST ROW
-    [INITIAL | SEEK]   -- SEEK is defined in the standard but not implemented
+    [INITIAL | SEEK]
     PATTERN ( <regex> )
     DEFINE <variable> AS <condition>, ...
   )
+
+SEEK is defined in the standard but not implemented.  The offset in
+the frame's end boundary must not be zero or a negative value.
 
 The PATTERN clause is a regular expression over row pattern variables.
 The DEFINE clause specifies boolean conditions that determine whether each
@@ -134,16 +135,10 @@ PERMUTE is not supported (the parser raises an error).  Its syntax is in the
 grammar so that the standard spelling is diagnosed rather than read as a
 pattern variable followed by a group; write the alternations out instead.
 
-RPR is also rejected outright inside a recursive WITH.  Per ISO/IEC 9075-2
-7.17 Syntax Rule 3)e)f) every <with list element> of a WITH RECURSIVE clause
-is potentially recursive and shall not contain a <row pattern common
-syntax>, and ISO/IEC 19075-5 6.17.5 restates the prohibition for CREATE
-RECURSIVE VIEW.  transformWithClause() (parse_cte.c) therefore walks each
-CTE with contain_rpr_walker() and reports "cannot use row pattern
-recognition in a recursive query" at the first WindowDef carrying
-PATTERN/DEFINE.  The walk runs on the raw parse tree, before the CTEs are
-analyzed, and it covers CREATE RECURSIVE VIEW as well, since
-makeRecursiveViewSelect() rewrites that into WITH RECURSIVE.
+RPR is not allowed in WITH RECURSIVE or CREATE RECURSIVE VIEW (ISO/IEC
+9075-2 7.17; ISO/IEC 19075-5 6.17.5).  transformWithClause()
+(parse_cte.c) rejects it by walking the raw parse tree with
+contain_rpr_walker(), before the CTEs are analyzed.
 
 Chapter II  Overall Processing Pipeline
 ============================================================================
