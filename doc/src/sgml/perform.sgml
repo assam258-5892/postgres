@@ -764,6 +764,10 @@ WINDOW w AS (
     computed and every row of the frame has to be kept; and
     <literal>Nav Mark Lookahead</literal> reports <literal>runtime</literal>
     or <literal>infinite</literal>.
+    Under <literal>ANALYZE</literal>, a node that was executed shows the
+    bound resolved for its last scan instead of <literal>runtime</literal>:
+    a row count, <literal>retain all</literal> or
+    <literal>infinite</literal>.
    </para>
 
    <para>
@@ -782,6 +786,12 @@ WINDOW w AS (
     same pattern prints with the <literal>#</literal> and
     <literal>~</literal> markers in that mode and without them in the
     others.
+    The markers are also left out when the frame ends at
+    <literal><replaceable>offset</replaceable> FOLLOWING</literal> rather
+    than <literal>UNBOUNDED FOLLOWING</literal>, or when a
+    <literal>DEFINE</literal> condition uses <function>FIRST</function>, or
+    <function>LAST</function> with an offset of its own, whether alone or
+    inside <function>PREV</function> or <function>NEXT</function>.
    </para>
 
   </sect2>
