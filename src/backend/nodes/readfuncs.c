@@ -558,6 +558,99 @@ _readExtensibleNode(ReadNodeContext *ctx)
 	READ_DONE();
 }
 
+static RPRPattern *
+_readRPRPattern(ReadNodeContext *ctx)
+{
+	READ_LOCALS(RPRPattern);
+
+	READ_INT_FIELD(numVars);
+	READ_INT_FIELD(maxDepth);
+	READ_INT_FIELD(numElements);
+
+	/*
+	 * varNames 배열을 읽는다.  _outRPRPattern()이 항상 이 리스트를 쓰므로
+	 * 여기서 모든 토큰은 철자가 하나뿐이며, 그 외의 입력은 모두 잘못된
+	 * 것이다.  구분자를 그냥 믿지 않고 직접 검사하는 이유는, 리스트와
+	 * 어긋나는 numVars 값이 있으면 그 뒤에 오는 모든 것에 대해 토큰 스트림이
+	 * 한 칸씩 밀려버리기 때문이다.
+	 */
+	token = pg_strtok(ctx, &length);	/* :varNames 건너뛰기 */
+	token = pg_strtok(ctx, &length);	/* '(' 읽기 */
+	if (local_node->numVars <= 0 || token == NULL || token[0] != '(')
+		elog(ERROR, "unexpected varNames in RPRPattern");
+	local_node->varNames = palloc_array(char *, local_node->numVars);
+	for (int i = 0; i < local_node->numVars; i++)
+	{
+		token = pg_strtok(ctx, &length);
+		if (token == NULL)
+			elog(ERROR, "unexpected end of RPRPattern varNames");
+		local_node->varNames[i] = nullable_string(token, length);
+	}
+	token = pg_strtok(ctx, &length);	/* ')' 읽기 */
+	if (token == NULL || token[0] != ')')
+		elog(ERROR, "unterminated varNames in RPRPattern");
+
+	/* elements 배열을 읽는다 */
+	token = pg_strtok(ctx, &length);	/* :elements 건너뛰기 */
+	token = pg_strtok(ctx, &length);	/* '(' 읽기 */
+	/* out은 항상 배열을 출력한다(numElements >= 2 는
+	 * makeRPRPattern 이 보장) */
+	if (local_node->numElements <= 0 || token == NULL || token[0] != '(')
+		elog(ERROR, "unexpected elements in RPRPattern");
+	/* palloc0은 reserved도 0으로 채우는데, 라운드 트립에서는 이 값을 버린다 */
+	local_node->elements = palloc0_array(RPRPatternElement, local_node->numElements);
+	for (int i = 0; i < local_node->numElements; i++)
+	{
+		RPRPatternElement *elem = &local_node->elements[i];
+		int			varId,
+					depth,
+					min,
+					max,
+					next,
+					jump;
+		unsigned int flags;		/* 다른 것과 달리 %u로 기록된다 */
+
+		/* "(varId depth flags min max next jump)"를 파싱한다 */
+		token = pg_strtok(ctx, &length);
+		varId = atoi(token);
+		token = pg_strtok(ctx, &length);
+		depth = atoi(token);
+		token = pg_strtok(ctx, &length);
+		flags = atoui(token);
+		token = pg_strtok(ctx, &length);
+		min = atoi(token);
+		token = pg_strtok(ctx, &length);
+		max = atoi(token);
+		token = pg_strtok(ctx, &length);
+		next = atoi(token);
+		token = pg_strtok(ctx, &length);
+		jump = atoi(token);
+		token = pg_strtok(ctx, &length);	/* ')' 읽기 */
+		if (token == NULL || token[0] != ')')
+			elog(ERROR, "unterminated element in RPRPattern");
+
+		elem->varId = (RPRVarId) varId;
+		elem->flags = (RPRElemFlags) flags;
+		elem->depth = (RPRDepth) depth;
+		elem->min = (RPRQuantity) min;
+		elem->max = (RPRQuantity) max;
+		elem->next = (RPRElemIdx) next;
+		elem->jump = (RPRElemIdx) jump;
+
+		/* 다음 요소의 '(' 또는 끝을 읽는다 */
+		if (i < local_node->numElements - 1)
+		{
+			token = pg_strtok(ctx, &length);	/* '(' 읽기 */
+			if (token == NULL || token[0] != '(')
+				elog(ERROR, "unexpected end of RPRPattern elements");
+		}
+	}
+
+	READ_BOOL_FIELD(isAbsorbable);
+
+	READ_DONE();
+}
+
 
 /*
  * parseNodeString

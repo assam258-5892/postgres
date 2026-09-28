@@ -18,6 +18,7 @@
 #include "access/stratnum.h"
 #include "nodes/bitmapset.h"
 #include "nodes/lockoptions.h"
+#include "nodes/parsenodes.h"
 #include "nodes/primnodes.h"
 
 
@@ -1247,6 +1248,96 @@ typedef struct Agg
 } Agg;
 
 /* ----------------
+ *		행 패턴 인식(RPR) 컴파일된 패턴 타입
+ * ----------------
+ */
+
+/* RPR 패턴 요소를 위한 타입 정의 */
+typedef uint8 RPRVarId;			/* 패턴 변수 ID */
+typedef uint8 RPRElemFlags;		/* 요소 플래그 */
+typedef uint8 RPRDepth;			/* 그룹 중첩 깊이 */
+typedef int32 RPRQuantity;		/* 수량자 최소/최대값 */
+typedef int16 RPRElemIdx;		/* 요소 배열 인덱스 */
+
+/*
+ * RPRPatternElement - NFA 패턴 매칭을 위한 평평한 요소(16 바이트)
+ *
+ * 정렬을 위해 최적화된 레이아웃(패딩 구멍 없음):
+ *   varId(1) + depth(1) + flags(1) + reserved(1) + min(4) + max(4) + next(2) + jump(2)
+ *
+ * reserved는 패딩이며 직렬화되지 않는다: 라운드 트립에서 이 값을 버린다.
+ * _outRPRPattern()은 나머지 일곱 필드를 쓰고 _readRPRPattern()은 이 필드를
+ * 0으로 채우므로, 그 형식 문자열이 전달되는 내용의 전부다.
+ * _copyRPRPattern()은 구조체를 memcpy()로 복사하므로 여덟 필드 모두를 그대로
+ * 가져간다. 이 바이트를 새로 쓰는 필드가 있다면 먼저 나머지 일곱 필드에
+ * 합류시켜야 한다.
+ */
+typedef struct RPRPatternElement
+{
+	RPRVarId	varId;			/* 변수 ID, 또는 제어용 특수 값 */
+	RPRDepth	depth;			/* 그룹 중첩 깊이 */
+	RPRElemFlags flags;			/* 플래그(소극적 등) */
+	uint8		reserved;		/* 예약된 패딩 바이트 */
+	RPRQuantity min;			/* 수량자 최소값 */
+	RPRQuantity max;			/* 수량자 최대값 */
+	RPRElemIdx	next;			/* 다음 요소 인덱스 */
+	RPRElemIdx	jump;			/* ALT/SEP 분기 링크; BEGIN: 그 자신의 END;
+							 * END: 첫 자식으로 되돌아가는 루프백 */
+} RPRPatternElement;
+
+/*
+ * RPRPattern - NFA 실행을 위한 컴파일된 패턴
+ *
+ * elements 배열 때문에 커스텀 copy/out/read 함수가 필요하다.
+ */
+typedef struct RPRPattern
+{
+	/*
+	 * RPRPattern은 손으로 작성한 복사가 필요한 배열을 가진 plan/exec 전용
+	 * 노드다(custom_copy_equal).  no_equal 속성을 가진 Plan, PlannedStmt 등과
+	 * 마찬가지로 equal()과 비교되는 일이 결코 없다: equal()에 넘겨지는 일이
+	 * 없으므로 비교할 대상이 없고, no_equal 속성으로 equal 지원이 억제되어
+	 * 있다.  Query에서도 도달할 수 없으므로 쿼리 잠블(jumble) 처리도 여기서는
+	 * 할 일이 없어 no_query_jumble 속성으로 억제되어 있다.
+	 */
+	pg_node_attr(custom_copy_equal, custom_read_write, no_equal, no_query_jumble)
+
+	NodeTag		type;			/* T_RPRPattern */
+	int			numVars;		/* 패턴 변수 개수 */
+	char	  **varNames;		/* 변수 이름 배열(DEFINE 순서가
+								 * 먼저) */
+	RPRDepth	maxDepth;		/* 가장 깊은 그룹 중첩 깊이에 1을 더한 값, 즉
+								 * 상태의 counts[] 길이 */
+	int			numElements;	/* 요소 개수 */
+	RPRPatternElement *elements;	/* 패턴 요소 배열 */
+
+	/*----------------
+	 * 컨텍스트 흡수 최적화.
+	 *
+	 * 흡수는 이후의 매치가 반드시 이전 매치의 접미사가 되도록 보장될 때만
+	 * 안전하며, 이를 위해서는 패턴이 무제한 탐욕적 요소로 시작해야 한다.
+	 * Phase-1 정규화(연속된 변수/그룹/ALT 병합과 접두사/접미사 병합)가 먼저
+	 * 패턴을 그런 형태로 다시 쓴다 -- 예를 들어 A B (A B)+는 (A B){2,}로
+	 * 병합된 다음 흡수 가능한지 판단된다.
+	 *
+	 * computeAbsorbability()는 흡수 가능한 경우를 표시한다
+	 * (isUnboundedStart 참고):
+	 *   - 시작에 있는 단순한 무제한 VAR: A+ B C
+	 *   - 고정 길이 자식을 가진 무제한 GROUP: (A B)+, (A B{2})+
+	 *   - 그중 하나로 본문이 시작하는 탐욕적 GROUP: (A+ B)+
+	 *   - 독립적으로 흡수 가능한 분기를 가진 ALT: A+ | B+
+	 *     (computeAbsorbabilityRecursive 함수에서 처리하며, 어떤 중첩
+	 *     단계에서도 (A+ | B)+의 분기는 같은 방식으로 판단된다)
+	 *
+	 * 흡수 불가능한 경우: 시작에 있지 않은 무제한 요소(A B+), 소극적
+	 * 수량자(A+?), 또는 어느 분기도 무제한 탐욕적 요소로 시작하지 않는
+	 * 교대((A|B)+) -- 이 경우 시작 위치에 따라 매치 내용이 달라지므로, 이후의
+	 * 매치가 이전 매치의 접미사가 되지 않는다.
+	 */
+	bool		isAbsorbable;	/* 패턴이 컨텍스트 흡수를 지원하면 true */
+} RPRPattern;
+
+/* ----------------
  *		window aggregate node
  * ----------------
  */
@@ -1315,6 +1406,24 @@ typedef struct WindowAgg
 
 	/* nulls sort first for in_range tests? */
 	bool		inRangeNullsFirst;
+
+	/* 행 패턴 인식(RPR)의 AFTER MATCH SKIP(매치 건너뛰기) 절 */
+	RPSkipTo	rpSkipTo;		/* 행 패턴 건너뛰기 대상 타입 */
+
+	/* NFA 실행을 위한 컴파일된 행 패턴 */
+	struct RPRPattern *rpPattern;
+
+	/* 행 패턴 DEFINE 절(TargetEntry 리스트) */
+	List	   *defineClause;
+
+	/*
+	 * 표현식이 match_start 값에 의존하는 DEFINE 변수 인덱스의 Bitmapset이다:
+	 * 그 표현식이 FIRST나 복합 PREV_FIRST/NEXT_FIRST 형태를 포함하거나,
+	 * 단독이든 복합 PREV_LAST/NEXT_LAST 안이든 자신만의 오프셋을 가진 LAST를
+	 * 포함하는 경우다. 이 집합의 변수는 NFA 처리 중에 per-context 재평가가
+	 * 필요하다.
+	 */
+	Bitmapset  *defineMatchStartDependent;
 
 	/*
 	 * false for all apart from the WindowAgg that's closest to the root of
