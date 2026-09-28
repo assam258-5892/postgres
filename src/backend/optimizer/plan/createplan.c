@@ -2670,7 +2670,7 @@ create_windowagg_plan(PlannerInfo *root, WindowAggPath *best_path)
 		/*
 		 * Classify which DEFINE variables depend on match_start (for
 		 * absorption suppression in buildRPRPattern).  Nav offsets for
-		 * tuplestore trim are resolved later, at executor init.
+		 * tuplestore trim are built at executor init and resolved per scan.
 		 */
 		compute_define_metadata(wc->defineClause, &matchStartDependent);
 

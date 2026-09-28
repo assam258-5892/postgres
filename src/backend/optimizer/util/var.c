@@ -933,7 +933,8 @@ flatten_join_alias_vars_mutator(Node *node,
 		/*
 		 * Below a navigation argument, wrap a non-Var/PHV replacement in a
 		 * PlaceHolderVar so it can't be constant-folded away before the
-		 * navigation runs (mirrors pullup_replace_vars_callback()).
+		 * navigation runs.  Unlike pullup_replace_vars_callback(), this also
+		 * wraps a strict expression over Vars.
 		 */
 		if (context->in_rpr_nav_arg && context->root != NULL &&
 			!(IsA(newvar, Var) && ((Var *) newvar)->varlevelsup == var->varlevelsup) &&

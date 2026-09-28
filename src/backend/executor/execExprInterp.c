@@ -6069,14 +6069,14 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 				target_pos = -1;
 			break;
 		case RPR_NAV_FIRST:
-			/* FIRST: offset from match_start, clamped to currentpos */
+			/* FIRST: offset from match_start, NULL beyond currentpos */
 			if (pg_add_s64_overflow(winstate->nav_match_start, offset, &target_pos))
 				target_pos = -1;
 			else if (target_pos > winstate->currentpos)
 				target_pos = -1;	/* beyond current match range */
 			break;
 		case RPR_NAV_LAST:
-			/* LAST: offset backward from currentpos, clamped to match_start */
+			/* LAST: offset backward from currentpos, NULL before match_start */
 			target_pos = winstate->currentpos - offset;
 			if (target_pos < winstate->nav_match_start)
 				target_pos = -1;	/* before match_start */

@@ -135,7 +135,7 @@ static void nfa_invalidate_dependent_vars(WindowAggState *winstate,
  * states), absorb (drop contexts an older context already covers), advance
  * (expand epsilon transitions until states park on VARs).  Per-element
  * advance behaviour, the absorption argument and the dual-flag contract are
- * documented in README.rpr chapters VIII and IX and in the RPRNFAContext
+ * documented in README.rpr chapters IX and X and in the RPRNFAContext
  * comment in nodes/execnodes.h.
  */
 
@@ -303,6 +303,22 @@ nfa_states_equal(WindowAggState *winstate, RPRNFAState *s1, RPRNFAState *s2)
 	 * groups.  Per the count-clear policy such a slot is zeroed when its
 	 * owning element exits (see nfa_advance_var and the inline fast path in
 	 * nfa_match), so it must not participate in equivalence judgment.
+	 *
+	 * XXX the comparison is finer than the future it stands for.  Where max
+	 * is RPR_QUANTITY_INF, RPRElemCanLoop() holds at every count and
+	 * RPRElemCanExit() at every count at or above min, so two states that
+	 * differ only above min behave identically from here on.  Counts saturate
+	 * at RPR_COUNT_INF, which is only the int32 guard, so this memcmp keeps
+	 * such states apart and neither in-context discard folds them back: dedup
+	 * calls them different, and the FIN early termination in nfa_advance()
+	 * never fires while the pattern cannot complete.  A branching unbounded
+	 * pattern that never reaches FIN then holds Theta(n^2) states at peak and
+	 * creates Theta(n^3) of them, each re-tested by the linear scan in
+	 * nfa_append_state_unique(): (A{2,} B)+ C with C never true takes 30 ms
+	 * over 80 rows, 37 s over 320, and does not finish over 640. Clamping the
+	 * increment to min where max is unbounded would fold them into the memcmp
+	 * already here, but every counts[] consumer, nfa_states_covered()
+	 * included, has to be shown that the clamp preserves it.
 	 */
 	elem = &pattern->elements[s1->elemIdx];
 	compareDepth = elem->depth + 1;
@@ -784,9 +800,11 @@ nfa_prune_skipped_contexts(WindowAggState *winstate, RPRNFAContext *ctx)
  * makes every VAR not match; nfa_match() is called that way to force a
  * mismatch at a frame boundary and at partition-end finalization.
  *
- * The caller must have set up the current row (ecxt_outertuple, currentpos,
- * nav_match_start) and invalidated the nav slot cache, via rpr_prepare_row()
- * or nfa_invalidate_dependent_vars(), before consumption.
+ * The caller must have set up the current row before consumption:
+ * advance_reduced_frame_nfa() sets currentpos and nav_match_start,
+ * rpr_prepare_row() sets ecxt_outertuple and invalidates the nav slot cache,
+ * and nfa_invalidate_dependent_vars() reinstalls nav_match_start (and
+ * invalidates the nav slot cache) for a context whose matchStartRow differs.
  *
  * Per ISO/IEC 19075-5 Feature R020, pattern variables not listed in DEFINE
  * are implicitly TRUE -- they match every row.  This is checked via
@@ -1193,9 +1211,9 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	else
 	{
 		/*
-		 * Greedy-or-non-nullable: route to the first child.  For optional
+		 * Greedy-or-non-optional: route to the first child.  For optional
 		 * groups (skipState != NULL, greedy min=0) additionally create the
-		 * skip path; for non-nullable groups (skipState == NULL, min>0) the
+		 * skip path; for non-optional groups (skipState == NULL, min>0) the
 		 * skip-path action is suppressed by the guard below.
 		 */
 		nfa_mark_group_entered(winstate, elem);
@@ -1462,13 +1480,16 @@ nfa_advance_var(WindowAggState *winstate, RPRNFAContext *ctx,
 	{
 		/*
 		 * Below the minimum, so exiting is illegal and matching this VAR
-		 * again on the next row is the only legal continuation.  This row's
-		 * match already incremented counts[depth] in the match phase, and the
-		 * advance phase only decides where the state goes next, so staying
+		 * again on the next row is the only legal continuation.  The advance
+		 * phase only decides where the state goes next, and counts[depth]
+		 * already holds this VAR's matches so far: a state that matched on
+		 * this row had it incremented in the match phase, and one that has
+		 * matched nothing yet -- the initial state of a new context, or a
+		 * state routed here by a skip -- arrives with 0.  Either way staying
 		 * parked at the same VAR is expressed by appending the state
 		 * unchanged to the new generation.  Dropping it instead would strand
-		 * every quantifier below its minimum: (A B){2} would lose its state
-		 * after the first A B match and never complete.
+		 * every quantifier below its minimum: A{2} B would lose its state
+		 * after the first A match and never complete.
 		 *
 		 * No clone is needed.  With a single continuation, ownership of the
 		 * original simply transfers to the list.

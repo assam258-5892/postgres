@@ -30,7 +30,7 @@
 
 /*
  * RPR_COUNT_INF is the value a runtime repetition count saturates at to avoid
- * int32 overflow (see the count++ guard in nfa_match).  It is defined as
+ * int32 overflow (see RPRCountIncrement() below).  It is defined as
  * RPR_QUANTITY_INF (from nodes/parsenodes.h, included above) so that a
  * saturated count compares as "unbounded", just like an unbounded
  * quantifier's max.
@@ -58,7 +58,7 @@
 #define RPR_ELEM_EMPTY_PREFERRED	0x04	/* END: group body prefers the
 											 * empty match */
 /*
- * The two absorption flags below are explained in README.rpr IV-5
+ * The two absorption flags below are explained in README.rpr V-7
  * ("Absorbability Analysis"), with worked examples in Appendix B; the
  * analysis that sets them is computeAbsorbability() in
  * optimizer/plan/rpr.c.

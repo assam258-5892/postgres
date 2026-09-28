@@ -244,7 +244,8 @@ add_other_rels_to_query(PlannerInfo *root)
 /*
  * build_base_rel_tlists
  *	  Add targetlist entries for each var needed in the query's final tlist
- *	  (and HAVING clause, if any) to the appropriate base relations.
+ *	  (and HAVING clause and row pattern DEFINE clauses, if any) to the
+ *	  appropriate base relations.
  *
  * We mark such vars as needed by "relation 0" to ensure that they will
  * propagate up through all join plan steps.

@@ -617,7 +617,7 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	 * A pattern variable qualifier (e.g. UP.price) is valid per ISO/IEC
 	 * 19075-5 6.15 / 4.16 but not yet implemented, and has to be recognized
 	 * here: a pattern variable names no range table entry, so leaving it to
-	 * normal resolution would report a missing FROM-clause entry instead.
+	 * normal resolution would reject it as a qualified expression instead.
 	 *
 	 * Like every other rule below, this one only reaches names the ref hooks
 	 * left for the query parser to resolve.  A PL that answers a name first
@@ -942,8 +942,10 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 				 * nothing is rejected for occupying it, the same as one that
 				 * names something.  Reporting a missing FROM-clause entry
 				 * would point at a repair that does not exist: adding the
-				 * relation only moves the reference to the range variable
-				 * rejection below.
+				 * relation only moves the reference to one of the rejections
+				 * below, the range variable one for a two-part name and the
+				 * qualified expression one for a longer name, or the outer
+				 * column one if the relation is added to an outer query.
 				 */
 				if (pstate->p_rpr_define)
 					ereport(ERROR,
