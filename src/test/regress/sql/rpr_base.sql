@@ -1540,6 +1540,21 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val / 0) > 0);
 
+-- A constant subexpression of the argument is folded away, so the pattern
+-- does not recompute it per row.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(val + 2 * 3) > 0);
+
+-- Folding a constant subexpression can raise where the whole argument would
+-- not have: unlike val / 0 above, 1 / 0 does not depend on the row, so it is
+-- reached at plan time even on the row PREV misses on.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val + 1 / 0) > 0);
+
 -- Here the null reaches the DEFINE predicate itself instead of an IS NULL
 -- An all-NULL target row would have made v IS NULL true and matched the
 -- first row, so this pins the predicate side of the same behaviour.
@@ -1548,21 +1563,128 @@ SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
 
--- Constant folding can leave a navigation argument with no column reference
--- at all (v folds to 10, so PREV(v IS NULL) becomes PREV(false)), which the
--- planner has to accept rather than re-run the parse-time rejection.
+-- Pulling up the VALUES substitutes 10 for v, which is not what the column
+-- stood for under a navigation: the argument reads the row the navigation
+-- lands on, not this one.  The replacement is wrapped in a PlaceHolderVar
+-- rather than folded through.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
 
--- XXX Folding evaluates the argument while planning, with the current row's
--- value standing in for the target row's, so this divides by zero even though
--- PREV has no row to navigate to.
+-- That wrapping is what keeps this one from raising: the divisor is constant
+-- but the dividend is not folded through, so the division stands until
+-- execution, where PREV has no row to navigate to and never reaches it.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
+-- A pulled-up subquery and a function RTE that folded to a constant reach a
+-- navigation argument the same way, so both are wrapped as well.
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT 1 AS id, 10 AS v) t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
+SELECT count(*) OVER w AS cnt
+FROM abs(-10) AS v
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
+-- Only the argument is protected.  One level outside the navigation the same
+-- column is replaced and folded as it is anywhere else, and the division
+-- raises at plan time -- as it does for the same WHERE clause over the same
+-- one-row VALUES, with no pattern in sight.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS v / 0 > 0);
+
+-- A replacement that still depends on the row is left unwrapped, because it
+-- is what the column meant at whichever row the navigation lands on.
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(v) > 0);
+
+-- Nesting: the inner navigation's argument is below the outer one's, so the
+-- column there is wrapped too.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(LAST(v / 0, 1), 2) > 0);
+
+-- eval_const_expressions() must perform a few rewrites on every expression
+-- it is handed -- a CollateExpr becomes a RelabelType, named arguments become
+-- positional, omitted defaults are inserted -- and preprocess_expression()
+-- documents them as mandatory, not as optimizations.  Each of the three below
+-- reaches the executor only if those rewrites reach inside a navigation
+-- argument, and each returns what the same expression one level outside the
+-- navigation returns.
+CREATE TABLE rpr_nav_txt (id int, s text);
+INSERT INTO rpr_nav_txt VALUES (1, 'b'), (2, 'c'), (3, 'a');
+CREATE FUNCTION rpr_nav_named(a int, b int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT $1 * 10 + $2';
+CREATE FUNCTION rpr_nav_dflt(a int, b int DEFAULT 100) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT $2';
+
+-- COLLATE under a navigation: the executor has no CollateExpr step, so the
+-- RelabelType rewrite has to reach here.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_txt
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(s COLLATE "C") > 'a');
+
+-- Named arguments under a navigation: the executor has no NamedArgExpr step.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_named(b => 7, a => val)) > 0);
+
+-- An omitted default under a navigation: without the insertion the call is
+-- initialized with one fewer argument than the callee reads.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_dflt(val)) = 100);
+
+DROP FUNCTION rpr_nav_dflt(int, int);
+DROP FUNCTION rpr_nav_named(int, int);
+DROP TABLE rpr_nav_txt;
+
+-- A navigation offset is resolved once at the top of the scan, before any
+-- input row has been read, so it must not be matched to the window input the
+-- way the navigated argument is.  These two spell the offset the same as a
+-- window ORDER BY key and as a GROUP BY expression, which is what makes the
+-- match available.
+CREATE TABLE rpr_navoff (id int, val int);
+INSERT INTO rpr_navoff VALUES (1, 10), (2, 20), (3, 15), (4, 30), (5, 5);
+
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_navoff
+WINDOW w AS (ORDER BY (extract(hour from localtimestamp)::int * 0 + 1), id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+)
+             DEFINE B AS val > PREV(val, (extract(hour from localtimestamp)::int * 0 + 1)));
+
+-- Control: an offset that matches nothing in the window input.
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_navoff
+WINDOW w AS (ORDER BY (extract(hour from localtimestamp)::int * 0 + 1), id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+)
+             DEFINE B AS val > PREV(val, (extract(hour from localtimestamp)::int * 0 + 2)));
+
+SELECT id, val, count(*) OVER w AS cnt
+FROM rpr_navoff
+GROUP BY GROUPING SETS ((id, val, ((random() * 0)::bigint + 1)),
+                        (id,      ((random() * 0)::bigint + 1)))
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+)
+             DEFINE B AS val > PREV(val, (random() * 0)::bigint + 1))
+ORDER BY id, val;
+
+DROP TABLE rpr_navoff;
 
 -- PREV function - reference previous row in pattern
 SELECT id, val, COUNT(*) OVER w as cnt
@@ -1748,12 +1870,21 @@ SELECT id FROM (
     PATTERN (A+) DEFINE A AS random() > 0.5)) s
 ORDER BY id;
 
--- ERROR: OFFSET 0 keeps the subquery, so its DEFINE is checked
+-- OFFSET 0 keeps the subquery, but still no OVER references the window, so
+-- the planner withdraws the DEFINE clause of a window it will not run and the
+-- check finds nothing left to reject
 SELECT id FROM (
  SELECT id FROM nt
  WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A+) DEFINE A AS random() > 0.5) OFFSET 0) sub;
+
+-- ERROR: a subquery window that does run keeps its DEFINE, so it is checked
+SELECT id, c FROM (
+ SELECT id, count(*) OVER w AS c FROM nt
+ WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A+) DEFINE A AS random() > 0.5)) sub;
 
 -- WHERE false makes the subquery rel dummy, so the planner never plans it
 -- and nothing looks at its DEFINE
@@ -3133,8 +3264,51 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE A AS ROW((items).*) IS NOT NULL
 );
+
 DROP TABLE rpr_composite;
 DROP TYPE rpr_item;
+
+-- A composite value that reaches DEFINE by way of a subquery Var only takes
+-- its ROW(...) shape after pullup, and the ORDER BY copy's sortgroupref
+-- keeps it from being flattened.  make_window_input_target() adds the fields
+-- the split leaves behind.
+CREATE TABLE rpr_ordrow (a int, b int);
+INSERT INTO rpr_ordrow SELECT g, g % 4 FROM generate_series(1, 10) g;
+SELECT count(*) OVER w AS c
+FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
+WINDOW w AS (ORDER BY x
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
+-- Control: without ORDER BY, x is flattened normally and this succeeds too.
+SELECT count(*) OVER w AS c
+FROM (SELECT ROW(a, b) AS x FROM rpr_ordrow) s
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (P Q+) DEFINE P AS TRUE, Q AS x IS NOT NULL);
+DROP TABLE rpr_ordrow;
+
+-- The same split by way of a pulled-up composite target, both as a plain
+-- subquery and as a view.
+CREATE TABLE rpr_partrow (a int, b int);
+INSERT INTO rpr_partrow VALUES (1, 1), (2, 2), (3, 3);
+SELECT count(*) OVER w
+FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (p q+) DEFINE q AS k IS NOT NULL);
+CREATE TYPE rpr_partrow_t AS (x int, y int);
+CREATE VIEW rpr_partrow_v AS SELECT b, row(a, 1)::rpr_partrow_t AS k FROM rpr_partrow;
+SELECT count(*) OVER w FROM rpr_partrow_v
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (p q+) DEFINE q AS k IS NOT NULL);
+-- Control: PATTERN/DEFINE aside, the same window clause runs fine.
+SELECT count(*) OVER w
+FROM (SELECT b, row(a, 1) AS k FROM rpr_partrow) s
+WINDOW w AS (PARTITION BY k ORDER BY b
+  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING);
+DROP VIEW rpr_partrow_v;
+DROP TYPE rpr_partrow_t;
+DROP TABLE rpr_partrow;
 
 -- ERROR: undefined column in DEFINE
 SELECT COUNT(*) OVER w
@@ -4905,6 +5079,86 @@ ORDER BY k;
 
 DROP TABLE rpr_join5, rpr_join6;
 
+-- A DEFINE clause reading a USING column whose two sides differ in typmod.
+-- The merged column stays a join alias Var, pullup leaves its joinaliasvars
+-- entry a non-trivial expression, and the outer join's nullingrels wrap that
+-- in a PlaceHolderVar.  The target list copy and the DEFINE copy are wrapped
+-- by separate calls, so their phids differ and equal() does not match them --
+-- the window input has to carry the DEFINE clause's own PlaceHolderVar.
+CREATE TABLE rpr_phv_src (n int);
+CREATE TABLE rpr_phv_dim (c varchar(10), tdate date);
+CREATE TABLE rpr_phv_out (k varchar);
+INSERT INTO rpr_phv_src VALUES (2), (4);
+INSERT INTO rpr_phv_dim VALUES ('zz', '2024-01-01'), ('zzzz', '2024-01-02');
+INSERT INTO rpr_phv_out VALUES ('zz'), ('zzzz');
+
+SELECT j.c, j.tdate, count(*) OVER w AS cnt
+FROM rpr_phv_out o1
+     LEFT JOIN ( (SELECT n, repeat('z', n)::varchar(5) AS c FROM rpr_phv_src) s
+                 JOIN rpr_phv_dim USING (c) ) j
+     ON o1.k = j.c
+WINDOW w AS (ORDER BY j.tdate
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (p q+)
+             DEFINE p AS TRUE, q AS c > '');
+
+-- The same with one more join level above it.  Reaching the window input is
+-- not enough on its own: an intermediate join emits only what something above
+-- has declared a need for, so what a DEFINE clause reads is marked needed at
+-- relation 0 the way the target list's own columns are.
+SELECT j.c, j.tdate, count(*) OVER w AS cnt
+FROM rpr_phv_out o1
+     LEFT JOIN rpr_phv_out o2 ON o1.k = o2.k
+     LEFT JOIN ( (SELECT n, repeat('z', n)::varchar(5) AS c FROM rpr_phv_src) s
+                 JOIN rpr_phv_dim USING (c) ) j
+     ON o2.k = j.c
+WINDOW w AS (ORDER BY j.tdate
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (p q+)
+             DEFINE p AS TRUE, q AS c > '');
+
+-- Control: with both sides of USING at the same typmod the merged column is a
+-- plain Var of one side, no PlaceHolderVar is built, and neither shape above
+-- needs any of this.
+SELECT j.c, j.tdate, count(*) OVER w AS cnt
+FROM rpr_phv_out o1
+     LEFT JOIN rpr_phv_out o2 ON o1.k = o2.k
+     LEFT JOIN ( (SELECT n, repeat('z', n)::varchar(10) AS c
+                  FROM rpr_phv_src) s
+                 JOIN rpr_phv_dim USING (c) ) j
+     ON o2.k = j.c
+WINDOW w AS (ORDER BY j.tdate
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             INITIAL PATTERN (p q+)
+             DEFINE p AS TRUE, q AS c > '');
+
+DROP TABLE rpr_phv_src, rpr_phv_dim, rpr_phv_out;
+
+-- A WINDOW clause no window function names is never executed, so its DEFINE
+-- clause is emptied before build_base_rel_tlists() could mark what it reads
+-- as needed at relation 0, which would keep the outer join from being
+-- removed.  The three plans below are the assertion: no WINDOW clause, a
+-- plain one and a row pattern one all lose the join alike.
+CREATE TABLE rpr_jr (id int, v int);
+CREATE TABLE rpr_jr_u (id int PRIMARY KEY, uval int);
+INSERT INTO rpr_jr SELECT g, g * 10 FROM generate_series(1, 5) g;
+INSERT INTO rpr_jr_u SELECT g, g * 100 FROM generate_series(1, 5) g;
+
+EXPLAIN (COSTS OFF)
+SELECT t.id FROM rpr_jr t LEFT JOIN rpr_jr_u u ON t.id = u.id;
+
+EXPLAIN (COSTS OFF)
+SELECT t.id FROM rpr_jr t LEFT JOIN rpr_jr_u u ON t.id = u.id
+WINDOW w AS (ORDER BY t.id);
+
+EXPLAIN (COSTS OFF)
+SELECT t.id FROM rpr_jr t LEFT JOIN rpr_jr_u u ON t.id = u.id
+WINDOW w AS (ORDER BY t.id
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS uval > PREV(uval));
+
+DROP TABLE rpr_jr, rpr_jr_u;
+
 -- ============================================================
 -- Complex Expression Tests
 -- ============================================================
@@ -5470,6 +5724,63 @@ SELECT pg_get_viewdef('rpr_grp_v2'::regclass, true);
 SELECT * FROM rpr_grp_v2 ORDER BY category NULLS LAST;
 DROP VIEW rpr_grp_v2;
 
+-- A DEFINE clause may spell a GROUP BY expression.  Planting stops at one
+-- rather than offering the columns underneath it to the grouping logic on
+-- their own, which is not how grouping makes them available; the target list
+-- entry holding the same expression is what both copies end up naming.
+SELECT val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val + 1
+WINDOW w AS (
+    ORDER BY val + 1
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val + 1 > 0)
+ORDER BY bumped;
+
+-- The same for a function call
+SELECT upper(category) AS u, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY upper(category)
+WINDOW w AS (
+    ORDER BY upper(category)
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS upper(category) = 'A')
+ORDER BY u;
+
+-- The same for a cast
+SELECT val::text AS t, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val::text
+WINDOW w AS (
+    ORDER BY val::text
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val::text > '0')
+ORDER BY t;
+
+-- And through a navigation operation, whose argument is read the same way
+SELECT val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY val + 1
+WINDOW w AS (
+    ORDER BY val + 1
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A B*)
+    DEFINE B AS PREV(val + 1) > 0)
+ORDER BY bumped;
+
+-- The same under a grouping set, where the row the set nulls leaves the
+-- predicate unknown and so unmatched.
+SELECT val + 1 AS bumped, count(*) OVER w AS cnt
+FROM rpr_grp
+GROUP BY ROLLUP(val + 1)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS val + 1 > 0);
+
 -- A DEFINE clause may repeat an expression the window itself orders by, with
 -- no grouping in sight.  Planting bare Vars is what makes this hold: the
 -- DEFINE copy of ROW(val, 1) IS NOT NULL is broken into per field tests before
@@ -5610,6 +5921,41 @@ DROP TABLE rpr_srf_t;
 DROP FUNCTION rpr_srf_inline(int);
 
 DROP TABLE rpr_planner;
+
+-- A DEFINE clause reading a compound GROUP BY expression.  After grouping
+-- only the expression itself exists, so make_window_input_target() has to
+-- take it whole and stop: asking for the Vars underneath would ask the
+-- grouping step for columns it cannot produce.  "((a + b))" alone on the
+-- Output lines, with no bare a or b anywhere above the HashAggregate, is the
+-- assertion.
+CREATE TABLE rpr_gexp (a int, b int);
+INSERT INTO rpr_gexp VALUES (1, 1), (2, 2), (3, 3), (4, 4);
+
+SELECT a + b AS ab, count(*) OVER w AS c
+FROM rpr_gexp
+GROUP BY a + b
+WINDOW w AS (ORDER BY a + b
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (X+) DEFINE X AS a + b > 2);
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT a + b AS ab, count(*) OVER w AS c
+FROM rpr_gexp
+GROUP BY a + b
+WINDOW w AS (ORDER BY a + b
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (X+) DEFINE X AS a + b > 2);
+
+-- Reaching below the grouping expression is rejected, as it would be in any
+-- other clause evaluated after grouping.
+SELECT a + b AS ab, count(*) OVER w AS c
+FROM rpr_gexp
+GROUP BY a + b
+WINDOW w AS (ORDER BY a + b
+             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (X+) DEFINE X AS a > 2);
+
+DROP TABLE rpr_gexp;
 
 -- ============================================================
 -- Stress Tests

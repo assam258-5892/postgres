@@ -2962,7 +2962,7 @@ transformWindowDefinitions(ParseState *pstate,
 											 windef->endOffset);
 
 		/* Process Row Pattern Recognition related clauses */
-		transformRPR(pstate, wc, windef, targetlist);
+		transformRPR(pstate, wc, windef);
 
 		wc->winref = winref;
 

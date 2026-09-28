@@ -17,6 +17,6 @@
 #include "parser/parse_node.h"
 
 extern void transformRPR(ParseState *pstate, WindowClause *wc,
-						 WindowDef *windef, List **targetlist);
+						 WindowDef *windef);
 
 #endif							/* PARSE_RPR_H */

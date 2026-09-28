@@ -53,8 +53,7 @@ typedef struct
 /* Forward declarations */
 static void validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 									   List **varNames);
-static List *transformDefineClause(ParseState *pstate, WindowDef *windef,
-								   List **targetlist);
+static List *transformDefineClause(ParseState *pstate, WindowDef *windef);
 static bool define_walker(Node *node, void *context);
 static bool rpr_frame_is_supported(int frameOptions);
 
@@ -72,8 +71,7 @@ static bool rpr_frame_is_supported(int frameOptions);
  * Returns early if windef has no rpCommonSyntax (non-RPR window).
  */
 void
-transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
-			 List **targetlist)
+transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef)
 {
 	/* Nothing to do unless the window carries a row pattern */
 	if (windef->rpCommonSyntax == NULL)
@@ -119,7 +117,7 @@ transformRPR(ParseState *pstate, WindowClause *wc, WindowDef *windef,
 	wc->rpSkipTo = windef->rpCommonSyntax->rpSkipTo;
 
 	/* Transform DEFINE clause into list of TargetEntry's */
-	wc->defineClause = transformDefineClause(pstate, windef, targetlist);
+	wc->defineClause = transformDefineClause(pstate, windef);
 
 	/* Store PATTERN parse tree for deparsing */
 	wc->rpPattern = windef->rpCommonSyntax->rpPattern;
@@ -238,8 +236,7 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
  * parse_expr.c via the p_rpr_pattern_vars check.
  */
 static List *
-transformDefineClause(ParseState *pstate, WindowDef *windef,
-					  List **targetlist)
+transformDefineClause(ParseState *pstate, WindowDef *windef)
 {
 	List	   *defineClause = NIL;
 	List	   *patternVarNames = NIL;
@@ -317,16 +314,12 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 	{
 		TargetEntry *teDefine;
 		Node	   *expr;
-		List	   *vars;
 
 		/*
-		 * Transform the DEFINE expression and coerce it to boolean.  We must
-		 * NOT add the whole expression to the query targetlist, because it
-		 * may contain RPRNavExpr nodes (PREV/NEXT/FIRST/LAST) that can only
-		 * be evaluated inside the owning WindowAgg.  Coercing here, before
-		 * pull_var_clause, keeps pull_var_clause operating on the final
-		 * expression form and surfaces a type mismatch before the targetlist
-		 * is touched.
+		 * Transform the DEFINE expression and coerce it to boolean.  The
+		 * result belongs in wc->defineClause, never in the query targetlist
+		 * as a whole: it may contain RPRNavExpr nodes (PREV/NEXT/FIRST/LAST)
+		 * that only the owning WindowAgg can evaluate.
 		 */
 		expr = transformExpr(pstate, restarget->val,
 							 EXPR_KIND_RPR_DEFINE);
@@ -340,38 +333,6 @@ transformDefineClause(ParseState *pstate, WindowDef *windef,
 
 		/* build transformed DEFINE clause (list of TargetEntry) */
 		defineClause = lappend(defineClause, teDefine);
-
-		/*
-		 * Pull out Var nodes from the transformed expression and ensure each
-		 * one is present in the targetlist.  This is needed so the planner
-		 * propagates the referenced columns through the plan tree, making
-		 * them available to the WindowAgg's DEFINE evaluation.
-		 */
-		vars = pull_var_clause(expr, 0);
-		foreach_node(Var, var, vars)
-		{
-			bool		found = false;
-
-			foreach_node(TargetEntry, tle, *targetlist)
-			{
-				if (equal(tle->expr, var))
-				{
-					found = true;
-					break;
-				}
-			}
-			if (!found)
-			{
-				TargetEntry *newtle;
-
-				newtle = makeTargetEntry((Expr *) copyObject(var),
-										 (AttrNumber) pstate->p_next_resno++,
-										 NULL,
-										 true);
-				*targetlist = lappend(*targetlist, newtle);
-			}
-		}
-		list_free(vars);
 	}
 	pstate->p_rpr_define = false;
 	pstate->p_rpr_pattern_vars = NIL;
