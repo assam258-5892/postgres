@@ -2534,7 +2534,7 @@ compute_matchStartDependent(RPRNavExpr *nav, DefineMetadataContext *context)
 }
 
 static bool
-RPRNavExpr_walker(Node *node, DefineMetadataContext *ctx)
+define_metadata_walker(Node *node, DefineMetadataContext *ctx)
 {
 	if (node == NULL)
 		return false;
@@ -2546,7 +2546,7 @@ RPRNavExpr_walker(Node *node, DefineMetadataContext *ctx)
 		compute_matchStartDependent(nav, ctx);
 	}
 
-	return expression_tree_walker(node, RPRNavExpr_walker, ctx);
+	return expression_tree_walker(node, define_metadata_walker, ctx);
 }
 
 /*
@@ -2582,7 +2582,7 @@ compute_define_metadata(List *defineClause, Bitmapset **matchStartDependent)
 	{
 		ctx.curVarIdx = foreach_current_index(te);
 
-		RPRNavExpr_walker((Node *) te->expr, &ctx);
+		define_metadata_walker((Node *) te->expr, &ctx);
 	}
 
 	*matchStartDependent = ctx.matchStartDependent;
@@ -6822,8 +6822,7 @@ static WindowAgg *
 make_windowagg(List *tlist, WindowClause *wc,
 			   int partNumCols, AttrNumber *partColIdx, Oid *partOperators, Oid *partCollations,
 			   int ordNumCols, AttrNumber *ordColIdx, Oid *ordOperators, Oid *ordCollations,
-			   List *runCondition,
-			   RPRPattern *compiledPattern,
+			   List *runCondition, RPRPattern *compiledPattern,
 			   Bitmapset *defineMatchStartDependent,
 			   List *qual, bool topWindow, Plan *lefttree)
 {

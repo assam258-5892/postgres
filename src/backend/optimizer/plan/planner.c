@@ -6281,10 +6281,10 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 
 				/*
 				 * Perform the same duplicate check that is done in
-				 * transformWindowFuncCall. wc is never an RPR clause here
-				 * (those are skipped above), and an RPR existing_wc differs
-				 * in its frame options anyway, so the RPR-related comparisons
-				 * are a defensive backstop for parity.
+				 * transformWindowFuncCall.  wc is never an RPR clause here
+				 * (those are skipped above), but a support function is free
+				 * to hand it the frame options an RPR clause uses, so the RPR
+				 * fields still have to be compared.
 				 */
 				if (equal(wc->partitionClause, existing_wc->partitionClause) &&
 					equal(wc->orderClause, existing_wc->orderClause) &&

@@ -45,8 +45,6 @@
 #include "optimizer/rpr.h"
 
 /* Forward declarations */
-static bool rprPatternEqual(RPRPatternNode *a, RPRPatternNode *b);
-static bool rprPatternChildrenEqual(List *a, List *b);
 static int64 rprNodeRowCount(RPRPatternNode *node);
 static int64 rprBodyRowCount(List *children);
 static bool rprBodyHasUniformLength(List *children);
@@ -94,64 +92,6 @@ static void computeAbsorbabilityRecursive(RPRPattern *pattern,
 										  RPRPatternElement *elem,
 										  bool *hasAbsorbable);
 static void computeAbsorbability(RPRPattern *pattern);
-
-/*
- * rprPatternEqual
- *		Compare two RPRPatternNode trees for equality.
- *
- * Returns true if the trees are structurally identical.  Neither argument
- * may be NULL: a children list never holds one.
- */
-static bool
-rprPatternEqual(RPRPatternNode *a, RPRPatternNode *b)
-{
-	/* Must have same node type and quantifiers */
-	if (a->nodeType != b->nodeType)
-		return false;
-	if (a->min != b->min || a->max != b->max)
-		return false;
-	if (a->reluctant != b->reluctant)
-		return false;
-
-	switch (a->nodeType)
-	{
-		case RPR_PATTERN_VAR:
-			return strcmp(a->varName, b->varName) == 0;
-
-		case RPR_PATTERN_SEQ:
-		case RPR_PATTERN_ALT:
-		case RPR_PATTERN_GROUP:
-			return rprPatternChildrenEqual(a->children, b->children);
-	}
-
-	pg_unreachable();
-	return false;
-}
-
-/*
- * rprPatternChildrenEqual
- *		Compare children lists of two pattern nodes for equality.
- *
- * Returns true if the children lists are structurally identical.
- */
-static bool
-rprPatternChildrenEqual(List *a, List *b)
-{
-	ListCell   *lca,
-			   *lcb;
-
-	if (list_length(a) != list_length(b))
-		return false;
-
-	forboth(lca, a, lcb, b)
-	{
-		if (!rprPatternEqual((RPRPatternNode *) lfirst(lca),
-							 (RPRPatternNode *) lfirst(lcb)))
-			return false;
-	}
-
-	return true;
-}
 
 /*
  * rprNodeRowCount
@@ -261,7 +201,7 @@ rprChildrenMatchAt(List *children, int start, List *content)
 		RPRPatternNode *have;
 
 		have = list_nth_node(RPRPatternNode, children, start + offset);
-		if (!rprPatternEqual(have, want))
+		if (!equal(have, want))
 			return false;
 		offset++;
 	}
@@ -484,7 +424,7 @@ mergeConsecutiveGroups(List *children)
 				if (other->nodeType != RPR_PATTERN_GROUP || other->reluctant)
 					break;
 
-				if (!rprPatternChildrenEqual(node->children, other->children))
+				if (!equal(node->children, other->children))
 					break;
 
 				/* The body must consume a fixed number of rows; see above */
@@ -555,7 +495,7 @@ mergeConsecutiveAlts(List *children)
 
 				other = list_nth_node(RPRPatternNode, children, readpos + count);
 
-				if (!rprPatternEqual(node, other))
+				if (!equal(node, other))
 					break;
 
 				count++;
@@ -801,8 +741,8 @@ removeDuplicateAlternatives(List *children)
 		 */
 		for (int keptpos = 0; keptpos < writepos; keptpos++)
 		{
-			if (rprPatternEqual(list_nth_node(RPRPatternNode, children, keptpos),
-								node))
+			if (equal(list_nth_node(RPRPatternNode, children, keptpos),
+					  node))
 			{
 				isDuplicate = true;
 				break;

@@ -2213,9 +2213,9 @@ expression_tree_walker_impl(Node *node,
 
 				if (WALK(expr->arg))
 					return true;
-				if (expr->offset_arg && WALK(expr->offset_arg))
+				if (WALK(expr->offset_arg))
 					return true;
-				if (expr->compound_offset_arg && WALK(expr->compound_offset_arg))
+				if (WALK(expr->compound_offset_arg))
 					return true;
 			}
 			break;

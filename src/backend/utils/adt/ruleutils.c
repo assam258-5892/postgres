@@ -7240,13 +7240,13 @@ append_pattern_quantifier(StringInfo buf, RPRPatternNode *node)
 		/* {1,1} = no quantifier */
 		has_quantifier = false;
 	}
-	else if (node->min == 0 && node->max == PG_INT32_MAX)
+	else if (node->min == 0 && node->max == RPR_QUANTITY_INF)
 		appendStringInfoChar(buf, '*');
-	else if (node->min == 1 && node->max == PG_INT32_MAX)
+	else if (node->min == 1 && node->max == RPR_QUANTITY_INF)
 		appendStringInfoChar(buf, '+');
 	else if (node->min == 0 && node->max == 1)
 		appendStringInfoChar(buf, '?');
-	else if (node->max == PG_INT32_MAX)
+	else if (node->max == RPR_QUANTITY_INF)
 		appendStringInfo(buf, "{%d,}", node->min);
 	else if (node->min == node->max)
 		appendStringInfo(buf, "{%d}", node->min);
@@ -14242,10 +14242,7 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	 */
 	if (inRPRDefine)
 	{
-		if (strcmp(proname, "prev") == 0 ||
-			strcmp(proname, "next") == 0 ||
-			strcmp(proname, "first") == 0 ||
-			strcmp(proname, "last") == 0)
+		if (is_rpr_navigation_name(proname))
 			force_qualify = true;
 	}
 

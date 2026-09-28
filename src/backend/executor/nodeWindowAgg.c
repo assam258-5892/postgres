@@ -264,7 +264,7 @@ static bool rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatc
 static void build_define_offsets(WindowAggState *winstate, List *defineClause);
 static void resolve_nav_offsets(WindowAggState *winstate);
 static void resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context);
-static bool RPRNavExpr_walker(Node *node, WindowAggState *winstate);
+static bool nav_offsets_walker(Node *node, WindowAggState *winstate);
 static void build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate);
 
 /*
@@ -4158,14 +4158,14 @@ build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate)
 }
 
 static bool
-RPRNavExpr_walker(Node *node, WindowAggState *winstate)
+nav_offsets_walker(Node *node, WindowAggState *winstate)
 {
 	if (node == NULL)
 		return false;
 	if (IsA(node, RPRNavExpr))
 		build_nav_offsets(castNode(RPRNavExpr, node), winstate);
 
-	return expression_tree_walker(node, RPRNavExpr_walker, winstate);
+	return expression_tree_walker(node, nav_offsets_walker, winstate);
 }
 
 /*
@@ -4191,7 +4191,7 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 
 	foreach_node(TargetEntry, te, defineClause)
 	{
-		RPRNavExpr_walker((Node *) te->expr, winstate);
+		nav_offsets_walker((Node *) te->expr, winstate);
 	}
 
 	/*
