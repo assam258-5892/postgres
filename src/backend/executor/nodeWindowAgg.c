@@ -43,6 +43,7 @@
 #include "executor/instrument.h"
 #include "executor/nodeWindowAgg.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "optimizer/clauses.h"
@@ -255,8 +256,7 @@ static void clear_reduced_frame(WindowAggState *winstate);
 static int	get_reduced_frame_status(WindowAggState *winstate, int64 pos);
 static void advance_nav_mark(WindowAggState *winstate, int64 currentPos);
 static void advance_reduced_frame_nfa(WindowObject winobj,
-									  RPRNFAContext *targetCtx, int64 pos,
-									  bool hasLimitedFrame, int64 frameOffset);
+									  RPRNFAContext *targetCtx);
 static void update_reduced_frame(WindowObject winobj, int64 pos);
 
 /* Forward declarations - DEFINE row evaluation */
@@ -2555,12 +2555,12 @@ ExecWindowAgg(PlanState *pstate)
 		/* don't evaluate the window functions when we're in pass-through mode */
 		if (winstate->status == WINDOWAGG_RUN)
 		{
-			/*
-			 * If RPR is defined and skip mode is next row, clear the current
-			 * match so the next row triggers re-evaluation.
-			 */
 			if (rpr_is_defined(winstate))
 			{
+				/*
+				 * Under SKIP TO NEXT ROW, clear the recorded match so this
+				 * row is matched again from its own start.
+				 */
 				if (winstate->rpSkipTo == ST_NEXT_ROW)
 					clear_reduced_frame(winstate);
 
@@ -3083,7 +3083,7 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		{
 			ExprState  *exprstate;
 
-			exprstate = ExecInitExpr(te->expr, (PlanState *) winstate);
+			exprstate = ExecInitQual(make_ands_implicit(te->expr), (PlanState *) winstate);
 
 			winstate->defineClauseExprs =
 				lappend(winstate->defineClauseExprs, exprstate);
@@ -3101,12 +3101,14 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		 * Allocate the per-row varMatched cache.  varNames are built in
 		 * DEFINE order, so varId equals the DEFINE list index and no mapping
 		 * is needed.
+		 *
+		 * The grammar makes DEFINE mandatory for a row pattern window, and
+		 * this branch runs only for one, so the list is never empty and
+		 * rpr_prepare_row() can reset the cache unconditionally.
 		 */
-		if (winstate->defineClauseExprs != NIL)
-			winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
-											  list_length(winstate->defineClauseExprs));
-		else
-			winstate->nfaVarMatched = NULL;
+		Assert(winstate->defineClauseExprs != NIL);
+		winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
+										  list_length(winstate->defineClauseExprs));
 
 		/* Copy match_start dependency bitmapset for per-context evaluation */
 		winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
@@ -4545,9 +4547,6 @@ clear_reduced_frame(WindowAggState *winstate)
  *   start >= 0, length == -1  unmatched (covers only the start row)
  *   start >= 0, length == 0   empty match (zero-length match at start)
  *   start >= 0, length >= 1   real match spanning [start, start + length)
- *
- * The tests below form a cascade with early returns, so their order is
- * significant.
  */
 static int
 get_reduced_frame_status(WindowAggState *winstate, int64 pos)
@@ -4555,30 +4554,35 @@ get_reduced_frame_status(WindowAggState *winstate, int64 pos)
 	int64		start = winstate->rpr_match_start;
 	int64		length = winstate->rpr_match_length;
 
+	Assert(pos >= 0);
+	Assert(start < 0 || length >= -1);
+
+	/* cleared slot: no result recorded yet */
 	if (start < 0)
-		return RF_NOT_DETERMINED;	/* cleared slot: no result recorded yet */
+		return RF_NOT_DETERMINED;
 
 	/*
-	 * Unmatched (length -1) and empty match (length 0) do not describe a
-	 * positive-length range, so they are classified before the range test.
-	 * Each covers only its own start row; any other position is not part of
-	 * this record and is still undetermined.
+	 * The record's own row: the length gives the verdict directly, and no
+	 * other row can produce any of these three.
 	 */
-	if (length == -1)
-		return (pos == start) ? RF_UNMATCHED : RF_NOT_DETERMINED;
-	if (length == 0)
-		return (pos == start) ? RF_EMPTY_MATCH : RF_NOT_DETERMINED;
+	if (pos == start)
+	{
+		if (length == -1)
+			return RF_UNMATCHED;
+		if (length == 0)
+			return RF_EMPTY_MATCH;
+		return RF_FRAME_HEAD;
+	}
 
 	/*
-	 * By here length >= 1, so [start, start + length) is a well-formed range.
+	 * Any other row is covered only by a real match, over [start, start +
+	 * length).  The sentinels need no special casing: -1 and 0 leave that
+	 * range empty, so every pos != start falls out here.
 	 */
 	if (pos < start || pos >= start + length)
 		return RF_NOT_DETERMINED;
 
-	/* pos lies within a real match. */
-	if (pos == start)
-		return RF_FRAME_HEAD;
-
+	/* inside a real match, after its head */
 	return RF_SKIPPED;
 }
 
@@ -4640,8 +4644,7 @@ advance_nav_mark(WindowAggState *winstate, int64 currentPos)
  * evaluations are shared across all active contexts.
  */
 static void
-advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
-						  int64 pos, bool hasLimitedFrame, int64 frameOffset)
+advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx)
 {
 	WindowAggState *winstate = winobj->winstate;
 	int64		currentPos;
@@ -4650,11 +4653,12 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 
 	/*
 	 * Determine where to start processing. Usually nfaLastProcessedRow+1 >=
-	 * pos since contexts are created at currentPos+1 during processing.
-	 * However, pos can exceed this when rows are skipped (e.g., unmatched
-	 * rows don't update nfaLastProcessedRow).
+	 * matchStartRow since contexts are created at currentPos+1 during
+	 * processing.  However, matchStartRow can exceed this when rows are
+	 * skipped (e.g., unmatched rows don't update nfaLastProcessedRow).
 	 */
-	startPos = Max(pos, winstate->nfaLastProcessedRow + 1);
+	startPos = Max(targetCtx->matchStartRow,
+				   winstate->nfaLastProcessedRow + 1);
 
 	/*
 	 * Process rows until target context completes or we hit boundaries. Each
@@ -4668,8 +4672,6 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 	 */
 	for (currentPos = startPos; targetCtx->states != NULL; currentPos++)
 	{
-		bool		rowExists;
-
 		/*
 		 * Evaluate variables for this row - done only once, shared by all
 		 * contexts.
@@ -4681,10 +4683,9 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 		 */
 		winstate->currentpos = currentPos;
 		winstate->nav_match_start = targetCtx->matchStartRow;
-		rowExists = rpr_prepare_row(winobj, currentPos, winstate->nfaVarMatched);
 
 		/* No more rows in partition? Finalize all contexts */
-		if (!rowExists)
+		if (!rpr_prepare_row(winobj, currentPos, winstate->nfaVarMatched))
 		{
 			ExecRPRFinalizeAllContexts(winstate, currentPos - 1);
 			/* Clean up dead contexts from finalization */
@@ -4701,7 +4702,7 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx,
 		 *   2. Absorb redundant
 		 *   3. Advance all (divergence)
 		 */
-		ExecRPRProcessRow(winstate, currentPos, hasLimitedFrame, frameOffset);
+		ExecRPRProcessRow(winstate, currentPos);
 
 		/*
 		 * Create a new context for the next potential start position. This
@@ -4742,40 +4743,32 @@ static void
 update_reduced_frame(WindowObject winobj, int64 pos)
 {
 	WindowAggState *winstate = winobj->winstate;
-	RPRNFAContext *targetCtx;
-	int			frameOptions = winstate->frameOptions;
-	bool		hasLimitedFrame;
-	int64		frameOffset = 0;
-	int64		matchLen;
+	RPRNFAContext *targetCtx = NULL;
 
-	/*
-	 * Check if we have a limited frame (ROWS ... N FOLLOWING). Each context
-	 * needs its own frame end based on matchStartRow + offset.
-	 */
-	hasLimitedFrame = (frameOptions & FRAMEOPTION_ROWS) &&
-		!(frameOptions & FRAMEOPTION_END_UNBOUNDED_FOLLOWING);
-	if (hasLimitedFrame)
-		frameOffset = DatumGetInt64(winstate->endOffsetValue);
+	winstate->rpr_match_start = pos;
+	winstate->rpr_match_length = -1;
 
-	/*
-	 * Case 1: pos is before any existing context's start position. This means
-	 * the position was already processed and determined unmatched. Head is
-	 * the oldest context (lowest matchStartRow) since contexts are added at
-	 * tail with increasing positions.
-	 */
-	if (winstate->nfaContext != NULL &&
-		pos < winstate->nfaContext->matchStartRow)
+	if (winstate->nfaContext != NULL)
 	{
-		/* already processed, unmatched */
-		winstate->rpr_match_start = pos;
-		winstate->rpr_match_length = -1;
-		return;
+		/*
+		 * Case 1: pos is before any existing context's start position. This
+		 * means the position was already processed and determined unmatched.
+		 * Head is the oldest context (lowest matchStartRow) since contexts
+		 * are added at tail with increasing positions.
+		 */
+		if (winstate->nfaContext->matchStartRow > pos)
+			return;
+
+		/*
+		 * Case 2: the head context starts exactly at pos, it holds this row's
+		 * pending result: either still in flight, or already completed by an
+		 * earlier call's driver loop.  Later contexts can't apply: the list
+		 * ascends by matchStartRow.
+		 */
+		if (winstate->nfaContext->matchStartRow == pos)
+			targetCtx = winstate->nfaContext;
 	}
 
-	/*
-	 * Case 2: Find existing context for this pos, or create new one.
-	 */
-	targetCtx = ExecRPRGetHeadContext(winstate, pos);
 	if (targetCtx == NULL)
 	{
 		/*
@@ -4784,67 +4777,54 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 		 * reprocess.
 		 */
 		if (pos <= winstate->nfaLastProcessedRow)
-		{
-			/* already processed, unmatched */
-			winstate->rpr_match_start = pos;
-			winstate->rpr_match_length = -1;
 			return;
-		}
+
 		/* Not yet processed - create new context and start fresh */
 		targetCtx = ExecRPRStartContext(winstate, pos);
 	}
-	else if (targetCtx->states == NULL)
-	{
-		/*
-		 * The head context already completed in an earlier call.  Reachable
-		 * under SKIP TO NEXT ROW, where overlapping contexts let one reach
-		 * FIN -- recording its result -- before the call for its own start
-		 * row arrives.  Register that result.
-		 */
-		goto register_result;
-	}
 
-	/* Drive the NFA forward until pos's match is resolved. */
-	advance_reduced_frame_nfa(winobj, targetCtx, pos, hasLimitedFrame,
-							  frameOffset);
-
-register_result:
+	/*
+	 * Either branch above settles targetCtx on pos, which the driver relies
+	 * on to resume from and which the result recorded at the top is keyed by.
+	 */
 	Assert(pos == targetCtx->matchStartRow);
 
 	/*
-	 * Record match result.  A determined slot has rpr_match_start >= 0; the
-	 * length then gives the kind: -1 unmatched, 0 empty match, >= 1 real
-	 * match.  A cleared slot keeps rpr_match_start < 0.
+	 * Drive the NFA forward, unless this context already finished in an
+	 * earlier call.  That happens in any skip mode: the driver runs rows on
+	 * behalf of an older context, and an overlapping context can complete
+	 * before the call for its own start row arrives.  The result it recorded
+	 * is registered below.
 	 */
-	winstate->rpr_match_start = targetCtx->matchStartRow;
+	if (targetCtx->states != NULL)
+		advance_reduced_frame_nfa(winobj, targetCtx);
 
-	if (targetCtx->matchEndRow < targetCtx->matchStartRow)
+	if (targetCtx->matchedState == NULL)
 	{
-		matchLen = targetCtx->lastProcessedRow - targetCtx->matchStartRow + 1;
+		/* No match */
+		winstate->rpr_match_length = -1;
+		ExecRPRRecordContextFailure(winstate,
+									targetCtx->lastProcessedRow - targetCtx->matchStartRow + 1);
+	}
+	else
+	{
+		/*
+		 * Match: an empty one ends at matchStartRow - 1, so the row count
+		 * comes out 0 with no case of its own.  Nothing ends earlier than
+		 * that -- FIN either consumes rows or is reached before the first.
+		 */
+		Assert(targetCtx->matchEndRow >= targetCtx->matchStartRow - 1);
 
-		if (targetCtx->matchedState != NULL)
-		{
-			/* Empty match: FIN reached but 0 rows consumed */
-			winstate->rpr_match_length = 0;
-			ExecRPRRecordContextSuccess(winstate, 0);
-		}
-		else
-		{
-			/* No match */
-			winstate->rpr_match_length = -1;
-			ExecRPRRecordContextFailure(winstate, matchLen);
-		}
-		ExecRPRFreeContext(winstate, targetCtx);
-		return;
+		winstate->rpr_match_length =
+			targetCtx->matchEndRow - targetCtx->matchStartRow + 1;
+
+		ExecRPRRecordContextSuccess(winstate, winstate->rpr_match_length);
 	}
 
-	/* Match succeeded */
-	matchLen = targetCtx->matchEndRow - targetCtx->matchStartRow + 1;
-
-	winstate->rpr_match_length = matchLen;
-	ExecRPRRecordContextSuccess(winstate, matchLen);
-
-	/* Remove the matched context */
+	/*
+	 * The result for pos is recorded; matched or not, this context is
+	 * consumed, so release it.
+	 */
 	ExecRPRFreeContext(winstate, targetCtx);
 }
 
@@ -4873,9 +4853,6 @@ rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched)
 	ExprContext *econtext = winstate->rprContext;
 	TupleTableSlot *slot;
 
-	/* Release the previous row's DEFINE evaluation memory */
-	ResetExprContext(econtext);
-
 	/* Fetch current row into temp_slot_1 */
 	slot = winstate->temp_slot_1;
 	if (!window_gettupleslot(winobj, pos, slot))
@@ -4891,9 +4868,8 @@ rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched)
 	 * Reset the per-row cache to "unevaluated"; each variable's DEFINE is
 	 * evaluated lazily at first consumption in nfa_eval_var_match.
 	 */
-	if (varMatched != NULL)
-		memset(varMatched, 0,
-			   sizeof(RPRVarMatch) * list_length(winstate->defineClauseExprs));
+	memset(varMatched, 0,
+		   sizeof(RPRVarMatch) * list_length(winstate->defineClauseExprs));
 
 	return true;				/* Row exists */
 }

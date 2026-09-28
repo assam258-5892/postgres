@@ -2912,13 +2912,13 @@ static void
 append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 {
 	/* Append quantifier if not {1,1} */
-	if (elem->min == 0 && elem->max == RPR_QUANTITY_INF)
+	if (elem->min == 0 && RPRElemIsUnbounded(elem))
 		appendStringInfoChar(buf, '*');
-	else if (elem->min == 1 && elem->max == RPR_QUANTITY_INF)
+	else if (elem->min == 1 && RPRElemIsUnbounded(elem))
 		appendStringInfoChar(buf, '+');
 	else if (elem->min == 0 && elem->max == 1)
 		appendStringInfoChar(buf, '?');
-	else if (elem->max == RPR_QUANTITY_INF)
+	else if (RPRElemIsUnbounded(elem))
 		appendStringInfo(buf, "{%d,}", elem->min);
 	else if (elem->min == elem->max && elem->min != 1)
 		appendStringInfo(buf, "{%d}", elem->min);
@@ -2940,7 +2940,7 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 	 */
 	if (RPRElemIsAbsorbable(elem))
 	{
-		Assert(elem->max == RPR_QUANTITY_INF);
+		Assert(RPRElemIsUnbounded(elem));
 		appendStringInfoChar(buf, '#');
 	}
 	else if (RPRElemIsAbsorbableBranch(elem))
@@ -3246,12 +3246,9 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 						ExplainPropertyInteger("Nav Mark Lookahead", NULL,
 											   planstate->navFirstOffset, es);
 					break;
-				default:
+				case RPR_NAV_OFFSET_RETAIN_ALL:
 					/* a forward reach is unbounded, never retain all */
-					Assert(planstate->navFirstOffsetKind ==
-						   RPR_NAV_OFFSET_NEEDS_EVAL ||
-						   planstate->navFirstOffsetKind ==
-						   RPR_NAV_OFFSET_FIXED);
+					Assert(false);
 					break;
 			}
 		}

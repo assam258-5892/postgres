@@ -79,6 +79,18 @@
 #define RPRElemIsSep(e)			((e)->varId == RPR_VARID_SEP)
 #define RPRElemIsFin(e)			((e)->varId == RPR_VARID_FIN)
 #define RPRElemCanSkip(e)		((e)->min == 0)
+#define RPRElemIsUnbounded(e)	((e)->max == RPR_QUANTITY_INF)
+/* Quantifier tests; a saturated count compares as unbounded */
+#define RPRElemCanLoop(e, count)	\
+	(RPRElemIsUnbounded(e) || (count) < (e)->max)
+#define RPRElemCanExit(e, count)	((count) >= (e)->min)
+/* Whether count has stayed inside the bound, not whether it may grow */
+#define RPRElemWithinMax(e, count)	\
+	(RPRElemIsUnbounded(e) || (count) <= (e)->max)
+
+/* Count one more iteration, saturating so that int32 cannot overflow */
+#define RPRCountIncrement(count)	\
+	do { if ((count) < RPR_COUNT_INF) (count)++; } while (0)
 
 extern RPRPattern *buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 								   RPSkipTo rpSkipTo, int frameOptions,
