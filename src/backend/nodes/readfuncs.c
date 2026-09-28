@@ -28,7 +28,6 @@
 
 #include "miscadmin.h"
 #include "nodes/bitmapset.h"
-#include "nodes/plannodes.h"
 #include "nodes/readfuncs.h"
 
 

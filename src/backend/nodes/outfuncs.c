@@ -23,7 +23,6 @@
 #include "nodes/bitmapset.h"
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
-#include "nodes/plannodes.h"
 #include "utils/datum.h"
 
 /* State flag that determines how nodeToStringInternal() should treat location fields */
