@@ -279,25 +279,25 @@ IGNORE NULLS
   </para>
 
   <para>
-   Row Pattern Recognition navigation functions are listed in
-   <xref linkend="functions-rpr-navigation-table"/>.  These functions
-   can be used to describe the DEFINE clause of Row Pattern Recognition.
-   The names <function>PREV</function>, <function>NEXT</function>,
-   <function>FIRST</function>, and <function>LAST</function> are
-   recognized as navigation functions only in an unqualified call; a
-   schema-qualified call is resolved as an ordinary function instead.
+   행 패턴 인식의 내비게이션 함수는
+   <xref linkend="functions-rpr-navigation-table"/>에 나열되어 있다. 이
+   함수들은 행 패턴 인식의 DEFINE 절을 기술하는 데 쓸 수 있다.
+   <function>PREV</function>, <function>NEXT</function>,
+   <function>FIRST</function>, <function>LAST</function>라는 이름은 한정하지
+   않고 호출할 때만 내비게이션 함수로 인식되며, 스키마로 한정한 호출은 대신
+   일반 함수로 해석된다.
   </para>
 
    <table id="functions-rpr-navigation-table">
-    <title>Row Pattern Navigation Functions</title>
+    <title>행 패턴 내비게이션 함수</title>
     <tgroup cols="1">
      <thead>
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        Function
+        함수
        </para>
        <para>
-        Description
+        설명
        </para></entry>
       </row>
      </thead>
@@ -312,15 +312,13 @@ IGNORE NULLS
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
-        Returns <parameter>value</parameter> evaluated at the row that is
-        <parameter>offset</parameter> rows before the current row within
-        the partition;
-        returns NULL if the target row is outside the partition.
-        <parameter>offset</parameter> defaults to 1 if omitted.
-        <parameter>offset</parameter> must be a non-negative integer;
-        an offset of 0 refers to the current row itself.
-        <parameter>offset</parameter> must not be NULL.
-        Can only be used in a <literal>DEFINE</literal> clause.
+        <parameter>value</parameter>를 파티션 내에서 현재 행보다
+        <parameter>offset</parameter>행 앞선 행에서 평가하여 반환하며, 대상
+        행이 파티션을 벗어나면 NULL 을 반환한다.
+        <parameter>offset</parameter>를 생략하면 기본값은 1 이다.
+        <parameter>offset</parameter>는 음이 아닌 정수여야 하며, offset이 0
+        이면 현재 행 자신을 가리킨다.  <parameter>offset</parameter>는 NULL
+        이면 안 된다.  <literal>DEFINE</literal> 절에서만 사용할 수 있다.
        </para></entry>
       </row>
 
@@ -333,15 +331,13 @@ IGNORE NULLS
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
-        Returns <parameter>value</parameter> evaluated at the row that is
-        <parameter>offset</parameter> rows after the current row within
-        the partition;
-        returns NULL if the target row is outside the partition.
-        <parameter>offset</parameter> defaults to 1 if omitted.
-        <parameter>offset</parameter> must be a non-negative integer;
-        an offset of 0 refers to the current row itself.
-        <parameter>offset</parameter> must not be NULL.
-        Can only be used in a <literal>DEFINE</literal> clause.
+        <parameter>value</parameter>를 파티션 내에서 현재 행보다
+        <parameter>offset</parameter>행 뒤선 행에서 평가하여 반환하며, 대상
+        행이 파티션을 벗어나면 NULL 을 반환한다.
+        <parameter>offset</parameter>를 생략하면 기본값은 1 이다.
+        <parameter>offset</parameter>는 음이 아닌 정수여야 하며, offset이 0
+        이면 현재 행 자신을 가리킨다.  <parameter>offset</parameter>는 NULL
+        이면 안 된다.  <literal>DEFINE</literal> 절에서만 사용할 수 있다.
        </para></entry>
       </row>
 
@@ -354,14 +350,13 @@ IGNORE NULLS
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
-        Returns <parameter>value</parameter> evaluated at the row that is
-        <parameter>offset</parameter> rows after the match start row;
-        returns NULL if the target row is beyond the current row.
-        <parameter>offset</parameter> defaults to 0 if omitted, referring to
-        the match start row itself.
-        <parameter>offset</parameter> must be a non-negative integer.
-        <parameter>offset</parameter> must not be NULL.
-        Can only be used in a <literal>DEFINE</literal> clause.
+        <parameter>value</parameter>를 매치 시작 행보다
+        <parameter>offset</parameter>행 뒤선 행에서 평가하여 반환하며, 대상
+        행이 현재 행을 지나면 NULL 을 반환한다. <parameter>offset</parameter>를
+        생략하면 기본값은 0 이며, 이는 매치 시작 행 자신을 가리킨다.
+        <parameter>offset</parameter>는 음이 아닌 정수여야 한다.
+        <parameter>offset</parameter>는 NULL 이면 안 된다.
+        <literal>DEFINE</literal> 절에서만 사용할 수 있다.
        </para></entry>
       </row>
 
@@ -374,15 +369,13 @@ IGNORE NULLS
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
-        Returns <parameter>value</parameter> evaluated at the row that is
-        <parameter>offset</parameter> rows before the current row within
-        the match;
-        returns NULL if the target row is before the match start row.
-        <parameter>offset</parameter> defaults to 0 if omitted, referring to
-        the current row itself.
-        <parameter>offset</parameter> must be a non-negative integer.
-        <parameter>offset</parameter> must not be NULL.
-        Can only be used in a <literal>DEFINE</literal> clause.
+        <parameter>value</parameter>를 매치 내에서 현재 행보다
+        <parameter>offset</parameter>행 앞선 행에서 평가하여 반환하며, 대상
+        행이 매치 시작 행보다 앞서면 NULL 을 반환한다.
+        <parameter>offset</parameter>를 생략하면 기본값은 0 이며, 이는 현재 행
+        자신을 가리킨다.  <parameter>offset</parameter>는 음이 아닌 정수여야
+        한다.  <parameter>offset</parameter>는 NULL 이면 안 된다.
+        <literal>DEFINE</literal> 절에서만 사용할 수 있다.
        </para></entry>
       </row>
 
@@ -391,35 +384,28 @@ IGNORE NULLS
    </table>
 
    <para>
-    <function>PREV</function> and <function>NEXT</function> may wrap
-    <function>FIRST</function> or <function>LAST</function> for compound
-    navigation. For example,
-    <literal>PREV(FIRST(val, 2), 3)</literal> fetches the value at
-    3 rows before the row that is 2 rows after the match start.
-    The inner <function>FIRST</function> or <function>LAST</function> is
-    checked first, as it would be on its own: if the inner
-    <function>FIRST</function> row is beyond the current row, or the inner
-    <function>LAST</function> row is before the match start row, the result
-    is NULL, even when the outer offset would lead back into range.  The
-    outer <function>PREV</function> or <function>NEXT</function> may then
-    reach rows outside the match, and returns NULL only if the target row
-    is outside the partition.
-    The reverse nesting (<function>FIRST</function>/<function>LAST</function>
-    wrapping <function>PREV</function>/<function>NEXT</function>) is not
-    permitted. Same-category nesting (e.g.,
-    <function>PREV</function> inside <function>PREV</function>) is also
-    prohibited.
-    The <parameter>offset</parameter> argument must be a run-time constant:
-    it cannot reference columns or contain a navigation operation.
-    In a compound navigation the inner <function>FIRST</function> or
-    <function>LAST</function> call must be the whole first argument of
-    <function>PREV</function> or <function>NEXT</function>; an argument
-    that merely contains one, such as <literal>PREV(FIRST(val) + 1)</literal>,
-    is rejected.
-    The <parameter>value</parameter> argument, on the other hand, must
-    include at least one column reference; an argument made only of
-    constants or parameters, such as <literal>PREV(1)</literal>, is
-    rejected.
+    <function>PREV</function>와 <function>NEXT</function>는 복합 내비게이션을
+    위해 <function>FIRST</function>나 <function>LAST</function>를 감쌀 수 있다.
+    예를 들어 <literal>PREV(FIRST(val, 2), 3)</literal>은 매치 시작 행보다 2 행
+    뒤인 행보다 3 행 앞선 행의 값을 가져온다.  안쪽의
+    <function>FIRST</function>나 <function>LAST</function>는 단독으로 쓰일 때와
+    마찬가지로 먼저 검사된다: 안쪽 <function>FIRST</function>의 행이 현재 행을
+    지나거나 안쪽 <function>LAST</function>의 행이 매치 시작 행보다 앞서면,
+    바깥쪽 offset이 다시 범위 안으로 돌아오더라도 결과는 NULL 이다.  그 뒤
+    바깥쪽 <function>PREV</function>나 <function>NEXT</function>는 매치 밖의
+    행에 닿을 수 있으며, 대상 행이 파티션을 벗어날 때만 NULL 을 반환한다.
+    <function>FIRST</function>/<function>LAST</function>가
+    <function>PREV</function>/<function>NEXT</function>를 감싸는 반대 방향
+    중첩은 허용되지 않는다.  같은 범주 안의 중첩(예: <function>PREV</function>
+    안에 <function>PREV</function>)도 금지된다.  <parameter>offset</parameter>
+    인수는 run-time 상수여야 한다: 열을 참조하거나 내비게이션 연산을 포함할 수
+    없다.  복합 내비게이션에서 안쪽의 <function>FIRST</function>나
+    <function>LAST</function> 호출은 <function>PREV</function>나
+    <function>NEXT</function>의 첫 번째 인수 전체여야 한다.
+    <literal>PREV(FIRST(val) + 1)</literal>처럼 그것을 일부로만 포함하는 인수는
+    거부된다.  반면 <parameter>value</parameter> 인수는 열 참조를 적어도 하나는
+    포함해야 한다.  <literal>PREV(1)</literal>처럼 상수나 매개변수로만 이루어진
+    인수는 거부된다.
    </para>
 
   <note>

@@ -390,7 +390,7 @@ exprTypmod(const Node *expr)
 		case T_CollateExpr:
 			return exprTypmod((Node *) ((const CollateExpr *) expr)->arg);
 		case T_RPRNavExpr:
-			/* result has the same type/typmod as the argument expression */
+			/* 결과는 인자 표현식과 같은 type/typmod를 가진다 */
 			return exprTypmod((Node *) ((const RPRNavExpr *) expr)->arg);
 		case T_CaseExpr:
 			{
@@ -2796,14 +2796,13 @@ query_tree_walker_impl(Query *query,
 		 * But we need to walk the expressions under WindowClause nodes even
 		 * if we're not interested in SortGroupClause nodes.
 		 *
-		 * Note that defineClause (row pattern recognition) is an expression
-		 * tree owned by the window clause itself, not a reference into the
-		 * targetlist the way partitionClause and orderClause are.  Every
-		 * Query-wide walker and rewriter therefore reaches its Vars and must
-		 * be able to treat them as live.  Whoever decides that a window
-		 * clause will not be executed is responsible for emptying
-		 * defineClause at that moment, rather than expecting later scans to
-		 * skip it.
+		 * defineClause(행 패턴 인식)는 partitionClause 와 orderClause 처럼
+		 * 타깃 리스트를 가리키는 참조가 아니라, 윈도우 절 자신이 소유하는
+		 * 표현식 트리라는 점에 유의하라.  따라서 Query 전체를 다루는 모든
+		 * 워커와 rewriter는 그 Var에 도달하며, 이를 살아 있는 것으로 다룰 수
+		 * 있어야 한다.  어떤 윈도우 절이 실행되지 않을 것이라고 결정하는
+		 * 쪽이, 이후의 스캔이 그것을 건너뛰기를 기대하는 대신, 그 시점에
+		 * defineClause 를 비울 책임을 진다.
 		 */
 		ListCell   *lc;
 

@@ -2458,12 +2458,11 @@ find_window_run_conditions(Query *subquery, AttrNumber attno,
 										wfunc->winref - 1);
 
 	/*
-	 * If this is a row pattern recognition window, we cannot push down a run
-	 * condition. In the case, a window partition (or frame) is divided into
-	 * multiple reduced frames and each frame should be evaluated to the end
-	 * of the partition (or full frame end). This means we cannot apply the
-	 * run condition optimization because it stops evaluation window functions
-	 * in certain cases.
+	 * 행 패턴 인식 윈도우라면 Run Condition을 푸시다운할 수 없다. 이 경우
+	 * 윈도우 파티션(또는 프레임)이 여러 개의 축소된 프레임으로 나뉘며, 각
+	 * 프레임은 파티션의 끝(또는 프레임 전체의 끝)까지 평가되어야 한다.  이는
+	 * 특정 경우에 윈도우 함수 평가를 멈추게 하므로 Run Condition 최적화를
+	 * 적용할 수 없다는 뜻이다.
 	 */
 	if (wclause->rpPattern != NULL)
 		return false;

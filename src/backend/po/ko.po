@@ -35729,6 +35729,313 @@ msgstr "문자열 안에 비표준 escape 문자를 사용하고 있습니다"
 msgid "Use the escape string syntax for escapes, e.g., E'\\r\\n'."
 msgstr "인용부호 표기법을 사용하세요, 예, E'\\r\\n'."
 
+#: executor/nodeWindowAgg.c:2428
+#, c-format
+msgid "frame ending offset must be positive with row pattern recognition"
+msgstr "행 패턴 인식에서는 프레임 끝 위치값이 양수여야 함"
+
+#: executor/nodeWindowAgg.c:4108
+#, c-format
+msgid "row pattern navigation offset must not be null"
+msgstr "행 패턴 내비게이션 오프셋으로 null 값을 사용할 수 없음"
+
+#: executor/nodeWindowAgg.c:4117
+#, c-format
+msgid "row pattern navigation offset must not be negative"
+msgstr "행 패턴 내비게이션 오프셋으로 음수 값을 사용할 수 없음"
+
+#: executor/nodeWindowAgg.c:5168
+#, c-format
+msgid "function %s does not allow RESPECT/IGNORE NULLS"
+msgstr "%s 함수는 RESPECT/IGNORE NULLS를 허용하지 않음"
+
+#: optimizer/plan/planner.c:1069
+#, c-format
+msgid "DEFINE clause cannot contain volatile functions"
+msgstr "DEFINE 절에는 휘발성 함수를 포함할 수 없음"
+
+#: optimizer/plan/rpr.c:1056
+#, c-format
+msgid "pattern nesting too deep"
+msgstr "패턴 중첩이 너무 깊음"
+
+#: optimizer/plan/rpr.c:1057
+#, c-format
+msgid "Pattern nesting depth %d exceeds maximum %d."
+msgstr "패턴 중첩 깊이(%d)가 최대값(%d)을 초과했습니다."
+
+#: optimizer/plan/rpr.c:1157
+#, c-format
+msgid "pattern too complex"
+msgstr "패턴이 너무 복잡함"
+
+#: optimizer/plan/rpr.c:1158
+#, c-format
+msgid "Pattern has %d elements, maximum is %d."
+msgstr "패턴에 요소가 %d개 있으며, 최대값은 %d입니다."
+
+#: parser/parse_cte.c:194
+#, c-format
+msgid "cannot use row pattern recognition in a recursive query"
+msgstr "재귀 쿼리에서는 행 패턴 인식을 사용할 수 없음"
+
+#: parser/parse_expr.c:657
+#, c-format
+msgid "pattern variable qualified expression \"%s\" is not supported in DEFINE clause"
+msgstr "DEFINE 절은 패턴 변수로 한정된 표현식 \"%s\"을(를) 지원하지 않음"
+
+#: parser/parse_expr.c:671 parser/parse_expr.c:735
+#, c-format
+msgid "whole-row reference is not allowed in DEFINE clause"
+msgstr "DEFINE 절에서는 전체 로우 참조를 사용할 수 없음"
+
+#: parser/parse_expr.c:672 parser/parse_expr.c:736
+#, c-format
+msgid "A DEFINE condition may reference individual columns only."
+msgstr "DEFINE 조건은 개별 칼럼만 참조할 수 있습니다."
+
+#: parser/parse_expr.c:951 parser/parse_expr.c:1044 parser/parse_expr.c:1052
+#, c-format
+msgid "qualified expression \"%s\" is not allowed in DEFINE clause"
+msgstr "DEFINE 절에서는 한정된 표현식 \"%s\"을(를) 사용할 수 없음"
+
+#: parser/parse_expr.c:1012
+#, c-format
+msgid "cannot use outer query column in DEFINE clause"
+msgstr "DEFINE 절에서는 외부 쿼리 칼럼을 사용할 수 없음"
+
+#: parser/parse_expr.c:1018
+#, c-format
+msgid "range variable qualified expression \"%s\" is not allowed in DEFINE clause"
+msgstr "DEFINE 절에서는 범위 변수로 한정된 표현식 \"%s\"을(를) 사용할 수 없음"
+
+#: parser/parse_expr.c:1046
+#, c-format
+msgid "Write the name without its qualifier, or write \"(x).field\" to select a field of a composite value."
+msgstr "한정자 없이 이름만 쓰거나, 복합 값의 필드를 선택하려면 \"(x).field\"처럼 쓰십시오."
+
+#: parser/parse_expr.c:2081
+msgid "cannot use subquery in DEFINE expression"
+msgstr "DEFINE 표현식에서는 서브쿼리를 사용할 수 없음"
+
+#: parser/parse_func.c:2222
+#, c-format
+msgid "cannot use VARIADIC with row pattern navigation function %s"
+msgstr "행 패턴 내비게이션 함수 %s에는 VARIADIC을 사용할 수 없음"
+
+#: parser/parse_func.c:2228
+#, c-format
+msgid "cannot use named arguments with row pattern navigation function %s"
+msgstr "행 패턴 내비게이션 함수 %s에는 인자 이름을 사용할 수 없음"
+
+#: parser/parse_func.c:2235
+#, c-format
+msgid "too few arguments for row pattern navigation function %s"
+msgstr "행 패턴 내비게이션 함수 %s의 인자가 너무 적음"
+
+#: parser/parse_func.c:2237 parser/parse_func.c:2245
+#, c-format
+msgid "%s takes a value expression and an optional offset argument."
+msgstr "%s는 값 표현식과 선택적 오프셋 인자를 받습니다."
+
+#: parser/parse_func.c:2243
+#, c-format
+msgid "too many arguments for row pattern navigation function %s"
+msgstr "행 패턴 내비게이션 함수 %s의 인자가 너무 많음"
+
+#: parser/parse_func.c:2281
+#, c-format
+msgid "offset argument of %s must be type %s, not type %s"
+msgstr "%s의 오프셋 인자는 %s 자료형이어야 함(%s 자료형이 아님)"
+
+#: parser/parse_rpr.c:91
+#, c-format
+msgid "unsupported frame for row pattern recognition"
+msgstr "행 패턴 인식에서 지원하지 않는 프레임"
+
+#. translator: both %s are SQL window frame specifications
+#: parser/parse_rpr.c:93
+#, c-format
+msgid "The frame must be \"%s\" or \"%s\"."
+msgstr "프레임은 \"%s\" 또는 \"%s\"여야 합니다."
+
+#: parser/parse_rpr.c:110
+#, c-format
+msgid "cannot use EXCLUDE with row pattern recognition"
+msgstr "행 패턴 인식에는 EXCLUDE를 사용할 수 없음"
+
+#: parser/parse_rpr.c:203
+#, c-format
+msgid "too many row pattern variables"
+msgstr "행 패턴 변수가 너무 많음"
+
+#: parser/parse_rpr.c:204
+#, c-format
+msgid "The maximum number of row pattern variables is %d."
+msgstr "행 패턴 변수의 최대 개수는 %d개입니다."
+
+#: parser/parse_rpr.c:285
+#, c-format
+msgid "DEFINE variable \"%s\" is not used in PATTERN"
+msgstr "DEFINE 변수 \"%s\"이(가) PATTERN에서 사용되지 않음"
+
+#: parser/parse_rpr.c:304
+#, c-format
+msgid "DEFINE variable \"%s\" appears more than once"
+msgstr "DEFINE 변수 \"%s\"이(가) 두 번 이상 사용되었음"
+
+#: parser/parse_rpr.c:422
+#, c-format
+msgid "row pattern navigation offset cannot contain a row pattern navigation operation"
+msgstr "행 패턴 내비게이션 오프셋에는 행 패턴 내비게이션 연산을 포함할 수 없음"
+
+#: parser/parse_rpr.c:423
+#, c-format
+msgid "A navigation offset must be a run-time constant."
+msgstr "내비게이션 오프셋은 런타임 상수여야 합니다."
+
+#: parser/parse_rpr.c:457
+#, c-format
+msgid "row pattern navigation operation must be a direct argument of the outer navigation"
+msgstr "행 패턴 내비게이션 연산은 외부 내비게이션의 직접 인자여야 함"
+
+#: parser/parse_rpr.c:458 parser/parse_rpr.c:466 parser/parse_rpr.c:499
+#: parser/parse_rpr.c:505 parser/parse_rpr.c:511
+#, c-format
+msgid "Only PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), and NEXT(LAST()) compound forms are allowed."
+msgstr "PREV(FIRST()), PREV(LAST()), NEXT(FIRST()), NEXT(LAST()) 복합 형태만 허용됩니다."
+
+#: parser/parse_rpr.c:465
+#, c-format
+msgid "cannot nest row pattern navigation more than two levels deep"
+msgstr "행 패턴 내비게이션은 2단계보다 더 깊이 중첩할 수 없음"
+
+#: parser/parse_rpr.c:492 parser/parse_rpr.c:518
+#, c-format
+msgid "argument of row pattern navigation operation must include at least one column reference"
+msgstr "행 패턴 내비게이션 연산의 인자에는 적어도 하나 이상의 칼럼 참조가 포함되어야 함"
+
+#: parser/parse_rpr.c:498
+#, c-format
+msgid "FIRST and LAST cannot contain PREV or NEXT"
+msgstr "FIRST와 LAST는 PREV나 NEXT를 포함할 수 없음"
+
+#: parser/parse_rpr.c:504
+#, c-format
+msgid "PREV and NEXT cannot contain PREV or NEXT"
+msgstr "PREV와 NEXT는 PREV나 NEXT를 포함할 수 없음"
+
+#: parser/parse_rpr.c:510
+#, c-format
+msgid "FIRST and LAST cannot contain FIRST or LAST"
+msgstr "FIRST와 LAST는 FIRST나 LAST를 포함할 수 없음"
+
+#: parser/parse_rpr.c:541 parser/parse_rpr.c:551
+#, c-format
+msgid "row pattern navigation offset must be a run-time constant"
+msgstr "행 패턴 내비게이션 오프셋은 런타임 상수여야 함"
+
+#: gram.y:17085
+#, c-format
+msgid "SEEK is not supported"
+msgstr "SEEK는 지원되지 않음"
+
+#: gram.y:17086
+#, c-format
+msgid "Use INITIAL instead."
+msgstr "대신 INITIAL을 사용하십시오."
+
+#: gram.y:17203
+#, c-format
+msgid "PERMUTE is not supported"
+msgstr "PERMUTE는 지원되지 않음"
+
+#: gram.y:17204
+#, c-format
+msgid "Write the alternations out instead, or write \"permute\" to use it as a pattern variable."
+msgstr "대신 교대를 풀어서 쓰거나, 패턴 변수로 사용하려면 \"permute\"라고 쓰십시오."
+
+#: gram.y:17277 gram.y:17321
+#, c-format
+msgid "invalid quantifier \"%s\""
+msgstr "잘못된 수량자 \"%s\""
+
+#: gram.y:17278 gram.y:17322 gram.y:17340 gram.y:17354
+#, c-format
+msgid "Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."
+msgstr "사용할 수 있는 수량자는 *, +, ?, {n}, {n,}, {,m}, {n,m}이며, 각각 뒤에 소극적 버전을 나타내는 \"?\"를 선택적으로 붙일 수 있습니다."
+
+#: gram.y:17295
+#, c-format
+msgid "invalid token \"%s\" after \"*\" quantifier"
+msgstr "잘못된 토큰 \"%s\"이(가) \"*\" 수량자 뒤에 있음"
+
+#: gram.y:17296
+#, c-format
+msgid "Did you mean \"*?\" for reluctant quantifier?"
+msgstr "소극적 수량자를 사용하려면 \"*?\"를 쓰십시오."
+
+#: gram.y:17312
+#, c-format
+msgid "invalid token \"%s\" after \"+\" quantifier"
+msgstr "잘못된 토큰 \"%s\"이(가) \"+\" 수량자 뒤에 있음"
+
+#: gram.y:17313
+#, c-format
+msgid "Did you mean \"+?\" for reluctant quantifier?"
+msgstr "소극적 수량자를 사용하려면 \"+?\"를 쓰십시오."
+
+#: gram.y:17333 gram.y:20730 gram.y:20750
+#, c-format
+msgid "alternation operator \"|\" requires a pattern on both sides"
+msgstr "교대 연산자 \"|\"는 양쪽에 패턴이 있어야 함"
+
+#: gram.y:17338
+#, c-format
+msgid "invalid token \"%s\" after \"%s\" quantifier"
+msgstr "잘못된 토큰 \"%s\"이(가) \"%s\" 수량자 뒤에 있음"
+
+#: gram.y:17353
+#, c-format
+msgid "invalid token \"%s\" after \"?\" quantifier"
+msgstr "잘못된 토큰 \"%s\"이(가) \"?\" 수량자 뒤에 있음"
+
+#: gram.y:17363 gram.y:17381 gram.y:17395 gram.y:17416 gram.y:17450
+#: gram.y:17472
+#, c-format
+msgid "quantifier bound must be between 1 and %d"
+msgstr "수량자 한계값은 1에서 %d 사이여야 함"
+
+#: gram.y:17372 gram.y:17390 gram.y:17433 gram.y:17467
+#, c-format
+msgid "quantifier bound must be between 0 and %d"
+msgstr "수량자 한계값은 0에서 %d 사이여야 함"
+
+#: gram.y:17400 gram.y:17477
+#, c-format
+msgid "quantifier minimum bound must not exceed maximum"
+msgstr "수량자의 최소 한계값은 최대 한계값을 초과할 수 없음"
+
+#: gram.y:17410 gram.y:17427 gram.y:17444 gram.y:17461
+#, c-format
+msgid "invalid token \"%s\" after range quantifier"
+msgstr "잘못된 토큰 \"%s\"이(가) 범위 수량자 뒤에 있음"
+
+#: gram.y:17411
+#, c-format
+msgid "Only \"?\" is allowed after {n} to make it reluctant."
+msgstr "{n} 뒤에는 소극적으로 만들기 위한 \"?\"만 허용됩니다."
+
+#: gram.y:17428 gram.y:17445
+#, c-format
+msgid "Only \"?\" is allowed after {n,} or {,m} to make it reluctant."
+msgstr "{n,} 또는 {,m} 뒤에는 소극적으로 만들기 위한 \"?\"만 허용됩니다."
+
+#: gram.y:17462
+#, c-format
+msgid "Only \"?\" is allowed after {n,m} to make it reluctant."
+msgstr "{n,m} 뒤에는 소극적으로 만들기 위한 \"?\"만 허용됩니다."
+
 #~ msgid "\"%s\" must be set to -1 during binary upgrade mode."
 #~ msgstr "바이너리 업그레이드 모드 중는 \"%s\" 값은 -1이어야 합니다."
 

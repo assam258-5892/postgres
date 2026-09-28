@@ -1060,42 +1060,45 @@ typedef struct RPRNavState
 	RPRNavExpr *rprnavexpr;
 
 	/*
-	 * Resolved navigation offsets for this execution, captured from
-	 * winstate->rprNavOffsets at expression compile time.  These live in
-	 * executor state (not on the RPRNavExpr) because plan trees are read-only
-	 * and may be shared by concurrent executions.
+	 * 이 실행에 대해 확정된 내비게이션 오프셋으로, 표현식 컴파일 타임에
+	 * winstate->rprNavOffsets 로부터 가져온 것이다.  플랜 트리는 읽기
+	 * 전용이고 동시 실행 사이에 공유될 수 있으므로, 이 값은
+	 * (RPRNavExpr 이 아니라) 실행기 상태에 있다.
 	 */
-	NullableDatum offset;		/* inner offset */
-	NullableDatum compound_offset;	/* outer offset for compound nav */
-	int16		resulttyplen;	/* RESTORE: result type length */
-	bool		resulttypbyval; /* RESTORE: result pass-by-value? */
+	NullableDatum offset;		/* 내부 오프셋 */
+	NullableDatum compound_offset;	/* 복합 내비게이션의 외부 오프셋 */
+	int16		resulttyplen;	/* RESTORE: 결과 타입 길이 */
+	bool		resulttypbyval; /* RESTORE: 결과가 pass-by-value인가? */
 } RPRNavState;
 
 /*
- * RPRNavOffsetKind - status of a resolved navigation trim offset
+ * RPRNavOffsetKind - 확정된 내비게이션 트림 오프셋의 상태
  * (WindowAggState.navMaxOffset / navFirstOffset)
  */
 typedef enum RPRNavOffsetKind
 {
-	RPR_NAV_OFFSET_FIXED,		/* resolved constant; use the offset value */
-	RPR_NAV_OFFSET_NEEDS_EVAL,	/* non-constant offset; shows "runtime",
-								 * resolved per scan */
-	RPR_NAV_OFFSET_RETAIN_ALL,	/* offset overflow; retain all rows (no trim) */
+	RPR_NAV_OFFSET_FIXED,		/* 확정된 상수. 오프셋 값을 사용한다 */
+	RPR_NAV_OFFSET_NEEDS_EVAL,	/* 상수가 아닌 오프셋. "runtime"으로
+								 * 표시되며 스캔마다 확정된다 */
+	RPR_NAV_OFFSET_RETAIN_ALL,	/* 오프셋 오버플로. 모든 행을 유지한다(트림
+								 * 없음) */
 } RPRNavOffsetKind;
 
 /*
- * RPRNavOffsets - one entry of WindowAggState.rprNavOffsets
+ * RPRNavOffsets - WindowAggState.rprNavOffsets 의 한 항목
  *
- * Associates an RPRNavExpr from the (read-only) plan tree with its offsets,
- * built by build_define_offsets() at executor startup and settled once per
- * scan by resolve_nav_offsets().  The list is in RPRNavExpr.navno order.
+ * (읽기 전용) 플랜 트리의 RPRNavExpr 을 그 오프셋과 연결한다. 이 목록은
+ * 실행기 시작 시 build_define_offsets()가 만들고, 스캔마다 한 번씩
+ * resolve_nav_offsets()가 확정한다.  목록의 순서는 RPRNavExpr.navno 순서를
+ * 따른다.
  */
 typedef struct RPRNavOffsets
 {
-	RPRNavExpr *nav;			/* plan-tree node this entry belongs to */
-	ExprState  *offset_state;	/* inner offset expr, evaluated once per scan */
-	ExprState  *compound_offset_state;	/* outer (compound) offset expr */
-	RPRNavState *rprnavstate;	/* execution state; holds the resolved values */
+	RPRNavExpr *nav;			/* 이 항목이 속한 plan-tree 노드 */
+	ExprState  *offset_state;	/* 내부 오프셋 표현식. 스캔마다 한 번
+								 * 평가된다 */
+	ExprState  *compound_offset_state;	/* 외부(복합) 오프셋 표현식 */
+	RPRNavState *rprnavstate;	/* 실행 상태. 확정된 값을 담는다 */
 } RPRNavOffsets;
 
 /*
@@ -2541,97 +2544,99 @@ typedef enum WindowAggStatus
 									 * tuples during spool */
 } WindowAggStatus;
 
-/* RPR reduced frame states returned by get_reduced_frame_status() */
-#define RF_NOT_DETERMINED	0	/* not yet processed */
-#define RF_FRAME_HEAD		1	/* start row of a match */
-#define RF_SKIPPED			2	/* interior row of a match */
-#define RF_UNMATCHED		3	/* no match at this row */
-#define RF_EMPTY_MATCH		4	/* empty match (0 rows); treated as unmatched */
+/* get_reduced_frame_status()가 반환하는 RPR 축소된 프레임 상태 */
+#define RF_NOT_DETERMINED	0	/* 아직 처리되지 않음 */
+#define RF_FRAME_HEAD		1	/* 매치의 시작 행 */
+#define RF_SKIPPED			2	/* 매치의 내부 행 */
+#define RF_UNMATCHED		3	/* 이 행에서 매치 없음 */
+#define RF_EMPTY_MATCH		4	/* 빈 매치(0 행). unmatch로 취급한다 */
 
 /*
- * RPRNFAState - single NFA state for pattern matching
+ * RPRNFAState - 패턴 매칭을 위한 단일 NFA 상태
  *
- * counts[] tracks repetition counts at each nesting depth.
+ * counts[]는 각 중첩 깊이에서의 반복 횟수를 추적한다.
  *
- * isAbsorbable tracks if state is in absorbable region (ABSORBABLE_BRANCH).
- * Monotonic property: once false, stays false (can't re-enter region).
+ * isAbsorbable 은 상태가 흡수 가능 영역(ABSORBABLE_BRANCH)에 있는지를
+ * 추적한다.  단조 속성: 한 번 false가 되면 계속 false로 남는다(그 영역에 다시
+ * 들어갈 수 없다).
  */
 typedef struct RPRNFAState
 {
-	struct RPRNFAState *next;	/* next state in linked list */
-	int16		elemIdx;		/* current pattern element index */
-	bool		isAbsorbable;	/* true if state is in absorbable region */
-	int32		counts[FLEXIBLE_ARRAY_MEMBER];	/* repetition counts by depth */
+	struct RPRNFAState *next;	/* 연결 리스트의 다음 상태 */
+	int16		elemIdx;		/* 현재 패턴 요소 인덱스 */
+	bool		isAbsorbable;	/* 상태가 흡수 가능 영역에 있으면 true */
+	int32		counts[FLEXIBLE_ARRAY_MEMBER];	/* 깊이별 반복 횟수 */
 } RPRNFAState;
 
 /*
- * RPRNFAContext - context for NFA pattern matching execution
+ * RPRNFAContext - NFA 패턴 매칭 실행을 위한 컨텍스트
  *
- * Two-flag absorption design:
- *   hasAbsorbableState: can this context absorb others? (>=1 absorbable state)
- *     - Monotonic: true->false only, cannot recover once false
- *     - Used to skip absorption attempts once all absorbable states are gone
- *   allStatesAbsorbable: can this context be absorbed? (ALL states
- *   absorbable, no recorded match)
- *     - Dynamic: false->true when non-absorbable states die; a recorded
- *       match pins it false
- *     - Used to determine if this context is eligible for absorption
+ * 2-플래그 흡수 설계:
+ *   hasAbsorbableState: 이 컨텍스트가 다른 것을 흡수할 수 있는가?
+ *   (흡수 가능한 상태가 1 개 이상)
+ *     - 단조적: true -> false만 가능하며, 한 번 false가 되면 되돌릴 수 없다
+ *     - 흡수 가능한 상태가 모두 사라지면 흡수 시도를 건너뛰는 데 사용한다
+ *   allStatesAbsorbable: 이 컨텍스트가 흡수될 수 있는가?  (모든 상태가 흡수
+ *   가능하고, 기록된 매치가 없음)
+ *     - 동적: 흡수 불가능한 상태가 사라지면 false -> true가 된다. 기록된
+ *     - 매치가 있으면 false로 고정된다
+ *     - 이 컨텍스트가 흡수 대상이 될 자격이 있는지 판단하는 데 사용한다
  */
 typedef struct RPRNFAContext
 {
-	struct RPRNFAContext *next; /* next context in linked list */
-	struct RPRNFAContext *prev; /* previous context (for reverse traversal) */
-	RPRNFAState *states;		/* active states (linked list) */
+	struct RPRNFAContext *next; /* 연결 리스트의 다음 컨텍스트 */
+	struct RPRNFAContext *prev; /* 이전 컨텍스트 (역방향 순회용) */
+	RPRNFAState *states;		/* 활성 상태 (연결 리스트) */
 
-	int64		matchStartRow;	/* row where match started */
-	int64		matchEndRow;	/* last row of the match; below matchStartRow
-								 * for an empty one, -1 before any */
-	int64		lastProcessedRow;	/* last row processed (for fail depth) */
+	int64		matchStartRow;	/* 매치가 시작된 행 */
+	int64		matchEndRow;	/* 매치의 마지막 행. 빈 매치에서는
+								 * matchStartRow 보다 작고, 아직 없으면 -1 */
+	int64		lastProcessedRow;	/* 마지막으로 처리한 행 (실패 깊이용) */
 
 	/*
-	 * The state that reached FIN, or NULL.  Its being non-NULL is what
-	 * records a match; matchEndRow cannot, because an empty match ends below
-	 * matchStartRow and would read as a failure.  The state itself is never
-	 * read.
+	 * FIN 에 도달한 상태, 또는 NULL.  매치를 기록하는 것은 이 값이 NULL 이
+	 * 아니라는 사실 자체이다.  matchEndRow 로는 그렇게 할 수 없는데, 빈
+	 * 매치는 matchStartRow 보다 작은 값으로 끝나 실패로 읽히기 때문이다. 이
+	 * 상태 자체를 다시 읽는 일은 없다.
 	 */
 	RPRNFAState *matchedState;
 
-	bool		matchUpdated;	/* matchedState was set or replaced during the
-								 * advance now running */
+	bool		matchUpdated;	/* 지금 실행 중인 advance 동안
+								 * matchedState가 설정되거나 교체되었음 */
 
-	/* Two-flag absorption optimization */
-	bool		hasAbsorbableState; /* can absorb others (>=1 absorbable
-									 * state) */
-	bool		allStatesAbsorbable;	/* can be absorbed (ALL states
-										 * absorbable) */
+	/* 2-플래그 흡수 최적화 */
+	bool		hasAbsorbableState; /* 다른 것을 흡수할 수 있음 (흡수 가능한
+									 * 상태가 1 개 이상) */
+	bool		allStatesAbsorbable;	/* 흡수될 수 있음 (모든 상태가 흡수
+										 * 가능) */
 } RPRNFAContext;
 
 /*
  * NFALengthStats
  *
- * Statistics for length measurements (min/max/total) used for computing
- * average lengths in EXPLAIN ANALYZE output.
+ * EXPLAIN ANALYZE 출력에서 평균 길이를 계산하는 데 사용하는 길이
+ * 측정값(최소/최대/합계) 통계.
  */
 typedef struct NFALengthStats
 {
-	int64		min;			/* minimum length */
-	int64		max;			/* maximum length */
-	int64		total;			/* total length (for computing average) */
+	int64		min;			/* 최소 길이 */
+	int64		max;			/* 최대 길이 */
+	int64		total;			/* 전체 길이 (평균 계산용) */
 } NFALengthStats;
 
 /*
- * Tri-state result of a DEFINE predicate for one row pattern variable at the
- * current row.  RPR_VAR_UNEVALUATED is the "not yet evaluated" sentinel and
- * must be zero so palloc0 initializes the per-row cache to it; the DEFINE is
- * evaluated lazily at the point the NFA first consumes the variable (see
- * nfa_eval_var_match).  A NULL DEFINE result folds to RPR_VAR_FALSE
- * (non-True = not mapped, per ISO/IEC 19075-5).
+ * 현재 행에서 하나의 행 패턴 변수에 대한 DEFINE 술어의 3 치 결과.
+ * RPR_VAR_UNEVALUATED 는 "not yet evaluated"를 나타내는 sentinel 값으로
+ * 반드시 0 이어야 palloc0이 행별 캐시를 이 값으로 초기화한다.  DEFINE 은
+ * NFA 가 그 변수를 처음 소비하는 시점에 지연 평가된다(nfa_eval_var_match
+ * 참고).  DEFINE 결과가 NULL 이면 RPR_VAR_FALSE 로 접힌다 (ISO/IEC 19075-5 에
+ * 따라 non-True는 매핑되지 않은 것을 의미한다).
  */
 typedef enum RPRVarMatch
 {
-	RPR_VAR_UNEVALUATED = 0,	/* not yet evaluated (sentinel) */
-	RPR_VAR_FALSE,				/* evaluated to non-True (FALSE or NULL) */
-	RPR_VAR_TRUE,				/* evaluated to True */
+	RPR_VAR_UNEVALUATED = 0,	/* 아직 평가되지 않음 (sentinel) */
+	RPR_VAR_FALSE,				/* non-True로 평가됨 (FALSE 또는 NULL) */
+	RPR_VAR_TRUE,				/* True로 평가됨 */
 } RPRVarMatch;
 
 typedef struct WindowAggState
@@ -2693,56 +2698,57 @@ typedef struct WindowAggState
 	int64		groupheadpos;	/* current row's peer group head position */
 	int64		grouptailpos;	/* " " " " tail position (group end+1) */
 
-	/* these fields are used in Row pattern recognition: */
-	RPSkipTo	rpSkipTo;		/* Row Pattern Skip To type */
-	struct RPRPattern *rpPattern;	/* compiled pattern for NFA execution */
-	List	   *defineClauseExprs;	/* row pattern DEFINE search conditions as
-									 * an ExprState list, in DEFINE order
-									 * (list index == varId) */
-	RPRNFAContext *nfaContext;	/* active matching contexts (head) */
-	RPRNFAContext *nfaContextTail;	/* tail of active contexts (for reverse
-									 * traversal) */
-	RPRNFAContext *nfaContextFree;	/* recycled NFA context nodes */
-	RPRNFAState *nfaStateFree;	/* recycled NFA state nodes */
-	Size		nfaStateSize;	/* pre-calculated RPRNFAState size */
-	RPRVarMatch *nfaVarMatched; /* per-row tri-state cache: varMatched[varId]
-								 * for varId < list_length(defineClauseExprs),
-								 * evaluated lazily */
-	Bitmapset  *defineMatchStartDependent;	/* DEFINE vars needing per-context
-											 * evaluation
-											 * (match_start-dependent) */
-	bitmapword *nfaVisitedEnds; /* nullable ENDs reached in this DFS, indexed
-								 * by elemIdx (cycle detection) */
-	int16		nfaVisitedMinWord;	/* lowest bitmapword index touched since
-									 * last reset (PG_INT16_MAX = none) */
-	int16		nfaVisitedMaxWord;	/* highest bitmapword index touched since
-									 * last reset (-1 = none) */
-	int64		nfaLastProcessedRow;	/* last row processed by NFA (-1 =
-										 * none) */
+	/* 다음 필드들은 행 패턴 인식에서 사용된다: */
+	RPSkipTo	rpSkipTo;		/* 행 패턴 건너뛰기(Skip To) 방식 */
+	struct RPRPattern *rpPattern;	/* NFA 실행을 위해 컴파일된 패턴 */
+	List	   *defineClauseExprs;	/* 행 패턴 DEFINE 검색 조건을 담은
+									 * ExprState 리스트. DEFINE 순서를 따르며
+									 * (리스트 인덱스 == varId) */
+	RPRNFAContext *nfaContext;	/* 활성 매칭 컨텍스트 (head) */
+	RPRNFAContext *nfaContextTail;	/* 활성 컨텍스트의 tail (역방향 순회용) */
+	RPRNFAContext *nfaContextFree;	/* 재활용된 NFA 컨텍스트 노드 */
+	RPRNFAState *nfaStateFree;	/* 재활용된 NFA 상태 노드 */
+	Size		nfaStateSize;	/* 미리 계산된 RPRNFAState 크기 */
+	RPRVarMatch *nfaVarMatched; /* 행별 3 치 캐시: varId <
+								 * list_length(defineClauseExprs)에 대한
+								 * varMatched[varId]이며 지연 평가된다 */
+	Bitmapset  *defineMatchStartDependent;	/* 컨텍스트별 평가가 필요한
+											 * DEFINE 변수 (match_start 에
+											 * 의존) */
+	bitmapword *nfaVisitedEnds; /* 이번 DFS 에서 도달한 nullable END 들,
+								 * elemIdx 로 색인 (사이클 감지용) */
+	int16		nfaVisitedMinWord;	/* 마지막 리셋 이후 건드린 가장 낮은
+									 * bitmapword 인덱스
+									 * (PG_INT16_MAX = 없음) */
+	int16		nfaVisitedMaxWord;	/* 마지막 리셋 이후 건드린 가장 높은
+									 * bitmapword 인덱스 (-1 = 없음) */
+	int64		nfaLastProcessedRow;	/* NFA 가 마지막으로 처리한 행 (-1 =
+										 * 없음) */
 
-	/* NFA statistics for EXPLAIN ANALYZE */
-	int64		nfaStatesActive;	/* current active states (internal) */
-	int64		nfaStatesMax;	/* peak active states */
-	int64		nfaStatesTotalCreated;	/* total states allocated */
-	int64		nfaStatesMerged;	/* states merged (deduplicated) */
-	int64		nfaContextsActive;	/* current active contexts (internal) */
-	int64		nfaContextsMax; /* peak active contexts */
-	int64		nfaContextsTotalCreated;	/* total contexts allocated */
-	int64		nfaContextsAbsorbed;	/* contexts absorbed (optimization) */
-	int64		nfaContextsSkipped; /* contexts skipped (SKIP PAST LAST ROW) */
-	int64		nfaContextsPruned;	/* contexts pruned on first row */
-	int64		nfaMatchesSucceeded;	/* successful pattern matches */
-	int64		nfaMatchesFailed;	/* failed pattern matches */
-	NFALengthStats nfaMatchLen; /* successful match length stats */
-	NFALengthStats nfaFailLen;	/* mismatch length stats */
-	NFALengthStats nfaAbsorbedLen;	/* absorbed context length stats */
-	NFALengthStats nfaSkippedLen;	/* skipped context length stats */
+	/* EXPLAIN ANALYZE 를 위한 NFA 통계 */
+	int64		nfaStatesActive;	/* 현재 활성 상태 수 (내부용) */
+	int64		nfaStatesMax;	/* 활성 상태 수의 최댓값 */
+	int64		nfaStatesTotalCreated;	/* 할당된 상태의 총 개수 */
+	int64		nfaStatesMerged;	/* 병합된 상태 수 (중복 제거됨) */
+	int64		nfaContextsActive;	/* 현재 활성 컨텍스트 수 (내부용) */
+	int64		nfaContextsMax; /* 활성 컨텍스트 수의 최댓값 */
+	int64		nfaContextsTotalCreated;	/* 할당된 컨텍스트의 총 개수 */
+	int64		nfaContextsAbsorbed;	/* 흡수된 컨텍스트 수 (최적화) */
+	int64		nfaContextsSkipped; /* 건너뛴 컨텍스트 수 (SKIP PAST LAST
+									 * ROW) */
+	int64		nfaContextsPruned;	/* 첫 행에서 프루닝된 컨텍스트 수 */
+	int64		nfaMatchesSucceeded;	/* 성공한 패턴 매치 수 */
+	int64		nfaMatchesFailed;	/* 실패한 패턴 매치 수 */
+	NFALengthStats nfaMatchLen; /* 성공한 매치 길이 통계 */
+	NFALengthStats nfaFailLen;	/* 매치 실패 길이 통계 */
+	NFALengthStats nfaAbsorbedLen;	/* 흡수된 컨텍스트 길이 통계 */
+	NFALengthStats nfaSkippedLen;	/* 건너뛴 컨텍스트 길이 통계 */
 
 	MemoryContext partcontext;	/* context for partition-lifespan data */
 	MemoryContext aggcontext;	/* shared context for aggregate working data */
 	MemoryContext curaggcontext;	/* current aggregate's working data */
 	ExprContext *tmpcontext;	/* short-term evaluation context */
-	ExprContext *rprContext;	/* DEFINE clause evaluation context */
+	ExprContext *rprContext;	/* DEFINE 절 평가 컨텍스트 */
 
 	bool		all_first;		/* true if the scan is starting */
 	bool		partition_spooled;	/* true if all tuples in current partition
@@ -2767,41 +2773,42 @@ typedef struct WindowAggState
 	TupleTableSlot *temp_slot_1;
 	TupleTableSlot *temp_slot_2;
 
-	/* RPR navigation */
+	/* RPR 내비게이션 */
 
 	/*
-	 * per-execution resolved nav offsets: list of RPRNavOffsets, indexed by
-	 * RPRNavExpr.navno; built by build_define_offsets()
+	 * 실행별로 확정된 nav 오프셋: RPRNavOffsets 의 리스트이며
+	 * RPRNavExpr.navno로 색인한다.  build_define_offsets()가 만든다.
 	 */
 	List	   *rprNavOffsets;
-	bool		navResolvePending;	/* nav offsets need (re)resolving at the
-									 * next ExecWindowAgg call; set at init
-									 * and rescan, cleared by
-									 * resolve_nav_offsets() */
-	bool		hasMaxNav;		/* backward nav in DEFINE: PREV, LAST,
-								 * compound PREV_LAST/NEXT_LAST */
-	bool		hasFirstNav;	/* forward nav in DEFINE: FIRST, compound
+	bool		navResolvePending;	/* 다음 ExecWindowAgg 호출에서 nav
+									 * 오프셋을 (다시) 확정해야 함.  초기화와
+									 * rescan 시 설정되며
+									 * resolve_nav_offsets()가 지운다 */
+	bool		hasMaxNav;		/* DEFINE 안의 후방 내비게이션: PREV, LAST,
+								 * 복합 PREV_LAST/NEXT_LAST */
+	bool		hasFirstNav;	/* DEFINE 안의 전방 내비게이션: FIRST, 복합
 								 * PREV_FIRST/NEXT_FIRST */
-	RPRNavOffsetKind navMaxOffsetKind;	/* status of navMaxOffset */
-	int64		navMaxOffset;	/* max backward nav offset (when FIXED) */
-	RPRNavOffsetKind navFirstOffsetKind;	/* status of navFirstOffset */
-	int64		navFirstOffset; /* min forward reach from match_start (when
-								 * FIXED); negative when a compound PREV_FIRST
-								 * reaches back past it */
-	struct WindowObjectData *nav_winobj;	/* winobj for RPR */
-	int64		nav_slot_pos;	/* position cached in nav_slot, or -1 */
-	TupleTableSlot *nav_slot;	/* slot holding the resolved navigation target
-								 * row (simple or compound
-								 * PREV/NEXT/FIRST/LAST) */
-	TupleTableSlot *nav_saved_outertuple;	/* saved slot during nav swap */
-	int64		nav_match_start;	/* match_start for FIRST/LAST nav */
+	RPRNavOffsetKind navMaxOffsetKind;	/* navMaxOffset 의 상태 */
+	int64		navMaxOffset;	/* 후방 내비게이션의 최대 오프셋 (FIXED 일
+								 * 때) */
+	RPRNavOffsetKind navFirstOffsetKind;	/* navFirstOffset 의 상태 */
+	int64		navFirstOffset; /* match_start 로부터의 최소 전방 도달 거리
+								 * (FIXED 일 때). 복합 PREV_FIRST 가 그보다 더
+								 * 뒤로 도달하면 음수가 된다 */
+	struct WindowObjectData *nav_winobj;	/* RPR 용 winobj */
+	int64		nav_slot_pos;	/* nav_slot 에 캐시된 위치, 없으면 -1 */
+	TupleTableSlot *nav_slot;	/* 확정된 내비게이션 대상 행을 담는 슬롯
+								 * (단순 또는 복합 PREV/NEXT/FIRST/LAST) */
+	TupleTableSlot *nav_saved_outertuple;	/* 내비게이션 교체 중 저장된
+											 * 슬롯 */
+	int64		nav_match_start;	/* FIRST/LAST 내비게이션을 위한
+									 * match_start */
 
-	/* RPR current match result */
-	int64		rpr_match_start;	/* start of the result; < 0 = not
-									 * determined */
-	int64		rpr_match_length;	/* result kind when start >= 0: -1
-									 * unmatched, 0 empty match, >= 1 real
-									 * match length */
+	/* RPR 의 현재 매치 결과 */
+	int64		rpr_match_start;	/* 결과의 시작; < 0 이면 결정되지 않음 */
+	int64		rpr_match_length;	/* start >= 0 일 때의 결과 종류: -1 은
+									 * unmatch, 0 은 빈 매치, 1 이상은 실제
+									 * 매치 길이 */
 } WindowAggState;
 
 /* ----------------

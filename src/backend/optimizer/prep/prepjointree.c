@@ -2806,10 +2806,10 @@ pullup_replace_vars_callback(const Var *var,
 	 * also need one if the caller has instructed us that certain expression
 	 * replacements need to be wrapped for identification purposes.
 	 *
-	 * A Var below the argument of a row pattern navigation operation needs
-	 * one too, so that a replacement that does not depend on the row is not
-	 * folded in: that argument reads the row the navigation lands on, not
-	 * this one.
+	 * 행 패턴 내비게이션 연산의 인자 아래에 있는 Var도 마찬가지로 하나가
+	 * 필요한데, 행에 의존하지 않는 치환이 그대로 접혀 들어가지 않도록 하기
+	 * 위해서다: 그 인자는 이 행이 아니라 내비게이션이 도달하는 행을 읽기
+	 * 때문이다.
 	 */
 	need_phv = (var->varnullingrels != NULL) ||
 		(rcon->wrap_option != REPLACE_WRAP_NONE) ||

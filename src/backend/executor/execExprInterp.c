@@ -2017,7 +2017,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			EEO_NEXT();
 		}
 
-		/* RPR navigation: swap slot to target row */
+		/* RPR 내비게이션: 슬롯을 대상 행으로 교체한다 */
 		EEO_CASE(EEOP_RPR_NAV_SET)
 		{
 			ExecEvalRPRNavSet(state, op, econtext);
@@ -2026,7 +2026,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			EEO_NEXT();
 		}
 
-		/* RPR navigation: restore slot to original row */
+		/* RPR 내비게이션: 슬롯을 원래 행으로 복구한다 */
 		EEO_CASE(EEOP_RPR_NAV_RESTORE)
 		{
 			ExecEvalRPRNavRestore(state, op, econtext);
@@ -6012,14 +6012,15 @@ ExecAggPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
 }
 
 /*
- * Evaluate RPR navigation (PREV/NEXT/FIRST/LAST): swap slot to target row.
+ * RPR 내비게이션(PREV/NEXT/FIRST/LAST)을 평가한다: 슬롯을 대상 행으로
+ * 교체한다.
  *
- * Saves the current outertuple into winstate for later restore, computes
- * the target row position, fetches the corresponding slot from the
- * tuplestore, and replaces econtext->ecxt_outertuple with it.
+ * 현재 outertuple을 나중에 복구할 수 있도록 winstate에 저장하고, 대상 행의
+ * 위치를 계산하며, tuplestore에서 그에 해당하는 슬롯을 가져와
+ * econtext->ecxt_outertuple 을 그것으로 바꾼다.
  *
- * This is called both from the interpreter inline handler and from
- * JIT-compiled expressions via build_EvalXFunc.
+ * 이 함수는 인터프리터의 인라인 핸들러와 build_EvalXFunc 를 거친 JIT 컴파일된
+ * 표현식 양쪽에서 모두 호출된다.
  */
 void
 ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
@@ -6033,14 +6034,14 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 
 	winstate = rprnavstate->winstate;
 
-	/* Save current slot for later restore */
+	/* 나중에 복구할 수 있도록 현재 슬롯을 저장한다 */
 	winstate->nav_saved_outertuple = econtext->ecxt_outertuple;
 
 	/*
-	 * resolve_nav_offsets() settled both offsets for this scan: it writes
-	 * them as non-null, and where either is negative it raises the error and
-	 * never writes them at all.  Assert the invariants rather than repeating
-	 * those checks here.
+	 * resolve_nav_offsets()는 이 스캔에 대해 두 오프셋을 모두 확정한다.  값을
+	 * 기록할 때는 항상 NULL 이 아니게 기록하고, 둘 중 하나라도 음수이면
+	 * 오류를 발생시키며 아예 기록하지 않는다.  그러므로 같은 검사를 여기서
+	 * 반복하는 대신 이 불변조건을 Assert로만 확인한다.
 	 */
 	Assert(!rprnavstate->offset.isnull && !rprnavstate->compound_offset.isnull);
 
@@ -6051,16 +6052,16 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	Assert(offset >= 0 && compound_offset >= 0);
 
 	/*
-	 * Calculate target position based on navigation direction.  On overflow,
-	 * use -1 so that ExecRPRNavGetSlot treats it as out of range.
+	 * 내비게이션 방향에 따라 대상 위치를 계산한다.  오버플로가 발생하면
+	 * ExecRPRNavGetSlot 이 범위를 벗어난 것으로 처리하도록 -1 을 사용한다.
 	 */
 	switch (rprnavstate->rprnavexpr->kind)
 	{
 		case RPR_NAV_PREV:
 
 			/*
-			 * currentpos and offset are both non-negative, asserted above, so
-			 * the subtraction cannot underflow.
+			 * currentpos와 offset은 둘 다 위에서 음수가 아님을 확인했으므로,
+			 * 이 뺄셈은 언더플로될 수 없다.
 			 */
 			target_pos = winstate->currentpos - offset;
 			break;
@@ -6069,17 +6070,20 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 				target_pos = -1;
 			break;
 		case RPR_NAV_FIRST:
-			/* FIRST: offset from match_start, NULL beyond currentpos */
+			/* FIRST: match_start 로부터의 오프셋. currentpos를 넘으면 NULL */
 			if (pg_add_s64_overflow(winstate->nav_match_start, offset, &target_pos))
 				target_pos = -1;
 			else if (target_pos > winstate->currentpos)
-				target_pos = -1;	/* beyond current match range */
+				target_pos = -1;	/* 현재 매치 범위를 벗어남 */
 			break;
 		case RPR_NAV_LAST:
-			/* LAST: offset backward from currentpos, NULL before match_start */
+			/*
+			 * LAST: currentpos에서 거꾸로 가는 오프셋.  match_start 이전이면
+			 * NULL
+			 */
 			target_pos = winstate->currentpos - offset;
 			if (target_pos < winstate->nav_match_start)
-				target_pos = -1;	/* before match_start */
+				target_pos = -1;	/* match_start 이전 */
 			break;
 
 		case RPR_NAV_PREV_FIRST:
@@ -6099,12 +6103,13 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 					break;
 				}
 
-				/* Apply outer: PREV subtracts, NEXT adds */
+				/* Outer를 적용: PREV 는 빼고, NEXT 는 더한다 */
 				if (rprnavstate->rprnavexpr->kind == RPR_NAV_PREV_FIRST)
 				{
 					/*
-					 * inner_pos is in [0, currentpos] and compound_offset is
-					 * non-negative, so this cannot underflow.
+					 * inner_pos 는 [0, currentpos] 범위에 있고
+					 * compound_offset 은 음수가 아니므로, 이 뺄셈은
+					 * 언더플로될 수 없다.
 					 */
 					target_pos = inner_pos - compound_offset;
 				}
@@ -6129,13 +6134,13 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 					break;
 				}
 
-				/* Apply outer: PREV subtracts, NEXT adds */
+				/* Outer를 적용: PREV 는 빼고, NEXT 는 더한다 */
 				if (rprnavstate->rprnavexpr->kind == RPR_NAV_PREV_LAST)
 				{
 					/*
-					 * inner_pos is in [nav_match_start, currentpos] (>= 0)
-					 * and compound_offset is non-negative, so this cannot
-					 * underflow.
+					 * inner_pos 는 [nav_match_start, currentpos] 범위(>= 0)에
+					 * 있고 compound_offset 은 음수가 아니므로, 이 뺄셈은
+					 * 언더플로될 수 없다.
 					 */
 					target_pos = inner_pos - compound_offset;
 				}
@@ -6153,16 +6158,16 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	}
 
 	/*
-	 * Slot swap elision: if target_pos is the current row, skip the
-	 * tuplestore fetch and slot swap entirely.  This benefits LAST(expr),
-	 * PREV(expr, 0), NEXT(expr, 0), and similar cases.
+	 * 슬롯 교체 생략: target_pos 가 현재 행이면 tuplestore 조회와 슬롯 교체를
+	 * 아예 건너뛴다.  이는 LAST(expr), PREV(expr, 0), NEXT(expr, 0)와 같은
+	 * 경우에 이득이 된다.
 	 *
-	 * We must still set nav_saved_outertuple (done above) so that
-	 * EEOP_RPR_NAV_RESTORE is a harmless no-op.
+	 * 이 경우에도 EEOP_RPR_NAV_RESTORE 가 무해한 no-op이 되도록
+	 * (위에서 이미 했듯이) nav_saved_outertuple 은 반드시 설정해 두어야 한다.
 	 */
 	if (target_pos == winstate->currentpos)
 	{
-		/* target row trivially exists; see comment below */
+		/* 대상 행이 자명하게 존재한다. 아래 주석을 참고 */
 		*op->resnull = false;
 		return;
 	}
@@ -6170,11 +6175,11 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	target_slot = ExecRPRNavGetSlot(winstate, target_pos);
 
 	/*
-	 * Report whether the target row exists through resnull, which the jump
-	 * step tests before the argument expression gets to overwrite it: null
-	 * when the row is out of range, so the jump skips the argument, and a
-	 * definitive false otherwise, since resnull may still hold a stale value
-	 * from a previous evaluation.
+	 * 대상 행이 존재하는지를 resnull을 통해 알린다.  점프 단계는 인자
+	 * 표현식이 이 값을 덮어쓰기 전에 이를 검사한다: 행이 범위를 벗어나면
+	 * null로 만들어 점프가 인자를 건너뛰게 하고, 그렇지 않으면 확정적인
+	 * false로 만든다.  resnull에는 이전 평가에서 남은 낡은 값이 여전히 들어
+	 * 있을 수 있기 때문이다.
 	 */
 	if (target_slot == NULL)
 	{
@@ -6185,27 +6190,26 @@ ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	*op->resnull = false;
 
 	/*
-	 * Update econtext to point to the target slot.  Also decompress the new
-	 * slot's attributes since FETCHSOME already ran for the original slot.
-	 * The caller (interpreter or JIT) is responsible for updating any local
-	 * slot cache (e.g. outerslot) from econtext after we return.
+	 * econtext가 대상 슬롯을 가리키도록 갱신한다.  또한 원래 슬롯에 대해서는
+	 * 이미 FETCHSOME 이 실행되었으므로, 새 슬롯의 속성도 압축을 해제한다.
+	 * 호출자(인터프리터 또는 JIT)는 함수가 반환된 뒤 econtext로부터 outerslot
+	 * 같은 로컬 슬롯 캐시를 갱신할 책임이 있다.
 	 */
 	slot_getallattrs(target_slot);
 	econtext->ecxt_outertuple = target_slot;
 }
 
 /*
- * Evaluate RPR navigation: restore slot to original row.
+ * RPR 내비게이션을 평가한다: 슬롯을 원래 행으로 복구한다.
  *
- * Restores econtext->ecxt_outertuple from the saved slot in winstate.
- * The caller is responsible for updating any local slot cache.
+ * winstate에 저장해 둔 슬롯으로부터 econtext->ecxt_outertuple 을 복구한다.
+ * 호출자는 로컬 슬롯 캐시를 갱신할 책임이 있다.
  *
- * For pass-by-reference result types, the result datum points into
- * nav_slot's tuple memory.  If a subsequent navigation in the same
- * expression re-fetches nav_slot for a different position, the old
- * tuple is freed, leaving a dangling pointer.  We prevent this by
- * copying pass-by-ref results into per-tuple memory, which survives
- * until the next ResetExprContext.
+ * pass-by-reference 결과 타입의 경우, 결과 datum은 nav_slot 의 튜플 메모리를
+ * 가리킨다.  같은 표현식 안의 후속 내비게이션이 다른 위치에 대해 nav_slot 을
+ * 다시 가져오면 이전 튜플은 해제되어 댕글링 포인터가 남는다.  이를 막기 위해
+ * pass-by-ref 결과를 다음 ResetExprContext 까지 유지되는 per-tuple 메모리로
+ * 복사해 둔다.
  */
 void
 ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
@@ -6214,17 +6218,16 @@ ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
 	WindowAggState *winstate = op->d.rpr_nav.rprnavstate->winstate;
 
 	/*
-	 * When the slot swap was elided (target == currentpos), restoring is a
-	 * no-op, and the argument read the current row's slot rather than
-	 * nav_slot, so no re-fetch of nav_slot can invalidate a pass-by-ref
-	 * result.
+	 * 슬롯 교체가 생략된 경우(target == currentpos)에는 복구도 no-op이 되고,
+	 * 인자는 nav_slot 이 아니라 현재 행의 슬롯을 읽었으므로, nav_slot 을 다시
+	 * 가져오더라도 pass-by-ref 결과를 무효화할 수 없다.
 	 */
 	if (econtext->ecxt_outertuple == winstate->nav_saved_outertuple)
 		return;
 
 	econtext->ecxt_outertuple = winstate->nav_saved_outertuple;
 
-	/* Stabilize pass-by-ref result against nav_slot re-fetch */
+	/* nav_slot 재조회에 대비해 pass-by-ref 결과를 안정화한다 */
 	if (!op->d.rpr_nav.rprnavstate->resulttypbyval &&
 		!*op->resnull)
 	{

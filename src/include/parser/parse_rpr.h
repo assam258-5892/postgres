@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * parse_rpr.h
- *	  handle Row Pattern Recognition in parser
+ *	  파서에서 행 패턴 인식(Row Pattern Recognition)을 처리한다
  *
  *
  * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group

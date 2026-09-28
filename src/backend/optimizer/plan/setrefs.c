@@ -2604,8 +2604,8 @@ set_upper_references(PlannerInfo *root, Plan *plan, int rtoffset)
 					   NUM_EXEC_QUAL(plan));
 
 	/*
-	 * Replace an expression tree in each DEFINE clause so that all Var
-	 * nodes's varno refers to OUTER_VAR.
+	 * 모든 Var 노드의 varno가 OUTER_VAR 를 가리키도록 각 DEFINE 절의 표현식
+	 * 트리를 치환한다.
 	 */
 	if (IsA(plan, WindowAgg))
 	{
@@ -3400,9 +3400,9 @@ fix_upper_expr_mutator(Node *node, fix_upper_expr_context *context)
 		memcpy(newnav, nav, sizeof(RPRNavExpr));
 
 		/*
-		 * The offsets are resolved once per scan, before the outer slot is
-		 * set, so they cannot reference it the way arg does.  Same treatment
-		 * as the WindowAgg frame offsets.
+		 * 오프셋은 outer 슬롯이 설정되기 전에 스캔마다 한 번 풀리므로,
+		 * arg처럼 그 슬롯을 참조할 수 없다.  WindowAgg 프레임 오프셋과 같은
+		 * 방식으로 처리한다.
 		 */
 		newnav->arg = (Expr *)
 			fix_upper_expr_mutator((Node *) nav->arg, context);

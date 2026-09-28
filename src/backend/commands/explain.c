@@ -2906,12 +2906,12 @@ show_sortorder_options(StringInfo buf, Node *sortexpr,
 }
 
 /*
- * Append quantifier suffix for a pattern element.
+ * 패턴 요소에 수량자 접미사를 덧붙인다.
  */
 static void
 append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 {
-	/* Append quantifier if not {1,1} */
+	/* {1,1}이 아니면 수량자를 덧붙인다 */
 	if (elem->min == 0 && RPRElemIsUnbounded(elem))
 		appendStringInfoChar(buf, '*');
 	else if (elem->min == 1 && RPRElemIsUnbounded(elem))
@@ -2925,7 +2925,7 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 	else if (elem->min != 1 || elem->max != 1)
 		appendStringInfo(buf, "{%d,%d}", elem->min, elem->max);
 
-	/* A fixed count is normalized to greedy, so '?' cannot be read as {0,1} */
+	/* 고정 개수는 탐욕적으로 정규화되므로 '?'를 {0,1}로 읽을 수 없다 */
 	if (RPRElemIsReluctant(elem))
 	{
 		Assert(elem->min != elem->max);
@@ -2933,10 +2933,10 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 	}
 
 	/*
-	 * Append absorption markers: # for the comparison point, ~ for the
-	 * absorbable region.  Neither character can occur in a bare pattern
-	 * variable name, and a name that does contain one is always double-quoted
-	 * by quote_identifier(), so a marker is never read as part of the name.
+	 * 흡수 마커를 덧붙인다: 판단 지점에는 #, 흡수 가능 영역에는 ~를 쓴다.  두
+	 * 문자 모두 단독 패턴 변수 이름에는 나타날 수 없고, 이 문자를 포함하는
+	 * 이름은 quote_identifier()가 항상 큰따옴표로 묶으므로 마커가 이름의
+	 * 일부로 읽히는 일은 없다.
 	 */
 	if (RPRElemIsAbsorbable(elem))
 	{
@@ -2948,36 +2948,35 @@ append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
 }
 
 /*
- * Deparse a compiled RPRPattern (bytecode) back to a pattern string.
+ * 컴파일된 RPRPattern(바이트코드)을 패턴 문자열로 다시 디파스한다.
  *
- * The flat RPRPatternElement[] array is walked by recursive descent.  Each
- * construct is deparsed within an inherited [start, limit) window: the parent
- * passes the boundary down, so each construct's extent is fixed by its caller.
- * Three signals drive the walk:
+ * 평평한 RPRPatternElement[] 배열을 재귀 하강 방식으로 순회한다.  각 구문은
+ * 상속받은 [start, limit) 구간 안에서 디파스되는데, 이 경계는 호출자가
+ * 넘겨주므로 각 구문의 범위는 호출자에 의해 고정된다.  순회를 이끄는 신호는
+ * 세 가지다:
  *
- *   - a GROUP body's end comes from depth, via rpr_match_end(); an ALT's
- *     scope end comes from its SEP chain, via rpr_alt_scope_end().
- *   - branch boundaries (where a "|" goes) come from the ALT's SEP chain: each
- *     branch is terminated by a SEP whose jump links to the next branch's SEP
- *     (-1 on the last), so a branch runs from its content start up to its SEP.
- *   - parentheses come from structure (a BEGIN group, an ALT) plus a one-step
- *     lookahead for a group that wraps a lone ALT.
+ *   - GROUP 본문의 끝은 depth를 통해 rpr_match_end()로 구하고, ALT의 스코프
+ *     끝은 SEP 체인을 통해 rpr_alt_scope_end()로 구한다.
+ *   - 분기 경계("|"가 들어갈 위치)는 ALT의 SEP 체인에서 나온다: 각 분기는
+ *     jump가 다음 분기의 SEP로 이어지는 SEP로 끝나며(마지막은 -1), 따라서
+ *     분기는 자신의 내용 시작부터 해당 SEP까지 이어진다.
+ *   - 괄호는 구조(BEGIN 그룹, ALT)에서 나오며, 여기에 단독 ALT를 감싸는
+ *     그룹을 위한 한 단계 룩어헤드가 더해진다.
  *
- * depth and the SEP chain are stable across the next/jump values the compiler
- * assigns to branch tails and nested alternations, which is what makes them
- * suitable to anchor scope and branch boundaries.
+ * depth와 SEP 체인은 컴파일러가 분기 꼬리와 중첩된 교대에 부여하는 next/jump
+ * 값과 무관하게 안정적이며, 이 때문에 스코프와 분기 경계를 고정하는 기준으로
+ * 쓰기에 적합하다.
  *
- * EXPLAIN parenthesizes every ALT on its own, so a top-level "A | B" deparses
- * as "(a | b)".  This self-consistent EXPLAIN form is the correctness oracle
- * here; pg_get_viewdef differs, as its parens come only from an enclosing
- * GROUP.  Absorption markers (# ~) are orthogonal and handled by
- * append_rpr_quantifier().
+ * EXPLAIN은 모든 ALT를 각각 괄호로 묶으므로, 최상위 "A | B"는 "(a | b)"로
+ * 디파스된다. 이 자기 일관적인 EXPLAIN 형식이 여기서 정합성을 판단하는
+ * 기준이며, pg_get_viewdef 함수는 다르다: 그쪽의 괄호는 오직 이를 감싸는
+ * GROUP에서만 나온다.  흡수 마커(# ~)는 이와 무관하며
+ * append_rpr_quantifier()가 처리한다.
  *
- * Two compiler invariants hold throughout: {1,1} groups are unwrapped before
- * bytecode generation (so every BEGIN/END group carries a non-trivial
- * quantifier, and a lone ALT inside a group always spans to the group's END),
- * and a group's quantifier is read from its END element (the BEGIN copy is
- * ignored).
+ * 두 가지 컴파일러 불변조건이 전체에 걸쳐 성립한다: {1,1} 그룹은 바이트코드
+ * 생성 전에 풀리므로(따라서 모든 BEGIN/END 그룹은 자명하지 않은 수량자를
+ * 가지며, 그룹 안의 단독 ALT는 항상 그룹의 END까지 이어진다) 그룹의 수량자는
+ * END 요소에서 읽는다(BEGIN의 사본은 무시한다).
  */
 static char *
 deparse_rpr_pattern(RPRPattern *pattern)
@@ -2992,10 +2991,10 @@ deparse_rpr_pattern(RPRPattern *pattern)
 }
 
 /*
- * Deparse a run of sibling elements in [start, limit), separated by spaces.
+ * [start, limit) 구간의 형제 요소들을 공백으로 구분해 디파스한다.
  *
- * Stops at limit or at the FIN terminator (top-level call passes limit =
- * numElements, where the last element is FIN).
+ * limit에 도달하거나 FIN 종료자를 만나면 멈춘다(최상위 호출은 limit을
+ * numElements 값으로 넘기며, 이때 마지막 요소가 FIN이다).
  */
 static void
 deparse_rpr_seq(RPRPattern *pattern, int start, int limit, StringInfo buf)
@@ -3013,16 +3012,15 @@ deparse_rpr_seq(RPRPattern *pattern, int start, int limit, StringInfo buf)
 }
 
 /*
- * Deparse the single construct starting at index idx, bounded by the
- * inherited limit.  Returns the index just past the construct.
+ * idx 위치에서 시작하는 구문 하나를 상속받은 limit 범위 안에서 디파스한다.
+ * 반환값은 그 구문 바로 다음 인덱스다.
  *
- * A VAR is its name plus quantifier.  A BEGIN opens a group spanning to its
- * matching END (rpr_match_end); when the group's sole child is an ALT that
- * runs to the END, the ALT supplies the parentheses and the group only adds
- * the quantifier, otherwise the group body is wrapped in its own "( )".  An
- * ALT runs to its SEP-chain scope end (capped by the inherited limit) and
- * emits "( b1 | b2 | ... )", each branch deparsed within the boundary handed
- * down by its SEP chain.
+ * VAR는 이름과 수량자로 이루어진다.  BEGIN은 대응하는 END까지 (rpr_match_end)
+ * 이어지는 그룹을 연다.  그룹의 유일한 자식이 END까지 이어지는 ALT라면 괄호는
+ * 그 ALT가 제공하고 그룹은 수량자만 더하며, 그렇지 않으면 그룹 본문을
+ * 자체적으로 "( )"로 감싼다.  ALT는 (상속받은 limit로 제한되는) SEP 체인
+ * 스코프 끝까지 이어지며 "( b1 | b2 | ... )"를 출력하고, 각 분기는 그 SEP
+ * 체인이 넘겨주는 경계 안에서 디파스된다.
  */
 static int
 deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
@@ -3049,7 +3047,7 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 
 		if (loneAlt)
 		{
-			/* The ALT child already parenthesizes the whole group body. */
+			/* ALT 자식이 이미 그룹 본문 전체를 괄호로 감싼 상태다. */
 			(void) deparse_rpr_node(pattern, idx + 1, end, buf);
 		}
 		else
@@ -3069,7 +3067,7 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 		int			sepIdx;
 		bool		first = true;
 
-		/* an alternation's SEP-chain scope end never exceeds the limit */
+		/* 교대의 SEP 체인 스코프 끝은 limit을 절대 넘지 않는다 */
 		Assert(altEnd <= limit);
 
 		appendStringInfoChar(buf, '(');
@@ -3079,14 +3077,14 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 		{
 			RPRPatternElement *sepElem = &pattern->elements[sepIdx];
 
-			/* The branch runs up to its terminating SEP */
+			/* 분기는 그 분기를 끝내는 SEP까지 이어진다 */
 			Assert(RPRElemIsSep(sepElem));
 			if (!first)
 				appendStringInfoString(buf, " | ");
 			first = false;
 			deparse_rpr_seq(pattern, branchStart, sepIdx, buf);
 
-			/* The last branch's SEP has no link, ending the walk */
+			/* 마지막 분기의 SEP는 링크가 없어 순회가 끝난다 */
 			branchStart = sepElem->next;
 			sepIdx = sepElem->jump;
 		}
@@ -3094,12 +3092,12 @@ deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
 		return altEnd;
 	}
 
-	pg_unreachable();			/* only VAR, BEGIN and ALT start a node */
+	pg_unreachable();			/* 노드는 VAR, BEGIN, ALT로만 시작한다 */
 }
 
 /*
- * Find the END that closes the group opened by the BEGIN at beginIdx: the
- * first END at the same depth scanning forward.
+ * beginIdx 위치에 있는 BEGIN이 여는 그룹을 닫는 END를 찾는다: 앞으로
+ * 스캔하면서 만나는, 같은 depth의 첫 END다.
  */
 static int
 rpr_match_end(RPRPattern *pattern, int beginIdx)
@@ -3114,20 +3112,18 @@ rpr_match_end(RPRPattern *pattern, int beginIdx)
 		if (RPRElemIsEnd(e) && e->depth == d)
 			return i;
 	}
-	pg_unreachable();			/* a BEGIN always has a matching END */
+	pg_unreachable();			/* BEGIN에는 항상 대응하는 END가 있다 */
 }
 
 /*
- * Scope end of the alternation marker at idx: the element just past its last
- * branch.  Walk the SEP chain from ALT.jump to the last SEP (jump invalid);
- * the element right after that SEP is the post-ALT element.  Only ever called
- * on an ALT.
+ * idx에 있는 교대 마커의 스코프 끝: 마지막 분기 바로 다음 요소다.
+ * ALT.jump에서 시작해 마지막 SEP(jump가 invalid)까지 SEP 체인을 따라가면, 그
+ * SEP 바로 다음 요소가 post-ALT 요소다.  항상 ALT에 대해서만 호출된다.
  *
- * Use "last SEP index + 1", not the SEP's next: for a nested ALT the last
- * SEP's next is redirected past the *enclosing* alternation by the branch-exit
- * fixup in fillRPRPatternAlt, whereas the last SEP is emitted as the final
- * element of the alternation, so the index after it is always this ALT's own
- * post-ALT element.
+ * SEP의 next가 아니라 "last SEP index + 1"을 쓴다: 중첩된 ALT의 경우
+ * fillRPRPatternAlt 함수의 분기 탈출 수정에 의해 마지막 SEP의 next는 *감싸는*
+ * 교대를 지나친 위치로 재지정되지만, 마지막 SEP는 교대의 마지막 요소로
+ * 출력되므로 그 다음 인덱스는 항상 이 ALT 자신의 post-ALT 요소다.
  */
 static int
 rpr_alt_scope_end(RPRPattern *pattern, int idx)
@@ -3201,7 +3197,7 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 	ExplainPropertyText("Window", wbuf.data, es);
 	pfree(wbuf.data);
 
-	/* Show Row Pattern Recognition pattern if present */
+	/* 있으면 행 패턴 인식(RPR) 패턴을 보여준다 */
 	if (wagg->rpPattern != NULL)
 	{
 		char	   *patternStr = deparse_rpr_pattern(wagg->rpPattern);
@@ -3211,9 +3207,9 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 		pfree(patternStr);
 
 		/*
-		 * Navigation offsets for tuplestore trim are resolved at executor
-		 * init, which runs even for plain EXPLAIN, so read the resolved value
-		 * and its kind from the planstate.
+		 * 튜플스토어 trim을 위한 내비게이션 오프셋은 실행기 초기화 단계에서
+		 * 결정되며, 이는 일반 EXPLAIN에서도 실행되므로 planstate에서 이미
+		 * 결정된 값과 그 종류를 읽는다.
 		 */
 		if (planstate->hasMaxNav)
 		{
@@ -3247,7 +3243,8 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 											   planstate->navFirstOffset, es);
 					break;
 				case RPR_NAV_OFFSET_RETAIN_ALL:
-					/* a forward reach is unbounded, never retain all */
+					/* 전방 도달 범위는 무한하므로 retain all이 되는
+					 * 경우는 없다 */
 					Assert(false);
 					break;
 			}
@@ -3824,20 +3821,20 @@ show_windowagg_info(WindowAggState *winstate, ExplainState *es)
 	tuplestore_get_stats(tupstore, &maxStorageType, &maxSpaceUsed);
 	show_storage_info(maxStorageType, maxSpaceUsed, es);
 
-	/* Show NFA statistics for Row Pattern Recognition */
+	/* 행 패턴 인식(RPR)의 NFA 통계를 보여준다 */
 	if (wagg->rpPattern != NULL)
 		show_rpr_nfa_stats(winstate, es);
 }
 
 /*
- * Show NFA statistics for Row Pattern Recognition on WindowAgg node.
+ * WindowAgg 노드에서 행 패턴 인식(RPR)의 NFA 통계를 보여준다.
  */
 static void
 show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
 {
 	if (es->format != EXPLAIN_FORMAT_TEXT)
 	{
-		/* State and context counters */
+		/* 상태 및 컨텍스트 카운터 */
 		ExplainPropertyInteger("NFA States Peak", NULL, winstate->nfaStatesMax, es);
 		ExplainPropertyInteger("NFA States Total", NULL, winstate->nfaStatesTotalCreated, es);
 		ExplainPropertyInteger("NFA States Merged", NULL, winstate->nfaStatesMerged, es);
@@ -3847,7 +3844,7 @@ show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
 		ExplainPropertyInteger("NFA Contexts Skipped", NULL, winstate->nfaContextsSkipped, es);
 		ExplainPropertyInteger("NFA Contexts Pruned", NULL, winstate->nfaContextsPruned, es);
 
-		/* Match/mismatch counts and length statistics */
+		/* 매치/미스매치 개수와 길이 통계 */
 		ExplainPropertyInteger("NFA Matched", NULL, winstate->nfaMatchesSucceeded, es);
 		ExplainPropertyInteger("NFA Mismatched", NULL, winstate->nfaMatchesFailed, es);
 		if (winstate->nfaMatchesSucceeded > 0)
@@ -3867,7 +3864,7 @@ show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
 								 es);
 		}
 
-		/* Absorbed/skipped context length statistics */
+		/* 흡수/건너뜀 컨텍스트 길이 통계 */
 		if (winstate->nfaContextsAbsorbed > 0)
 		{
 			ExplainPropertyInteger("NFA Absorbed Length Min", NULL, winstate->nfaAbsorbedLen.min, es);
@@ -3887,7 +3884,7 @@ show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
 	}
 	else
 	{
-		/* State and context counters */
+		/* 상태 및 컨텍스트 카운터 */
 		ExplainIndentText(es);
 		appendStringInfo(es->str,
 						 "NFA States: " INT64_FORMAT " peak, " INT64_FORMAT " total, " INT64_FORMAT " merged\n",
@@ -3901,7 +3898,7 @@ show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
 						 winstate->nfaContextsTotalCreated,
 						 winstate->nfaContextsPruned);
 
-		/* Match/mismatch counts with length min/max/avg */
+		/* 매치/미스매치 개수와 길이 최소/최대/평균 */
 		ExplainIndentText(es);
 		appendStringInfoString(es->str, "NFA: ");
 		if (winstate->nfaMatchesSucceeded > 0)
@@ -3936,7 +3933,7 @@ show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
 		}
 		appendStringInfoChar(es->str, '\n');
 
-		/* Absorbed/skipped context length statistics */
+		/* 흡수/건너뜀 컨텍스트 길이 통계 */
 		if (winstate->nfaContextsAbsorbed > 0 || winstate->nfaContextsSkipped > 0)
 		{
 			ExplainIndentText(es);

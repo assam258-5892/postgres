@@ -2470,45 +2470,44 @@ create_minmaxagg_plan(PlannerInfo *root, MinMaxAggPath *best_path)
 }
 
 /*
- * DefineMetadataContext - context for the DEFINE clause walk below.
+ * DefineMetadataContext - 아래 DEFINE 절 순회를 위한 컨텍스트.
  *
- * The walk classifies one thing: which DEFINE variables depend on the match
- * start, which is what buildRPRPattern() needs to decide context absorption.
- * The trim offsets are not plan-time metadata; the executor records them at
- * init (build_define_offsets) and settles their values per scan
- * (resolve_nav_offsets), both in nodeWindowAgg.c.
+ * 이 순회는 한 가지만 분류한다: 어떤 DEFINE 변수가 매치 시작(match start)에
+ * 의존하는가이며, 이는 buildRPRPattern()이 컨텍스트 흡수를 결정하는 데 필요한
+ * 정보다.  trim 오프셋은 계획 시점의 메타데이터가 아니다; 실행기가 init
+ * 단계(build_define_offsets)에서 이를 기록하고 스캔마다(resolve_nav_offsets)
+ * 값을 확정하며, 둘 다 nodeWindowAgg.c에 있다.
  *
- * The driver sets curVarIdx to the index of the variable being walked before
- * each invocation; the walker uses it to populate matchStartDependent.
+ * 드라이버는 각 호출 전에 curVarIdx 값을 순회 중인 변수의 인덱스로 설정한다;
+ * 워커는 이를 이용해 matchStartDependent 필드를 채운다.
  */
 typedef struct DefineMetadataContext
 {
-	int			curVarIdx;		/* DEFINE variable currently being walked */
-	int			navno;			/* next RPRNavExpr.navno to assign */
-	Bitmapset  *matchStartDependent;	/* variables that depend on
-										 * match_start */
+	int			curVarIdx;		/* 현재 순회 중인 DEFINE 변수 */
+	int			navno;			/* 다음에 할당할 RPRNavExpr.navno */
+	Bitmapset  *matchStartDependent;	/* match_start 값에
+										 * 의존하는 변수 */
 } DefineMetadataContext;
 
 /*
  * compute_matchStartDependent
  *
- * per-variable match_start dependency for absorption suppression: outer nav
- * kinds that reach match_start (FIRST, LAST-with-offset, PREV_FIRST,
- * NEXT_FIRST, PREV_LAST/NEXT_LAST-with-offset) add curVarIdx to
- * matchStartDependent.
+ * 흡수 억제를 위한 변수별 match_start 의존성: match_start 에 도달하는 바깥쪽
+ * nav 종류(FIRST, LAST-with-offset, PREV_FIRST, NEXT_FIRST,
+ * PREV_LAST/NEXT_LAST-with-offset)는 curVarIdx 를 matchStartDependent 에
+ * 추가한다.
  *
- * Classification uses only the outer nav kind: parser nesting restrictions
- * prevent FIRST/LAST inside a PREV/NEXT value subexpression.
+ * 분류는 오직 바깥쪽 nav 종류만 사용한다: 파서의 중첩 제한 때문에 PREV/NEXT
+ * 값 하위 표현식 안에 FIRST/LAST가 올 수 없다.
  */
 static void
 compute_matchStartDependent(RPRNavExpr *nav, DefineMetadataContext *context)
 {
 	/*
-	 * Parser guarantee: by the time the planner sees a DEFINE expression,
-	 * compound nesting has been flattened into a single RPRNavExpr and any
-	 * other RPRNavExpr nesting has been rejected.  So nav's direct child
-	 * fields are not themselves RPRNavExpr nodes, and outer-kind dispatch
-	 * below is sufficient.
+	 * 파서가 보장하는 것: 플래너가 DEFINE 표현식을 보는 시점에는 복합 중첩이
+	 * 이미 단일 RPRNavExpr 하나로 평탄화되어 있고, 그 밖의 다른 RPRNavExpr
+	 * 중첩은 거부된 상태다.  따라서 nav의 직계 자식 필드 자신은 RPRNavExpr
+	 * 노드가 아니며, 아래의 바깥쪽 종류 디스패치로 충분하다.
 	 */
 	Assert(nav->arg == NULL || !IsA(nav->arg, RPRNavExpr));
 	Assert(nav->offset_arg == NULL || !IsA(nav->offset_arg, RPRNavExpr));
@@ -2516,10 +2515,10 @@ compute_matchStartDependent(RPRNavExpr *nav, DefineMetadataContext *context)
 		   !IsA(nav->compound_offset_arg, RPRNavExpr));
 
 	/*
-	 * Match-start dependency: classify the outer nav kind.  A constant
-	 * LAST(x, 0) is conservatively included (offset_arg is a non-NULL Const),
-	 * causing a harmless extra re-evaluation; since LAST(x, 0) is the current
-	 * row, its result is independent of the match start.
+	 * 매치 시작 의존성: 바깥쪽 nav 종류를 분류한다.  상수 LAST(x, 0)은
+	 * 보수적으로 포함시키는데(offset_arg 필드가 non-NULL Const이므로), 이는
+	 * 무해한 추가 재평가를 일으킬 뿐이다; LAST(x, 0)은 현재 행이므로 그
+	 * 결과는 매치 시작과 무관하기 때문이다.
 	 */
 	if (nav->kind == RPR_NAV_FIRST ||
 		(nav->kind == RPR_NAV_LAST && nav->offset_arg != NULL) ||
@@ -2551,23 +2550,23 @@ define_metadata_walker(Node *node, DefineMetadataContext *ctx)
 
 /*
  * compute_define_metadata
- *		Classify which DEFINE variables depend on the match start, and number
- *		the navigations.
+ *		어떤 DEFINE 변수가 매치 시작에 의존하는지 분류하고, 내비게이션에
+ *		번호를 매긴다.
  *
- * Walks each DEFINE variable expression once and returns the set of variable
- * indices whose navigation reaches match_start: those containing FIRST or a
- * compound PREV_FIRST/NEXT_FIRST, or a LAST that carries an offset of its
- * own, whether plain or inside a compound PREV_LAST/NEXT_LAST.  Such
- * variables require per-context re-evaluation during NFA processing, and
- * their presence disqualifies the pattern from context absorption.
+ * 각 DEFINE 변수 표현식을 한 번씩 순회하며, 내비게이션이 match_start 에
+ * 도달하는 변수 인덱스의 집합을 반환한다: FIRST나 복합 PREV_FIRST/NEXT_FIRST
+ * 형태를 포함하거나, 단독이든 복합 PREV_LAST/NEXT_LAST 안이든 자신만의
+ * 오프셋을 가진 LAST를 포함하는 변수다.  이런 변수는 NFA 처리 중에
+ * per-context 재평가가 필요하며, 이런 변수가 있으면 그 패턴은 컨텍스트 흡수
+ * 대상에서 제외된다.
  *
- * The same walk assigns RPRNavExpr.navno in visit order, which is the order
- * the executor builds WindowAggState.rprNavOffsets in.
+ * 같은 순회가 방문 순서대로 RPRNavExpr.navno를 배정하는데, 이는 실행기가
+ * WindowAggState.rprNavOffsets 를 구성하는 순서와 같다.
  *
- * Navigation offsets for tuplestore trim are not computed here; they are
- * built at executor init (build_define_offsets) and settled per scan
- * (resolve_nav_offsets), which can evaluate non-constant offsets that the
- * planner cannot fold.
+ * 튜플스토어 trim을 위한 내비게이션 오프셋은 여기서 계산하지 않는다; 이는
+ * 실행기 초기화(build_define_offsets)에서 만들어지고
+ * 스캔마다(resolve_nav_offsets) 확정되는데, 이 단계는 플래너가 폴딩할 수 없는
+ * 비상수 오프셋도 평가할 수 있다.
  */
 static void
 compute_define_metadata(List *defineClause, Bitmapset **matchStartDependent)
@@ -2664,17 +2663,18 @@ create_windowagg_plan(PlannerInfo *root, WindowAggPath *best_path)
 		ordNumCols++;
 	}
 
-	/* Build RPR pattern */
+	/* RPR 패턴을 빌드한다 */
 	if (wc->rpPattern)
 	{
 		/*
-		 * Classify which DEFINE variables depend on match_start (for
-		 * absorption suppression in buildRPRPattern).  Nav offsets for
-		 * tuplestore trim are built at executor init and resolved per scan.
+		 * 어떤 DEFINE 변수가 match_start 에 의존하는지 분류한다
+		 * (buildRPRPattern 함수가 흡수 억제를 위해 쓰인다).  튜플스토어
+		 * trim을 위한 내비게이션 오프셋은 실행기 초기화 시점에 만들어지고
+		 * 스캔마다 결정된다.
 		 */
 		compute_define_metadata(wc->defineClause, &matchStartDependent);
 
-		/* Compile and optimize RPR patterns */
+		/* RPR 패턴을 컴파일하고 최적화한다 */
 		compiledPattern = buildRPRPattern(wc->rpPattern,
 										  wc->defineClause,
 										  wc->rpSkipTo,
@@ -6853,12 +6853,12 @@ make_windowagg(List *tlist, WindowClause *wc,
 	node->topWindow = topWindow;
 	node->rpSkipTo = wc->rpSkipTo;
 
-	/* Store compiled pattern for NFA execution */
+	/* NFA 실행을 위해 컴파일된 패턴을 저장한다 */
 	node->rpPattern = compiledPattern;
 
 	node->defineClause = wc->defineClause;
 
-	/* Store pre-computed match_start dependency bitmapset */
+	/* 미리 계산된 match_start 의존성 bitmapset을 저장한다 */
 	node->defineMatchStartDependent = defineMatchStartDependent;
 
 	plan->targetlist = tlist;

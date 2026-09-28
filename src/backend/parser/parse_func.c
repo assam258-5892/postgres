@@ -222,13 +222,12 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	}
 
 	/*
-	 * Inside an RPR DEFINE clause, an unqualified call to one of the row
-	 * pattern navigation names PREV/NEXT/FIRST/LAST denotes the navigation
-	 * operation, not an ordinary function.  Just note that here; the catalog
-	 * lookup is skipped and the RPRNavExpr is built at the end, after the
-	 * common decoration checks have run (see the could_be_rpr_nav handling
-	 * below).  A schema-qualified call is the explicit way to reach an
-	 * ordinary function of one of these names.
+	 * RPR DEFINE 절 안에서는, 행 패턴 탐색 이름 PREV/NEXT/FIRST/LAST 중
+	 * 하나에 대한 수식되지 않은 호출은 일반 함수가 아니라 탐색 연산을
+	 * 가리킨다.  여기서는 그 사실만 기록해 둔다; 카탈로그 조회는 건너뛰고
+	 * 공통 장식(decoration) 검사가 끝난 뒤 마지막에 RPRNavExpr 을 만든다
+	 * (아래의 could_be_rpr_nav 처리를 참고한다).  이들 이름의 일반 함수에
+	 * 도달하는 명시적인 방법은 스키마로 수식된 호출이다.
 	 */
 	if (!is_column && !proc_call &&
 		pstate->p_rpr_define &&
@@ -303,10 +302,10 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	else
 	{
 		/*
-		 * A recognized navigation name skips catalog lookup entirely.  Treat
-		 * it as an ordinary function so the common wrong-kind-of-routine and
-		 * decoration checks below run with the existing messages, then route
-		 * to ParseRPRNavCall to build the RPRNavExpr.
+		 * 인식된 탐색 이름은 카탈로그 조회를 완전히 건너뛴다.  아래의
+		 * 공통적인 wrong-kind-of-routine 및 장식 검사가 기존 메시지 그대로
+		 * 실행되도록 일단 일반 함수처럼 취급한 다음, RPRNavExpr 을 만들기
+		 * 위해 ParseRPRNavCall 로 넘긴다.
 		 */
 		Assert(!proc_call);
 
@@ -693,9 +692,9 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	}
 
 	/*
-	 * A recognized navigation name has now passed the common decoration and
-	 * wrong-kind checks above; build the RPRNavExpr.  No fallback to function
-	 * resolution ever happens here.
+	 * 인식된 탐색 이름은 이제 위의 공통 장식 검사와 wrong-kind 검사를
+	 * 통과했다; RPRNavExpr 을 만든다.  여기서는 함수 해석으로 다시 돌아가는
+	 * 일이 결코 일어나지 않는다.
 	 */
 	if (could_be_rpr_nav)
 		return ParseRPRNavCall(pstate, funcname, fargs, argnames, fn,
@@ -2136,12 +2135,12 @@ FuncNameAsType(List *funcname)
 
 /*
  * is_rpr_navigation_name
- *		Is this unqualified, parser-downcased name a row pattern navigation
- *		operation inside a DEFINE clause?
+ *		이 수식되지 않은, 파서가 소문자로 바꾼 이름은 DEFINE 절 안에서 행 패턴
+ *		탐색 연산인가?
  *
- * ruleutils.c asks the same question to decide when a user function of one
- * of these names has to be printed schema-qualified, so both sides share the
- * one list.
+ * ruleutils.c 도 이들 이름 중 하나를 가진 사용자 함수를 언제 스키마로
+ * 수식해서 출력해야 하는지 결정할 때 같은 질문을 하므로, 양쪽이 하나의
+ * 목록을 공유한다.
  */
 bool
 is_rpr_navigation_name(const char *name)
@@ -2154,23 +2153,21 @@ is_rpr_navigation_name(const char *name)
 
 /*
  * ParseRPRNavCall
- *		Recognize a row pattern navigation operation in a DEFINE clause.
+ *		DEFINE 절 안의 행 패턴 탐색 연산을 인식한다.
  *
- * Anywhere inside a DEFINE condition (p_rpr_define is set, even where a
- * nested FILTER or aggregate ORDER BY has changed p_expr_kind) an unqualified
- * call to one of the names PREV/NEXT/FIRST/LAST denotes the corresponding row
- * pattern navigation operation (ISO/IEC 19075-5 Subclause 5.6), not an
- * ordinary function call.
- * The name is matched here, before any catalog lookup, with no fallback to
- * function resolution: once it matches, decoration and argument-count
- * violations are hard errors rather than letting an ordinary function of
- * the same name take over.  A schema-qualified call (the caller restricts us
- * to unqualified names) is the documented way to reach such a function
- * instead.
+ * DEFINE 조건 안 어디에서든(중첩된 FILTER 나 집계의 ORDER BY 가
+ * p_expr_kind 를 바꿔 놓은 곳이라도 p_rpr_define 이 설정되어 있으면), 이름
+ * PREV/NEXT/FIRST/LAST 중 하나에 대한 수식되지 않은 호출은 일반 함수 호출이
+ * 아니라 그에 대응하는 행 패턴 탐색 연산(ISO/IEC 19075-5 Subclause 5.6) 을
+ * 가리킨다. 이 이름은 어떤 카탈로그 조회보다도 먼저 여기서 매칭되며, 함수
+ * 해석으로 돌아가는 fallback 은 없다: 일단 매칭되면 장식이나 인수 개수 위반은
+ * 같은 이름의 일반 함수가 대신 처리하게 두는 대신 하드 오류가 된다.  그 대신
+ * 그런 함수에 도달하는 공식적인 방법은 스키마로 수식된 호출이다(호출자가
+ * 우리를 수식되지 않은 이름으로 제한한다).
  *
- * The caller routes here only after the name has matched one of the four
- * navigation names and the common decoration/wrong-kind checks in
- * ParseFuncOrColumn have run, so this always returns an RPRNavExpr.
+ * 호출자는 이름이 네 가지 탐색 이름 중 하나와 매칭되고 ParseFuncOrColumn 의
+ * 공통 장식/wrong-kind 검사가 실행된 뒤에만 여기로 넘기므로, 이 함수는 항상
+ * RPRNavExpr 을 반환한다.
  */
 static Node *
 ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
@@ -2183,7 +2180,7 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 	Node	   *arg;
 	RPRNavExpr *navexpr;
 
-	/* match the parser-downcased identifier; otherwise not a navigation name */
+	/* 파서가 소문자로 바꾼 식별자를 매칭한다; 아니면 탐색 이름 아님 */
 	if (strcmp(name, "prev") == 0)
 	{
 		kind = RPR_NAV_PREV;
@@ -2206,20 +2203,18 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 	}
 	else
 	{
-		/* the caller only routes here after matching one of the four names */
+		/* 호출자는 네 이름 중 하나와 매칭된 뒤에만 여기로 넘긴다 */
 		pg_unreachable();
 		return NULL;
 	}
 
 	/*
-	 * Once the name matches we never fall back to function resolution, so any
-	 * decoration that does not make sense for a navigation operation is a
-	 * hard error.  The aggregate/window decorations (agg_star, DISTINCT,
-	 * WITHIN GROUP, ORDER BY, FILTER, OVER, RESPECT/IGNORE NULLS) are already
-	 * rejected by the common path in ParseFuncOrColumn, which treated the
-	 * recognized name as an ordinary function; what remains are the
-	 * decorations that path accepts for a plain function but a navigation
-	 * operation must still reject.
+	 * 이름이 매칭되면 함수 해석으로 다시 돌아가는 일은 결코 없으므로, 탐색
+	 * 연산에 맞지 않는 장식은 모두 하드 오류다.  집계/윈도우 장식(agg_star,
+	 * DISTINCT, WITHIN GROUP, ORDER BY, FILTER, OVER, RESPECT/IGNORE
+	 * NULLS) 은 인식된 이름을 일반 함수로 취급한 ParseFuncOrColumn 의 공통
+	 * 경로에서 이미 거부되었다; 남은 것은 그 경로가 평범한 함수에는
+	 * 허용하지만 탐색 연산은 여전히 거부해야 하는 장식들이다.
 	 */
 	if (fn->func_variadic)
 		ereport(ERROR,
@@ -2233,7 +2228,7 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 				 errmsg("cannot use named arguments with row pattern navigation function %s",
 						navname),
 				 parser_errposition(pstate, location)));
-	/* takes a value expression and an optional offset */
+	/* 값 표현식과 선택적 offset 을 받는다 */
 	if (nargs == 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
@@ -2252,11 +2247,11 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 				 parser_errposition(pstate, location)));
 
 	/*
-	 * Resolve a still-unknown first argument to text, the same way the
-	 * anycompatible family does.  A navigation operation is not a polymorphic
-	 * function, so the old "could not determine polymorphic type" error does
-	 * not apply; an unknown literal cannot contain a column reference, so the
-	 * walker still rejects it later.
+	 * anycompatible 계열과 같은 방식으로, 아직 타입을 모르는 첫 번째 인수를
+	 * text 로 해석한다.  탐색 연산은 다형(polymorphic) 함수가 아니므로 예전의
+	 * "could not determine polymorphic type" 오류는 해당하지 않는다; 타입을
+	 * 모르는 리터럴은 열 참조를 담을 수 없으므로, 워커는 나중에도 여전히
+	 * 이를 거부한다.
 	 */
 	arg = linitial(fargs);
 	if (exprType(arg) == UNKNOWNOID)
@@ -2265,9 +2260,9 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 	navexpr = makeNode(RPRNavExpr);
 	navexpr->kind = kind;
 	navexpr->arg = (Expr *) arg;
-	navexpr->navno = -1;		/* assigned while planning */
+	navexpr->navno = -1;		/* 플래닝 중에 할당됨 */
 
-	/* an explicit offset is coerced to int8, which the executor reads */
+	/* 명시적 offset 은 int8 로 강제 변환되며, 실행기가 이를 읽는다 */
 	if (nargs == 2)
 	{
 		Node	   *offset = lsecond(fargs);
@@ -2293,9 +2288,10 @@ ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
 	else
 		navexpr->offset_arg = NULL;
 
-	/* compound_offset_arg stays NULL; define_walker flattening fills it in */
+	/* compound_offset_arg 는 NULL 로 남는다;
+	 * define_walker 의 평탄화가 이를 채운다 */
 	navexpr->resulttype = exprType(arg);
-	/* resultcollid will be set by parse_collate.c */
+	/* resultcollid 는 parse_collate.c 가 설정한다 */
 	navexpr->location = location;
 
 	return (Node *) navexpr;

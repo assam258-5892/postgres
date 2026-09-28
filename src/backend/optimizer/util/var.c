@@ -68,7 +68,7 @@ typedef struct
 	int			sublevels_up;
 	bool		possible_sublink;	/* could aliases include a SubLink? */
 	bool		inserted_sublink;	/* have we inserted a SubLink? */
-	bool		in_rpr_nav_arg; /* below a row pattern navigation argument? */
+	bool		in_rpr_nav_arg; /* 행 패턴 내비게이션 인자 아래에 있는가? */
 } flatten_join_alias_vars_context;
 
 static bool pull_varnos_walker(Node *node,
@@ -931,10 +931,10 @@ flatten_join_alias_vars_mutator(Node *node,
 			context->inserted_sublink = checkExprHasSubLink(newvar);
 
 		/*
-		 * Below a navigation argument, wrap a non-Var/PHV replacement in a
-		 * PlaceHolderVar so it can't be constant-folded away before the
-		 * navigation runs.  Unlike pullup_replace_vars_callback(), this also
-		 * wraps a strict expression over Vars.
+		 * 내비게이션 인자 아래에서는, 내비게이션이 실행되기 전에 상수
+		 * 폴딩으로 사라지지 못하도록 Var/PHV가 아닌 치환을 PlaceHolderVar 로
+		 * 래핑한다.  pullup_replace_vars_callback()과 달리, 이는 Var 위의
+		 * strict 표현식도 래핑한다.
 		 */
 		if (context->in_rpr_nav_arg && context->root != NULL &&
 			!(IsA(newvar, Var) && ((Var *) newvar)->varlevelsup == var->varlevelsup) &&
@@ -958,8 +958,8 @@ flatten_join_alias_vars_mutator(Node *node,
 	if (IsA(node, RPRNavExpr))
 	{
 		/*
-		 * Flag the argument, but not the offsets, as a navigation argument
-		 * (mirrors replace_rte_variables_mutator()'s handling).
+		 * 오프셋이 아니라 인자만 내비게이션 인자로 표시한다
+		 * (replace_rte_variables_mutator()의 처리를 그대로 따른다).
 		 */
 		RPRNavExpr *nav = (RPRNavExpr *) node;
 		RPRNavExpr *newnode = makeNode(RPRNavExpr);
