@@ -929,6 +929,7 @@ WINDOW <replaceable class="parameter">window_name</replaceable> AS ( <replaceabl
 [ PARTITION BY <replaceable class="parameter">expression</replaceable> [, ...] ]
 [ ORDER BY <replaceable class="parameter">expression</replaceable> [ ASC | DESC | USING <replaceable class="parameter">operator</replaceable> ] [ NULLS { FIRST | LAST } ] [, ...] ]
 [ <replaceable class="parameter">frame_clause</replaceable> ]
+[ <replaceable class="parameter">row_pattern_common_syntax</replaceable> ]
 </synopsis>
    </para>
 
@@ -971,8 +972,8 @@ WINDOW <replaceable class="parameter">window_name</replaceable> AS ( <replaceabl
     The <replaceable class="parameter">frame_clause</replaceable> can be one of
 
 <synopsis>
-{ RANGE | ROWS | GROUPS } <replaceable>frame_start</replaceable> [ <replaceable>frame_exclusion</replaceable> ] [ <replaceable>row_pattern_common_syntax</replaceable> ]
-{ RANGE | ROWS | GROUPS } BETWEEN <replaceable>frame_start</replaceable> AND <replaceable>frame_end</replaceable> [ <replaceable>frame_exclusion</replaceable> ] [ <replaceable>row_pattern_common_syntax</replaceable> ]
+{ RANGE | ROWS | GROUPS } <replaceable>frame_start</replaceable> [ <replaceable>frame_exclusion</replaceable> ]
+{ RANGE | ROWS | GROUPS } BETWEEN <replaceable>frame_start</replaceable> AND <replaceable>frame_end</replaceable> [ <replaceable>frame_exclusion</replaceable> ]
 </synopsis>
 
     where <replaceable>frame_start</replaceable>
@@ -1081,10 +1082,11 @@ EXCLUDE NO OTHERS
 
    <para>
     The
-    optional <replaceable class="parameter">row_pattern_common_syntax</replaceable>
+    optional
+    <replaceable class="parameter">row_pattern_common_syntax</replaceable>
     defines the <firstterm>Row Pattern Recognition condition</firstterm> for
-    this
-    window. <replaceable class="parameter">row_pattern_common_syntax</replaceable>
+    this window.
+    <replaceable class="parameter">row_pattern_common_syntax</replaceable>
     includes the following subclauses.
 
 <synopsis>
@@ -1096,11 +1098,11 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     <literal>AFTER MATCH SKIP PAST LAST ROW</literal> or <literal>AFTER MATCH
     SKIP TO NEXT ROW</literal> controls how to proceed to the next row position
     after a match is found. With <literal>AFTER MATCH SKIP PAST LAST
-    ROW</literal> (the default) the next row position is next to the last row of
-    the previous match. On the other hand, with <literal>AFTER MATCH SKIP TO NEXT
-    ROW</literal> the next row position is next to the first row of the previous
-    match. <literal>INITIAL</literal> or <literal>SEEK</literal> specifies from
-    which row in the frame pattern matching begins.
+    ROW</literal> (the default) the next row position is next to the last row
+    of the previous match. On the other hand, with <literal>AFTER MATCH SKIP TO
+    NEXT ROW</literal> the next row position is next to the first row of the
+    previous match. <literal>INITIAL</literal> or <literal>SEEK</literal>
+    specifies from which row in the frame pattern matching begins.
     If <literal>INITIAL</literal> is specified, the match must start
     from the first row in the frame. If <literal>SEEK</literal> is specified,
     the set of matching rows does not necessarily start from the first row. The
@@ -1109,19 +1111,24 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     defines definition variables along with a boolean
     expression. <literal>PATTERN</literal> defines a sequence of rows that
     satisfies certain conditions using variables defined
-    in the <literal>DEFINE</literal> clause (an empty <literal>PATTERN()</literal>
-    is not accepted by the syntax). Each pattern variable can be followed
-    by a quantifier to specify how many times it should match:
-    <literal>*</literal> (zero or more),
+    in the <literal>DEFINE</literal> clause (an empty
+    <literal>PATTERN()</literal> is not accepted by the syntax). Each pattern
+    variable can be followed by a quantifier to specify how many times it
+    should match: <literal>*</literal> (zero or more),
     <literal>+</literal> (one or more),
     <literal>?</literal> (zero or one),
-    <literal>{</literal><replaceable>n</replaceable><literal>}</literal> (exactly <replaceable>n</replaceable> times, n &gt; 0),
-    <literal>{</literal><replaceable>n</replaceable><literal>,}</literal> (at least <replaceable>n</replaceable> times, n &gt;= 0),
-    <literal>{,</literal><replaceable>m</replaceable><literal>}</literal> (at most <replaceable>m</replaceable> times, m &gt; 0), or
+    <literal>{</literal><replaceable>n</replaceable><literal>}</literal>
+    (exactly <replaceable>n</replaceable> times, n &gt; 0),
+    <literal>{</literal><replaceable>n</replaceable><literal>,}</literal>
+    (at least <replaceable>n</replaceable> times, n &gt;= 0),
+    <literal>{,</literal><replaceable>m</replaceable><literal>}</literal>
+    (at most <replaceable>m</replaceable> times, m &gt; 0), or
     <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}</literal>
-    (between <replaceable>n</replaceable> and <replaceable>m</replaceable> times, 0 &lt;= n &lt;= m, 0 &lt; m).
+    (between <replaceable>n</replaceable> and <replaceable>m</replaceable>
+    times, 0 &lt;= n &lt;= m, 0 &lt; m).
     Reluctant quantifiers (e.g., <literal>*?</literal>, <literal>+?</literal>,
-    <literal>??</literal>, <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}?</literal>)
+    <literal>??</literal>,
+    <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}?</literal>)
     are supported.
     The exclusion (<literal>{-</literal> and <literal>-}</literal>) is not
     accepted by the syntax, and the permutation
@@ -1149,6 +1156,9 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     with an error.  The <literal>DEFINE</literal> clause itself is not
     optional: leaving it out is a syntax error, even where every pattern
     variable would evaluate as <literal>TRUE</literal>.
+    A variable may be defined only once in the <literal>DEFINE</literal>
+    clause; a second definition of the same name is rejected with an
+    error.
    </para>
 
    <para>
@@ -1167,7 +1177,6 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
    <para>
     Note that the maximum number of unique pattern variables
     used in the <literal>PATTERN</literal> clause is 240.
-    If this limit is exceeded, an error will be raised.
     Additionally, the maximum nesting depth of pattern groups
     (parentheses) is 254 levels.  An alternation costs a level of its own,
     so a pattern that nests alternations reaches the limit at about half
@@ -1175,6 +1184,12 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     However, pattern optimizations such as flattening nested sequences
     and simplifying nested quantifiers may reduce the effective depth,
     so this limit is rarely reached in practice.
+    The pattern is also limited to 32767 elements, counted after these
+    optimizations: one for each occurrence of a pattern variable, two for
+    each group with a quantifier other than <literal>{1}</literal>, one
+    for each alternation plus one for each of its alternatives, and one
+    more for the pattern as a whole.  A larger pattern is rejected with
+    an error.
    </para>
 
    <para>
@@ -1194,7 +1209,9 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     whole <literal>FROM</literal> clause, and an ambiguous name is
     rejected.  Where the name is not unique, rename the column in
     the <literal>FROM</literal> clause, for example with a column alias on
-    a subquery.
+    a subquery.  A column of an outer query cannot be referenced from
+    a <literal>DEFINE</literal> condition, qualified or not; such a
+    reference is rejected as not supported.
    </para>
 
    <para>
@@ -1220,6 +1237,18 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     <literal>A.price</literal> as well.  This is the same shadowing the
     setting applies to table columns; see
     <xref linkend="plpgsql-var-subst"/>.
+   </para>
+
+   <para>
+    Two planner optimizations are not applied to a window that uses row
+    pattern recognition.  A filter on the result of a monotonic window
+    function, such as <literal>rn &lt;= 3</literal> on
+    a <function>row_number()</function> computed in a subquery, is not
+    pushed down into the window as a run condition, so the window is
+    evaluated to the end of the partition instead of stopping early.  And
+    the frame clause is not replaced with a cheaper one, even when the
+    window functions using it do not depend on the frame.  Query results
+    are not affected, only the cost of evaluating the window.
    </para>
 
    <para>
