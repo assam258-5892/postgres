@@ -398,7 +398,6 @@ static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
 static bool colname_is_fixed(RangeTblEntry *rte, AttrNumber attno);
 static void mark_define_columns(deparse_namespace *dpns, Query *query);
-static bool mark_define_columns_walker(Node *node, deparse_namespace *dpns);
 static void mark_define_column(deparse_namespace *dpns, Var *var);
 static char *preset_input_colname(deparse_namespace *dpns, int varno,
 								  AttrNumber attno);
@@ -4598,27 +4597,13 @@ mark_define_columns(deparse_namespace *dpns, Query *query)
 	foreach(lc, query->windowClause)
 	{
 		WindowClause *wc = lfirst_node(WindowClause, lc);
+		List	   *vars;
 
-		if (wc->defineClause != NIL)
-			(void) mark_define_columns_walker((Node *) wc->defineClause,
-											  dpns);
+		/* DEFINE has no outer-level Vars or sub-selects */
+		vars = pull_vars_of_level((Node *) wc->defineClause, 0);
+		foreach_node(Var, var, vars)
+			mark_define_column(dpns, var);
 	}
-}
-
-static bool
-mark_define_columns_walker(Node *node, deparse_namespace *dpns)
-{
-	if (node == NULL)
-		return false;
-	if (IsA(node, Var))
-	{
-		mark_define_column(dpns, (Var *) node);
-		return false;
-	}
-	/* Sub-selects are not allowed here, but be safe: they have own namespace */
-	if (IsA(node, Query))
-		return false;
-	return expression_tree_walker(node, mark_define_columns_walker, dpns);
 }
 
 /*
@@ -7272,13 +7257,13 @@ append_pattern_quantifier(StringInfo buf, RPRPatternNode *node)
 		/* {1,1} = no quantifier */
 		has_quantifier = false;
 	}
-	else if (node->min == 0 && node->max == PG_INT32_MAX)
+	else if (node->min == 0 && node->max == RPR_QUANTITY_INF)
 		appendStringInfoChar(buf, '*');
-	else if (node->min == 1 && node->max == PG_INT32_MAX)
+	else if (node->min == 1 && node->max == RPR_QUANTITY_INF)
 		appendStringInfoChar(buf, '+');
 	else if (node->min == 0 && node->max == 1)
 		appendStringInfoChar(buf, '?');
-	else if (node->max == PG_INT32_MAX)
+	else if (node->max == RPR_QUANTITY_INF)
 		appendStringInfo(buf, "{%d,}", node->min);
 	else if (node->min == node->max)
 		appendStringInfo(buf, "{%d}", node->min);
@@ -14274,10 +14259,7 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	 */
 	if (inRPRDefine)
 	{
-		if (strcmp(proname, "prev") == 0 ||
-			strcmp(proname, "next") == 0 ||
-			strcmp(proname, "first") == 0 ||
-			strcmp(proname, "last") == 0)
+		if (is_rpr_navigation_name(proname))
 			force_qualify = true;
 	}
 

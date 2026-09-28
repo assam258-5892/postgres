@@ -6273,10 +6273,10 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 
 				/*
 				 * Perform the same duplicate check that is done in
-				 * transformWindowFuncCall. wc is never an RPR clause here
-				 * (those are skipped above), and an RPR existing_wc differs
-				 * in its frame options anyway, so the RPR-related comparisons
-				 * are a defensive backstop for parity.
+				 * transformWindowFuncCall.  wc is never an RPR clause here
+				 * (those are skipped above), but a support function is free
+				 * to hand it the frame options an RPR clause uses, so the RPR
+				 * fields still have to be compared.
 				 */
 				if (equal(wc->partitionClause, existing_wc->partitionClause) &&
 					equal(wc->orderClause, existing_wc->orderClause) &&
@@ -6517,30 +6517,25 @@ common_prefix_cmp(const void *a, const void *b)
 static bool
 add_define_inputs_walker(Node *node, PathTarget *input_target)
 {
-	ListCell   *lc;
-
 	if (node == NULL)
 		return false;
 
-	foreach(lc, input_target->exprs)
-	{
-		/*
-		 * XXX this equal() match can miss a DEFINE expression that is
-		 * semantically the same as one already in input_target, producing a
-		 * redundant column below the WindowAgg.  Seen with a join-alias
-		 * expression exposed through a pulled-up subquery: flattening it
-		 * once for the target list and once for this DEFINE clause each
-		 * wraps a fresh, independently-numbered PlaceHolderVar around an
-		 * otherwise identical copy (make_placeholder_expr() never checks for
-		 * an existing equivalent one), and PlaceHolderVar's equal() compares
-		 * that number, not the wrapped expression, so the two never match.
-		 * Wasteful, not known to be incorrect.  Not specific to DEFINE --
-		 * make_group_input_target() can build the same kind of duplicate for
-		 * GROUP BY/HAVING with no RPR involved.
-		 */
-		if (equal(node, lfirst(lc)))
-			return false;
-	}
+	/*
+	 * XXX this list_member() match can miss a DEFINE expression that is
+	 * semantically the same as one already in input_target, producing a
+	 * redundant column below the WindowAgg.  Seen with a join-alias
+	 * expression exposed through a pulled-up subquery: flattening it once for
+	 * the target list and once for this DEFINE clause each wraps a fresh,
+	 * independently-numbered PlaceHolderVar around an otherwise identical
+	 * copy (make_placeholder_expr() never checks for an existing equivalent
+	 * one), and PlaceHolderVar's equal() compares that number, not the
+	 * wrapped expression, so the two never match.  Wasteful, not known to be
+	 * incorrect.  Not specific to DEFINE -- make_group_input_target() can
+	 * build the same kind of duplicate for GROUP BY/HAVING with no RPR
+	 * involved.
+	 */
+	if (list_member(input_target->exprs, node))
+		return false;
 
 	if (IsA(node, Var) || IsA(node, PlaceHolderVar))
 	{

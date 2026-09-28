@@ -266,9 +266,9 @@ use.  After that it processes each DEFINE variable as follows:
 
   (1) Checks for duplicate variable names -- this one in a pass of its
       own over the whole list, before any expression is transformed
-  (2) Transforms the expression via transformExpr() and coerces it to
-      Boolean (coerce_to_boolean) right away, so that the steps below see
-      the final expression form
+  (2) Transforms the expression and coerces it to Boolean right away,
+      through transformWhereClause() as for WHERE and HAVING, so that the
+      steps below see the final expression form
   (3) Wraps in a TargetEntry with the variable name set in resname
 
 Parse analysis puts nothing in the query targetlist for a DEFINE clause.
@@ -516,7 +516,7 @@ error.
       A{2}? -> A{2},  (A B){2}? -> (A B){2}
       This runs before and after each node's own rewrites.  (b), (c), (e)
       and (g) decline a reluctant node outright, and (c) to (f) compare
-      nodes with rprPatternEqual(), which treats a reluctant node as unequal
+      nodes with equal(), which treats a reluctant node as unequal
       to its greedy twin.  Without the normalization (A{2}?){3} would stay
       nested where (A{2}){3} collapses to A{6}, and (A{2}? | A{2}) would
       keep both branches.  The absorbability analysis of IV-5 reads the flag

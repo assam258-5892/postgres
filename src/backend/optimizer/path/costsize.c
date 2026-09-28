@@ -3269,12 +3269,9 @@ cost_windowagg(Path *path, PlannerInfo *root,
 	{
 		QualCost	defcosts;
 
-		foreach_node(TargetEntry, def, winclause->defineClause)
-		{
-			cost_qual_eval_node(&defcosts, (Node *) def->expr, root);
-			startup_cost += defcosts.startup;
-			total_cost += defcosts.per_tuple * input_tuples;
-		}
+		cost_qual_eval_node(&defcosts, (Node *) winclause->defineClause, root);
+		startup_cost += defcosts.startup;
+		total_cost += defcosts.per_tuple * input_tuples;
 	}
 
 	foreach(lc, windowFuncs)

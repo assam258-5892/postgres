@@ -1036,8 +1036,6 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 		/* Create skip state before add_unique, which may free state */
 		if (RPRElemCanSkip(targetElem))
 		{
-			RPRPatternElement *landElem;
-
 			skipState = nfa_state_clone(winstate, targetElem->next,
 										state->counts, state->isAbsorbable);
 
@@ -1048,9 +1046,8 @@ nfa_route_to_elem(WindowAggState *winstate, RPRNFAContext *ctx,
 			 * group's min check and the cycle guard's below-min fall-through
 			 * both read.
 			 */
-			landElem = &winstate->rpPattern->elements[skipState->elemIdx];
-			if (RPRElemIsEnd(landElem))
-				RPRCountIncrement(skipState->counts[landElem->depth]);
+			nfa_state_exit_to(winstate, skipState, targetElem->depth,
+							  targetElem->next);
 		}
 
 		if (skipState != NULL && RPRElemIsReluctant(targetElem))
@@ -1181,8 +1178,6 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 	/* Optional group: create skip path (but don't route yet) */
 	if (RPRElemCanSkip(elem))
 	{
-		RPRPatternElement *landElem;
-
 		skipState = nfa_state_clone(winstate, skipIdx,
 									state->counts, state->isAbsorbable);
 
@@ -1190,9 +1185,7 @@ nfa_advance_begin(WindowAggState *winstate, RPRNFAContext *ctx,
 		 * As in nfa_route_to_elem, a skip that lands directly on an outer END
 		 * still counts as an iteration of that END's group.
 		 */
-		landElem = &elements[skipIdx];
-		if (RPRElemIsEnd(landElem))
-			RPRCountIncrement(skipState->counts[landElem->depth]);
+		nfa_state_exit_to(winstate, skipState, elem->depth, skipIdx);
 	}
 
 	if (skipState != NULL && RPRElemIsReluctant(elem))

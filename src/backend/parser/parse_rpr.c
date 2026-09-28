@@ -28,8 +28,7 @@
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/rpr.h"
-#include "parser/parse_coerce.h"
-#include "parser/parse_expr.h"
+#include "parser/parse_clause.h"
 #include "parser/parse_rpr.h"
 
 /* DEFINE clause walker context -- see define_walker for usage. */
@@ -321,9 +320,8 @@ transformDefineClause(ParseState *pstate, WindowDef *windef)
 		 * as a whole: it may contain RPRNavExpr nodes (PREV/NEXT/FIRST/LAST)
 		 * that only the owning WindowAgg can evaluate.
 		 */
-		expr = transformExpr(pstate, restarget->val,
-							 EXPR_KIND_RPR_DEFINE);
-		expr = coerce_to_boolean(pstate, expr, "DEFINE");
+		expr = transformWhereClause(pstate, restarget->val,
+									EXPR_KIND_RPR_DEFINE, "DEFINE");
 
 		/* Build the defineClause entry directly from the transformed expr */
 		teDefine = makeTargetEntry((Expr *) expr,
