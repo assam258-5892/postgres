@@ -570,6 +570,22 @@ select pg_get_viewdef('view_of_grown_input', true)
 select * from view_of_grown_input;
 select * from view_of_grown_input_2;
 
+drop view view_of_grown_input_2;
+
+-- A grown column that is dropped again still takes up its place in the
+-- positional alias list, as a dropped column; a column grown after it must
+-- not slide into that place.
+alter table tblfc drop column val;
+alter table tblfc add column val int;
+
+select pg_get_viewdef('view_of_grown_input', true);
+select 'create view view_of_grown_input_2 as '
+       || pg_get_viewdef('view_of_grown_input', true) \gexec
+select pg_get_viewdef('view_of_grown_input', true)
+     = pg_get_viewdef('view_of_grown_input_2', true) as round_trips;
+select * from view_of_grown_input;
+select * from view_of_grown_input_2;
+
 drop view view_of_grown_input_2, view_of_grown_input;
 drop function tblfc_f();
 drop table tblfc, tblfr;
