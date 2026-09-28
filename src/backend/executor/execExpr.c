@@ -1168,6 +1168,80 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				break;
 			}
 
+		case T_RPRNavExpr:
+			{
+				/*
+				 RPR 내비게이션 함수(PREV/NEXT/FIRST/LAST)는 일반적인 함수
+				 호출이 아니라 EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE opcode로
+				 컴파일된다. SET opcode가 ecxt_outertuple 을 대상 행으로
+				 교체하면, 인자 표현식은 (교체된 슬롯에서 값을 읽으며)
+				 정상적으로 컴파일되고, RESTORE opcode가 원래 슬롯을 복구한다.
+				 */
+				RPRNavState *rprnavstate;
+				RPRNavOffsets *entry;
+				RPRNavExpr *nav = (RPRNavExpr *) node;
+				WindowAggState *winstate;
+				int			skip_arg_step;
+
+				Assert(state->parent && IsA(state->parent, WindowAggState));
+				winstate = (WindowAggState *) state->parent;
+
+				/*
+				 플랜 트리는 읽기 전용이므로, 오프셋은 RPRNavExpr 이 아니라
+				 실행기 상태에 있다. navno는 시작 시점에
+				 build_define_offsets()가 채운 리스트를 인덱싱하며, 그 안의
+				 값은 스캔마다 resolve_nav_offsets()가 확정한다.
+				 */
+				Assert(nav->navno >= 0 &&
+					   nav->navno < list_length(winstate->rprNavOffsets));
+
+				entry = list_nth(winstate->rprNavOffsets, nav->navno);
+				Assert(entry->nav == nav);
+				rprnavstate = entry->rprnavstate;
+
+				/* SET opcode를 내보낸다: 슬롯을 대상 행으로 교체한다 */
+				scratch.opcode = EEOP_RPR_NAV_SET;
+				scratch.d.rpr_nav.rprnavstate = rprnavstate;
+
+				ExprEvalPushStep(state, &scratch);
+
+				/*
+				 대상 행이 존재하지 않으면 인자 표현식의 평가를 건너뛰고 곧바로
+				 RESTORE 로 간다. EEOP_RPR_NAV_SET 단계가 (대상 행이 존재하면
+				 false인) 확정적인 resnull을 기록하므로, 이 점프 조건은 항상
+				 최신 상태를 반영한다.
+				 */
+				skip_arg_step = state->steps_len;
+				scratch.opcode = EEOP_JUMP_IF_NULL;
+				scratch.resvalue = resv;
+				scratch.resnull = resnull;
+				scratch.d.jump.jumpdone = -1;	/* 아래에서 설정 */
+				ExprEvalPushStep(state, &scratch);
+
+				/* 인자 표현식을 정상적으로 컴파일한다 */
+				ExecInitExprRec(nav->arg, state, resv, resnull);
+
+				/* 범위를 벗어난 점프는 RESTORE 단계로 이동한다 */
+				state->steps[skip_arg_step].d.jump.jumpdone = state->steps_len;
+
+				/* RESTORE opcode를 내보낸다: 원래 슬롯을 복구한다 */
+				scratch.opcode = EEOP_RPR_NAV_RESTORE;
+				scratch.resvalue = resv;
+				scratch.resnull = resnull;
+				scratch.d.rpr_nav.rprnavstate = rprnavstate;
+
+				/*
+				 상태는 오프셋 엔트리와 공유하지만, resulttype은 플랜 노드에
+				 속하므로 이 내비게이션을 컴파일할 때마다 항상 같은 값의 쌍을
+				 기록한다.
+				 */
+				get_typlenbyval(nav->resulttype,
+								&rprnavstate->resulttyplen,
+								&rprnavstate->resulttypbyval);
+				ExprEvalPushStep(state, &scratch);
+				break;
+			}
+
 		case T_MergeSupportFunc:
 			{
 				/* must be in a MERGE, else something messed up */

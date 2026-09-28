@@ -37,6 +37,7 @@
 #include "parser/parse_func.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_relation.h"
+#include "parser/parse_rpr.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
 #include "parser/parser.h"
@@ -2829,6 +2830,9 @@ transformWindowDefinitions(ParseState *pstate,
 		 * And prepare the new WindowClause.
 		 */
 		wc = makeNode(WindowClause);
+		wc->rpSkipTo = ST_NONE; /* ST_NONE 은 이 윈도우가 RPR 이 아님을
+								 * 표시한다; RPR 을 쓰면 transformRPR() 가
+								 * 덮어쓴다 */
 		wc->name = windef->name;
 		wc->refname = windef->refname;
 
@@ -2957,6 +2961,10 @@ transformWindowDefinitions(ParseState *pstate,
 											 rangeopfamily, rangeopcintype,
 											 &wc->endInRangeFunc,
 											 windef->endOffset);
+
+		/* 행 패턴 인식(Row Pattern Recognition) 관련 절을 처리한다 */
+		transformRPR(pstate, wc, windef);
+
 		wc->winref = winref;
 
 		result = lappend(result, wc);

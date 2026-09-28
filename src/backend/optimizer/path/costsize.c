@@ -3260,7 +3260,19 @@ cost_windowagg(Path *path, PlannerInfo *root,
 	 * many rows the window function will fetch, it's hard to do better.  In
 	 * any case, it's a good estimate for all the built-in window functions,
 	 * so we'll just do this for now.
+	 *
+	 * 게다가 행 패턴 인식을 쓰는 경우, DEFINE 변수마다 DEFINE 표현식을 튜플당
+	 * 한 번씩 청구한다.
 	 */
+	if (winclause->rpPattern)
+	{
+		QualCost	defcosts;
+
+		cost_qual_eval_node(&defcosts, (Node *) winclause->defineClause, root);
+		startup_cost += defcosts.startup;
+		total_cost += defcosts.per_tuple * input_tuples;
+	}
+
 	foreach(lc, windowFuncs)
 	{
 		WindowFunc *wfunc = lfirst_node(WindowFunc, lc);

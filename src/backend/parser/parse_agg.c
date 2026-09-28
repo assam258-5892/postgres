@@ -585,6 +585,10 @@ check_agglevels_and_constraints(ParseState *pstate, Node *expr)
 			errkind = true;
 			break;
 
+		case EXPR_KIND_RPR_DEFINE:
+			errkind = true;
+			break;
+
 			/*
 			 * There is intentionally no default: case here, so that the
 			 * compiler will warn if we add a new ParseExprKind without
@@ -1024,6 +1028,9 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 		case EXPR_KIND_CYCLE_MARK:
 			errkind = true;
 			break;
+		case EXPR_KIND_RPR_DEFINE:
+			errkind = true;
+			break;
 
 			/*
 			 * There is intentionally no default: case here, so that the
@@ -1104,7 +1111,8 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 				equal(refwin->orderClause, windef->orderClause) &&
 				refwin->frameOptions == windef->frameOptions &&
 				equal(refwin->startOffset, windef->startOffset) &&
-				equal(refwin->endOffset, windef->endOffset))
+				equal(refwin->endOffset, windef->endOffset) &&
+				equal(refwin->rpCommonSyntax, windef->rpCommonSyntax))
 			{
 				/* found a duplicate window specification */
 				wfunc->winref = winref;
@@ -1322,6 +1330,37 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 								   gset_common,
 								   have_non_var_grouping,
 								   &func_grouped_rels);
+
+	/*
+	 * 행 패턴 DEFINE 절은 WindowClause 중에서 자기 자신의 표현식 트리를 담는
+	 * 유일한 부분이므로, 이 치환도 필요하다: partitionClause 와
+	 * orderClause 는 타깃 리스트로 sortgroupref 만 옮겨 나르고, 프레임
+	 * offset 은 Var 가 없는지만 검사한다. 이 치환이 없으면, 같은 컬럼의 타깃
+	 * 리스트 사본은 RTE_GROUP RTE 의 Var 가 되는데 DEFINE 의 Var 는 평범한
+	 * 릴레이션 Var 로 남아, 그 컬럼 중 하나를 NULL 로 만드는 그룹화 집합이 두
+	 * 사본을 varnullingrels 에서 서로 어긋나게 만들고, 이를 setrefs.c 가 내부
+	 * 오류로 보고하게 된다.
+	 *
+	 * finalize_grouping_exprs() 는 여기 같이 오지 않는다.  그 함수는 GROUPING
+	 * 표현식을 마무리하는데, DEFINE 절은 그런 표현식을 담을 수 없다 --
+	 * transformExpr() 가 EXPR_KIND_RPR_DEFINE 아래에서 GroupingFunc 를 여기
+	 * 도달하기 전에 거부하기 때문이다.
+	 */
+	foreach_node(WindowClause, wc, qry->windowClause)
+	{
+		if (wc->defineClause == NIL)
+			continue;
+
+		clause = (Node *) wc->defineClause;
+		if (hasJoinRTEs)
+			clause = flatten_join_alias_for_parser(qry, clause, 0);
+		wc->defineClause = (List *)
+			substitute_grouped_columns(clause, pstate, qry,
+									   groupClauses, groupClauseCommonVars,
+									   gset_common,
+									   have_non_var_grouping,
+									   &func_grouped_rels);
+	}
 
 	/*
 	 * Per spec, aggregates can't appear in a recursive term.

@@ -580,6 +580,74 @@ typedef struct SortBy
 } SortBy;
 
 /*
+ * 행 패턴 공통 구문에서 쓰이는 AFTER MATCH 행 패턴 건너뛰기 대상 타입
+ */
+typedef enum RPSkipTo
+{
+	ST_NONE,					/* 행 패턴 윈도우가 아니다;
+							 * AFTER MATCH를 생략하면 ST_PAST_LAST_ROW 값이
+							 * 된다 */
+	ST_NEXT_ROW,				/* SKIP TO NEXT ROW */
+	ST_PAST_LAST_ROW,			/* SKIP TO PAST LAST ROW */
+} RPSkipTo;
+
+/*
+ * RPRPatternNodeType - 행 패턴 인식(RPR) 패턴 노드 타입
+ */
+typedef enum RPRPatternNodeType
+{
+	RPR_PATTERN_VAR,			/* 변수 참조 */
+	RPR_PATTERN_SEQ,			/* 시퀀스(연결) */
+	RPR_PATTERN_ALT,			/* 교대(|) */
+	RPR_PATTERN_GROUP,			/* 그룹(괄호) */
+} RPRPatternNodeType;
+
+/*
+ * RPR_QUANTITY_INF 값은 무제한 수량자(*, +, 또는 {n,})를 위해
+ * RPRPatternNode.max에 저장되는 센티널 값이다; 이후 단계들은 이 max를
+ * "no upper bound"로 취급한다. 이 값은 파서, 플래너 (optimizer/rpr.h),
+ * 실행기가 모두 하나의 정의를 공유하도록 이 자리, 즉 노드 바로 옆에 둔다.
+ */
+#define RPR_QUANTITY_INF	PG_INT32_MAX	/* 무제한 수량자 */
+
+/*
+ * RPRPatternNode - 행 패턴 인식(RPR) 패턴 파스 트리 노드
+ */
+typedef struct RPRPatternNode
+{
+	NodeTag		type;			/* T_RPRPatternNode */
+	RPRPatternNodeType nodeType;	/* VAR, SEQ, ALT, GROUP */
+	int32		min;			/* 최소 반복 횟수(*, ?의 경우 0) */
+	int32		max;			/* 최대 반복 횟수(*, +의 경우
+							 * RPR_QUANTITY_INF) */
+	bool		reluctant;		/* 소극적(비탐욕적)이면 true */
+	ParseLoc	location;		/* 토큰 위치, 알 수 없으면 -1 */
+	char	   *varName;		/* VAR: 변수 이름 */
+	List	   *children;		/* SEQ, ALT, GROUP: 자식 노드 */
+
+	/*
+	 * splitRPRTrailingAlt 함수가 트리를 확정하기 전에 지우는 일시적 파싱
+	 * 플래그다: "*|"처럼 들러붙은 수량자는 곧바로 교대 연산자 '|'가 뒤따른다.
+	 * 확정된 트리에서는 항상 false이므로 pg_stat_statements 의 queryid에는
+	 * 영향을 주지 않는다.
+	 */
+	bool		trailing_alt;
+} RPRPatternNode;
+
+/*
+ * RPCommonSyntax - 행 패턴 공통 구문의 원시 표현
+ */
+typedef struct RPCommonSyntax
+{
+	NodeTag		type;
+	RPSkipTo	rpSkipTo;		/* 행 패턴 AFTER MATCH SKIP 타입 */
+	RPRPatternNode *rpPattern;	/* PATTERN 파스 트리 */
+	List	   *rpDefs;			/* 행 패턴 정의 절(ResTarget
+							 * 리스트) */
+	ParseLoc	location;		/* PATTERN 키워드 위치, 알 수 없으면 -1 */
+} RPCommonSyntax;
+
+/*
  * WindowDef - raw representation of WINDOW and OVER clauses
  *
  * For entries in a WINDOW list, "name" is the window name being defined.
@@ -597,7 +665,10 @@ typedef struct WindowDef
 	int			frameOptions;	/* frame_clause options, see below */
 	Node	   *startOffset;	/* expression for starting bound, if any */
 	Node	   *endOffset;		/* expression for ending bound, if any */
+	RPCommonSyntax *rpCommonSyntax; /* 행 패턴 공통 구문 */
 	ParseLoc	location;		/* parse location, or -1 if none/unknown */
+	ParseLoc	frameLocation;	/* ROWS/RANGE/GROUPS 위치, 없으면 -1 */
+	ParseLoc	excludeLocation;	/* EXCLUDE 위치, 없으면 -1 */
 } WindowDef;
 
 /*
@@ -1562,6 +1633,17 @@ typedef struct GroupingSet
  * When refname isn't null, the partitionClause is always copied from there;
  * the orderClause might or might not be copied (see copiedOrder); the framing
  * options are never copied, per spec.
+ * "defineClause"는 행 패턴 인식(RPR) DEFINE 절이다(TargetEntry 리스트).
+ * TargetEntry.resname은 행 패턴 정의 변수 이름을 나타낸다.  "rpPattern"은
+ * PATTERN 절을 파스 트리로 나타낸다 (RPRPatternNode).  파싱 분석은 rpSkipTo,
+ * defineClause, rpPattern 을 하나의 문법 생성 규칙으로부터 함께 설정하거나,
+ * 아니면 셋 다 설정하지 않는다.  플래너는 이들을 그렇게 유지하지 않는다:
+ * grouping_planner()는 실행되지 않을 윈도우 절, 즉 activeWindows 에 없는 절에
+ * 대해서는 defineClause 만 비운다.  "is this a row pattern window"를 판단할
+ * 때는 defineClause 가 아니라 항상 rpPattern 을 검사하라.  rpPattern 이
+ * null이 아닌데 defineClause 가 비어 있으면 그 절은 실행되지 않는다는 뜻이고,
+ * defineClause 가 비어 있지 않다고 해서 실행된다는 뜻은 아니다.
+ *
  */
 typedef struct WindowClause
 {
@@ -1589,6 +1671,12 @@ typedef struct WindowClause
 	Index		winref;			/* ID referenced by window functions */
 	/* did we copy orderClause from refname? */
 	bool		copiedOrder pg_node_attr(query_jumble_ignore);
+	/* AFTER MATCH SKIP 타입; 행 패턴 윈도우가 아니면 ST_NONE */
+	RPSkipTo	rpSkipTo;
+	/* 행 패턴 DEFINE 절(TargetEntry 리스트) */
+	List	   *defineClause pg_node_attr(custom_query_jumble);
+	/* 행 패턴 PATTERN 파스 트리 */
+	RPRPatternNode *rpPattern;
 } WindowClause;
 
 /*

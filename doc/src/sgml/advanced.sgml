@@ -553,6 +553,127 @@ WHERE pos &lt; 3;
    </para>
 
    <para>
+    행 패턴 공통 구문은 질의에서 행 패턴 인식을 수행하는 데 쓸 수 있다.  행
+    패턴 공통 구문은 다음 순서로 써야 하는 네 개의 하위 절을 포함한다:
+    <literal>AFTER MATCH SKIP</literal>, <literal>INITIAL</literal>
+    또는 <literal>SEEK</literal>, <literal>PATTERN</literal>,
+    <literal>DEFINE</literal>.  앞의 두 절은 선택 사항이며, 아래의 완전한
+    예제는 둘 다 사용한다.  <literal>DEFINE</literal>은 행 패턴 변수를 식과
+    함께 정의한다. 이 식은 논리식이어야 하는데, 이는 <literal>TRUE</literal>,
+    <literal>FALSE</literal> 또는 <literal>NULL</literal>을 반환해야 한다는
+    뜻이다. 이 식은 열 참조와 비휘발성 함수로 구성될 수 있다.  윈도우 함수,
+    집계 함수, 그룹화 연산, 집합 반환 함수, 전체 행 참조, 서브쿼리는 허용되지
+    않는다.  <literal>DEFINE</literal>의 예는 다음과 같다.
+
+<programlisting>
+DEFINE
+ LOWPRICE AS price &lt;= 100,
+ UP AS price &gt; PREV(price),
+ DOWN AS price &lt; PREV(price)
+</programlisting>
+
+    행 패턴 인식의 맥락에서 호출될 경우 <function>PREV</function>는 이전 행의
+    <literal>price</literal> 열을 반환한다는 점에 유의하라.  따라서 두 번째
+    줄에서 행 패턴 변수 "UP"은 현재 행의 price 열이 이전 행의 price 열보다 클
+    때 <literal>TRUE</literal>이다.  마찬가지로 "DOWN"은
+    <literal>TRUE</literal>인데, 이는 현재 행의 <literal>price</literal> 열이
+    이전 행의 <literal>price</literal> 열보다 작을 때이다.
+   </para>
+   <para>
+    <literal>DEFINE</literal>이 있으면 <literal>PATTERN</literal>을 사용할 수
+    있다.  <literal>PATTERN</literal>은 <literal>DEFINE</literal> 절에서 정의된
+    조건을 만족하는 행의 시퀀스를 정의한다.  예를 들어 다음
+    <literal>PATTERN</literal>은 "LOWPRICE"를 만족하는 행으로 시작해서 하나
+    이상의 "UP"을 만족하는 행이 이어지고, 마지막으로 하나 이상의 "DOWN"을
+    만족하는 행으로 끝나는 행의 시퀀스를 정의한다.  패턴 변수 뒤에는 수량자를
+    붙일 수 있다: "+"는 1회 이상 매치, "*"는 0회 이상 매치, "?"는 0회 또는 1회
+    매치를 뜻하고, "{n}" (n &gt; 0)은 정확히 n회 매치, "{n,}" (n &gt;= 0)은
+    최소 n회 매치, "{,m}" (m &gt; 0)은 최대 m회 매치, "{n,m}"
+    (0 &lt;= n &lt;= m, 0 &lt; m)은 n회 이상 m회 이하 매치를 뜻한다.  패턴은
+    괄호를 사용해 그룹화할 수 있고, 교대(OR를 나타내는 세로줄 "|")를 사용해
+    결합할 수 있다.  예를 들어 "(UP DOWN)+"는 UP 다음에 DOWN이 오는 것이 한 번
+    이상 반복되는 것에 매치한다.  PATTERN을 만족하는 행의 시퀀스가 발견되면,
+    시작 행에서는 대상 목록의 모든 열이나 함수가 표시된다.  집계는 프레임
+    전체가 아니라 매치된 행만을 살펴본다는 점에 유의하라.  두 번째 이후의
+    행에서는 <function>first_value()</function>처럼 프레임을 읽는 윈도우 함수는
+    NULL 로 표시되는 반면, <function>row_number()</function>처럼 프레임에
+    의존하지 않는 함수는 영향을 받지 않는다.  시작 행이 아닌 행에서 집계는
+    초기값을 반환한다: 예를 들어 <function>count()</function>는 0 을 반환하고
+    <function>sum()</function>은 NULL 을 반환한다.  PATTERN에 매치하지 않는
+    행도 마찬가지로 동작한다.  PATTERN이 빈 매치를 찾은 행도 마찬가지이다. 이는
+    패턴 전체가 0개 행에 매치할 수 있을 때(예를 들어 <literal>A*</literal>나
+    <literal>A?</literal>) 일어날 수 있다: 그런 매치는 행을 포함하지 않으므로
+    프레임이 비어 있다.  <literal>SELECT</literal>가
+    <literal>DEFINE</literal>과 <literal>PATTERN</literal> 절을 사용하는 예는
+    다음과 같다.
+
+<programlisting>
+SELECT company, tdate, price,
+ first_value(price) OVER w,
+ max(price) OVER w,
+ count(price) OVER w
+FROM stock
+ WINDOW w AS (
+ PARTITION BY company
+ ORDER BY tdate
+ ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+ AFTER MATCH SKIP PAST LAST ROW
+ INITIAL
+ PATTERN (LOWPRICE UP+ DOWN+)
+ DEFINE
+  LOWPRICE AS price &lt;= 100,
+  UP AS price &gt; PREV(price),
+  DOWN AS price &lt; PREV(price)
+);
+</programlisting>
+<screen>
+ company  |   tdate    | price | first_value | max | count
+----------+------------+-------+-------------+-----+-------
+ company1 | 2023-07-01 |   100 |         100 | 200 |     4
+ company1 | 2023-07-02 |   200 |             |     |     0
+ company1 | 2023-07-03 |   150 |             |     |     0
+ company1 | 2023-07-04 |   140 |             |     |     0
+ company1 | 2023-07-05 |   150 |             |     |     0
+ company1 | 2023-07-06 |    90 |          90 | 130 |     4
+ company1 | 2023-07-07 |   110 |             |     |     0
+ company1 | 2023-07-08 |   130 |             |     |     0
+ company1 | 2023-07-09 |   120 |             |     |     0
+ company1 | 2023-07-10 |   130 |             |     |     0
+(10 rows)
+</screen>
+   </para>
+
+   <para>
+    행 패턴 인식은 내부적으로 비결정적 유한 오토마톤(NFA)을 사용해 패턴을
+    매치한다.  <literal>A+</literal>나 <literal>(A B)+</literal>처럼 제한 없는
+    수량자를 가진 패턴의 경우, NFA는 여러 활성 매칭 컨텍스트를 동시에 추적해야
+    할 수 있으며, 이는 행 수가 늘어남에 따라 O(n<superscript>2</superscript>)
+    복잡도로 이어질 수 있다.
+   </para>
+
+   <para>
+    실행 전에 <productname>PostgreSQL</productname>은 패턴의 구조를 단순화하기
+    위해 자동으로 패턴을 최적화한다.  여기에는 중첩된 시퀀스와 교대를
+    평탄화하는 것, 연속된 동일 변수를 병합하는 것(예: <literal>A{2,3}
+    A{1,2}</literal>가 <literal>A{3,5}</literal>가 됨), 중복된 대안을 제거하는
+    것(예: <literal>(A | B | A)</literal>가 <literal>(A | B)</literal>가 됨),
+    중첩된 수량자를 단순화하는 것(예: <literal>(A*)*</literal>가
+    <literal>A*</literal>가 됨)이 포함된다.  이러한 최적화는 패턴 복잡도를
+    줄이고 중첩 깊이도 낮춰서, 254 단계 깊이 한계에 도달하는 일이 드물어진다.
+    이 최적화는 투명하게 적용되며 <command>EXPLAIN</command> 출력에서 관찰할
+    수 있다.
+   </para>
+
+   <para>
+    위에서 설명한 O(n<superscript>2</superscript>) 복잡도를 완화하기 위해
+    <productname>PostgreSQL</productname>은 컨텍스트 흡수 최적화도 사용한다.
+    패턴이 탐욕적인 제한 없는 요소로 시작할 때, 더 새로운 매칭 컨텍스트는 더
+    오래된 컨텍스트보다 더 긴 매치를 만들어낼 수 없다.  이런 중복 컨텍스트를
+    검출하고 제거함으로써, 많은 흔한 패턴에서 매칭 복잡도는
+    O(n<superscript>2</superscript>)에서 O(n)으로 줄어든다.
+   </para>
+
+   <para>
     When a query involves multiple window functions, it is possible to write
     out each one with a separate <literal>OVER</literal> clause, but this is
     duplicative and error-prone if the same windowing behavior is wanted

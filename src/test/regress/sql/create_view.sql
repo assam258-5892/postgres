@@ -409,6 +409,187 @@ select pg_get_viewdef('view_of_joins_2b', true);
 select pg_get_viewdef('view_of_joins_2c', true);
 select pg_get_viewdef('view_of_joins_2d', true);
 
+-- TABLEFUNC RTE는 컬럼을 만들어내는 절에서 그 컬럼에 이름을 붙이지만, 다른
+-- RTE와 마찬가지로 컬럼 별칭 목록을 받아들이며, 그 컬럼 중 하나의 이름을
+-- 바꾸면 그 결과가 출력되는 곳도 바로 이 목록이다.  아래 ON절은 질의가 보는
+-- 이름으로 컬럼을 가리키므로, 이 목록이 없으면 둘의 이름이 일치하지 않는다.
+-- 익명 FULL JOIN은 USING 이름을 질의 전체에서 유일하게 만들도록 강제하는데, 이
+-- 때문에 JSON_TABLE 컬럼이 밀려난다.
+create table tblnr (m int);
+create table tblnu (x int, m int);
+create table tblnl (x int);
+create table tblnm (x int);
+create table tblnw (a int, c int, d int);
+create table tblnv (c int);
+
+create view view_of_unrenamable as
+select j.m
+from (tblnl full join tblnm using (x)),
+     (json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+      join tblnr on jt.x > 0) j;
+
+select pg_get_viewdef('view_of_unrenamable', true);
+
+-- 그리고 그 텍스트가 재파싱되어야 하는 대상이다
+select 'create view view_of_unrenamable_2 as '
+       || pg_get_viewdef('view_of_unrenamable', true) \gexec
+select pg_get_viewdef('view_of_unrenamable', true)
+     = pg_get_viewdef('view_of_unrenamable_2', true) as round_trips;
+
+-- 병합된 컬럼의 이름은 rename이 향하는 또 다른 곳이며, 양쪽에 동시에 적용된다:
+-- 어떤 이름이 선택되든 각 입력은 그 이름에 맞춰야 하며, TABLEFUNC는 테이블이
+-- 자신의 별칭 목록으로 그러듯 자신의 별칭 목록으로 그렇게 한다.
+create view view_of_unrenamable_using as
+select j.m
+from (tblnl full join tblnm using (x)),
+     (json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+      join tblnu using (x)) j;
+
+select pg_get_viewdef('view_of_unrenamable_using', true);
+
+select 'create view view_of_unrenamable_using_2 as '
+       || pg_get_viewdef('view_of_unrenamable_using', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_using', true)
+     = pg_get_viewdef('view_of_unrenamable_using_2', true) as round_trips;
+
+-- INNER JOIN이나 LEFT JOIN에서 먼 쪽도 가까운 쪽 못지않게 하나의 입력이다:
+-- 병합된 컬럼의 표현식은 가까운 입력만 이름으로 가리키지만, rename은 양쪽
+-- 모두에 미친다.
+create view view_of_unrenamable_right as
+select j.m
+from (tblnl full join tblnm using (x)),
+     ((tblnu join json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+       using (x)) full join tblnm t2 using (x)) j;
+
+select pg_get_viewdef('view_of_unrenamable_right', true);
+select 'create view view_of_unrenamable_right_2 as '
+       || pg_get_viewdef('view_of_unrenamable_right', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_right', true)
+     = pg_get_viewdef('view_of_unrenamable_right_2', true) as round_trips;
+
+create view view_of_unrenamable_left as
+select j.m
+from (tblnl full join tblnm using (x)),
+     ((tblnu left join json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+       using (x)) full join tblnm t2 using (x)) j;
+
+select pg_get_viewdef('view_of_unrenamable_left', true);
+select 'create view view_of_unrenamable_left_2 as '
+       || pg_get_viewdef('view_of_unrenamable_left', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_left', true)
+     = pg_get_viewdef('view_of_unrenamable_left_2', true) as round_trips;
+
+-- 별칭이 붙은 join은 자신의 입력을 감추므로, 그 위에서 쓰인 USING 이름은 join
+-- 자신의 컬럼으로 취급된다: join은 자신의 별칭 목록에서 그 이름을 바꾸고, 그
+-- 아래의 TABLEFUNC도 질의 전체의 USING 이름을 따라야 하므로 자신의 목록에서
+-- 자기 컬럼의 이름을 바꾼다.
+create view view_of_unrenamable_hidden as
+select j.m
+from (tblnl full join tblnm using (x)),
+     ((json_table(jsonb '[1,2]', '$[*]' columns (x int path '$')) as jt
+       join tblnr on true) j full join tblnm t2 using (x));
+
+select pg_get_viewdef('view_of_unrenamable_hidden', true);
+select 'create view view_of_unrenamable_hidden_2 as '
+       || pg_get_viewdef('view_of_unrenamable_hidden', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_hidden', true)
+     = pg_get_viewdef('view_of_unrenamable_hidden_2', true) as round_trips;
+
+-- 상위 join이 병합된 컬럼에 밀어넣는 이름은, 그 아래의 USING절이 무엇을 쓰든
+-- 그 이름이 놓이는 입력 안에서 유일해야 한다.
+create view view_of_unrenamable_pushed as
+select j2.d
+from (tblnv join (tblnw join json_table(jsonb '[1]', '$[*]' columns (a int path '$')) x
+                  using (a)) using (c)) as j2(a);
+
+select pg_get_viewdef('view_of_unrenamable_pushed', true);
+select 'create view view_of_unrenamable_pushed_2 as '
+       || pg_get_viewdef('view_of_unrenamable_pushed', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_pushed', true)
+     = pg_get_viewdef('view_of_unrenamable_pushed_2', true) as round_trips;
+
+-- TABLEFUNC를 통해 같은 이름을 병합하는 두 개의 익명 FULL JOIN도 여전히 서로
+-- 다른 이름을 얻는다.
+create view view_of_unrenamable_twice as
+select count(*) as n
+from (tblnl full join json_table(jsonb '[1]', '$[*]' columns (x int path '$')) jt1
+      using (x)),
+     (tblnm full join json_table(jsonb '[1]', '$[*]' columns (x int path '$')) jt2
+      using (x));
+
+select pg_get_viewdef('view_of_unrenamable_twice', true);
+select 'create view view_of_unrenamable_twice_2 as '
+       || pg_get_viewdef('view_of_unrenamable_twice', true) \gexec
+select pg_get_viewdef('view_of_unrenamable_twice', true)
+     = pg_get_viewdef('view_of_unrenamable_twice_2', true) as round_trips;
+
+-- 그리고 사용자가 TABLEFUNC에 작성한 컬럼 별칭 목록도 질의의 일부다
+create view view_of_tablefunc_alias as
+select t.a from json_table(jsonb '[1]', '$[*]' columns (c int path '$')) as t(a);
+
+select pg_get_viewdef('view_of_tablefunc_alias', true);
+select 'create view view_of_tablefunc_alias_2 as '
+       || pg_get_viewdef('view_of_tablefunc_alias', true) \gexec
+select pg_get_viewdef('view_of_tablefunc_alias', true)
+     = pg_get_viewdef('view_of_tablefunc_alias_2', true) as round_trips;
+
+drop view view_of_tablefunc_alias_2, view_of_tablefunc_alias;
+drop view view_of_unrenamable_twice_2, view_of_unrenamable_twice;
+drop view view_of_unrenamable_pushed_2, view_of_unrenamable_pushed;
+drop view view_of_unrenamable_hidden_2, view_of_unrenamable_hidden;
+drop view view_of_unrenamable_left_2, view_of_unrenamable_left;
+drop view view_of_unrenamable_right_2, view_of_unrenamable_right;
+drop view view_of_unrenamable_using_2, view_of_unrenamable_using;
+drop view view_of_unrenamable_2, view_of_unrenamable;
+drop table tblnr, tblnu, tblnl, tblnm, tblnw, tblnv;
+
+-- 뷰가 만들어진 뒤 함수의 결과 타입이 늘어나 생긴 컬럼도 지금 RTE가 가진
+-- 컬럼이며, 별칭 목록은 위치로 대응되므로 전체가 출력된다: 위에 있는 별칭 붙은
+-- join은 자신의 목록을 입력들의 목록 위에 순서대로 겹쳐 놓으므로, 늘어난
+-- 컬럼을 빠뜨리면 그 뒤의 입력이 밀려나고, 그 입력을 가리키는 참조는 소리 없이
+-- 다른 컬럼을 가리키게 된다.
+create table tblfc (a int, z int);
+insert into tblfc values (1, 5);
+create function tblfc_f() returns setof tblfc language sql
+  as $$ select * from tblfc $$;
+create table tblfr (z int, val int);
+insert into tblfr values (1, 7);
+
+create view view_of_grown_input as
+select j.a, j.val from (tblfc_f() f join tblfr on true) j;
+
+select * from view_of_grown_input;
+
+alter table tblfc add column val int, add column spare int;
+
+select pg_get_viewdef('view_of_grown_input', true);
+select 'create view view_of_grown_input_2 as '
+       || pg_get_viewdef('view_of_grown_input', true) \gexec
+select pg_get_viewdef('view_of_grown_input', true)
+     = pg_get_viewdef('view_of_grown_input_2', true) as round_trips;
+select * from view_of_grown_input;
+select * from view_of_grown_input_2;
+
+drop view view_of_grown_input_2;
+
+-- 늘어났다가 다시 drop된 컬럼도 위치 기반 별칭 목록에서 drop된 컬럼으로서
+-- 여전히 자기 자리를 차지한다; 그 뒤에 늘어난 컬럼이 그 자리로 밀려 들어가면
+-- 안 된다.
+alter table tblfc drop column val;
+alter table tblfc add column val int;
+
+select pg_get_viewdef('view_of_grown_input', true);
+select 'create view view_of_grown_input_2 as '
+       || pg_get_viewdef('view_of_grown_input', true) \gexec
+select pg_get_viewdef('view_of_grown_input', true)
+     = pg_get_viewdef('view_of_grown_input_2', true) as round_trips;
+select * from view_of_grown_input;
+select * from view_of_grown_input_2;
+
+drop view view_of_grown_input_2, view_of_grown_input;
+drop function tblfc_f();
+drop table tblfc, tblfr;
+
 -- Test view decompilation in the face of column addition/deletion/renaming
 
 create table tt2 (a int, b int, c int);

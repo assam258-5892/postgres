@@ -128,6 +128,9 @@ llvm_compile_expr(ExprState *state)
 	LLVMValueRef v_aggvalues;
 	LLVMValueRef v_aggnulls;
 
+	/* RPR 내비게이션: true이면 EEOP_OUTER_VAR 가 econtext에서 다시 불러온다 */
+	bool		has_rpr_nav;
+
 	instr_time	starttime;
 	instr_time	deform_starttime;
 	instr_time	endtime;
@@ -297,6 +300,37 @@ llvm_compile_expr(ExprState *state)
 								   FIELDNO_EXPRCONTEXT_AGGNULLS,
 								   "v.econtext.aggnulls");
 
+	/*
+	 * RPR 내비게이션 opcode(PREV/NEXT/FIRST/LAST)는 표현식 도중에
+	 * ecxt_outertuple 을 다른 행으로 바꾼다.  JIT 코드는 entry 블록에서
+	 * v_outervalues 와 v_outernulls 를 한 번만 불러와 모든 EEOP_OUTER_VAR
+	 * 단계에서 재사용한다.  슬롯을 교체하면 새 슬롯이 자신의
+	 * tts_values/tts_isnull 배열을 가지므로, 이 캐시된 포인터는 낡은
+	 * 값이 된다.
+	 *
+	 * RPR 내비게이션 opcode가 있으면 EEOP_OUTER_VAR 는 캐시된 entry 블록 값을
+	 * 쓰는 대신 접근할 때마다 econtext->ecxt_outertuple 에서 슬롯 포인터를
+	 * 다시 불러온다.  이렇게 하면 SSA/PHI 의 복잡성을 피하면서도 표현식의
+	 * 나머지 부분은 그대로 JIT 컴파일할 수 있다.  RPR 내비게이션이 없는
+	 * 표현식은 이전처럼 캐시된 값을 사용한다.
+	 */
+	has_rpr_nav = false;
+	if (parent && IsA(parent, WindowAggState) &&
+		((WindowAgg *) parent->plan)->rpPattern != NULL)
+	{
+		for (int opno = 0; opno < state->steps_len; opno++)
+		{
+			ExprEvalOp	opcode = ExecEvalStepOp(state, &state->steps[opno]);
+
+			if (opcode == EEOP_RPR_NAV_SET ||
+				opcode == EEOP_RPR_NAV_RESTORE)
+			{
+				has_rpr_nav = true;
+				break;
+			}
+		}
+	}
+
 	/* allocate blocks for each op upfront, so we can do jumps easily */
 	opblocks = palloc_array(LLVMBasicBlockRef, state->steps_len);
 	for (int opno = 0; opno < state->steps_len; opno++)
@@ -459,8 +493,37 @@ llvm_compile_expr(ExprState *state)
 					}
 					else if (opcode == EEOP_OUTER_VAR)
 					{
-						v_values = v_outervalues;
-						v_nulls = v_outernulls;
+						if (has_rpr_nav)
+						{
+					/*
+					 * RPR 내비게이션은 표현식 도중에 ecxt_outertuple 을
+					 * 교체한다.  매번 접근할 때마다 econtext에서 슬롯
+					 * 포인터를 다시 불러와, 현재(교체됐을 수도 있는) 슬롯을
+					 * 읽도록 한다.
+					 */
+							LLVMValueRef v_tmpslot;
+
+							v_tmpslot = l_load_struct_gep(b,
+														  StructExprContext,
+														  v_econtext,
+														  FIELDNO_EXPRCONTEXT_OUTERTUPLE,
+														  "v_outerslot_reload");
+							v_values = l_load_struct_gep(b,
+														 StructTupleTableSlot,
+														 v_tmpslot,
+														 FIELDNO_TUPLETABLESLOT_VALUES,
+														 "v_outervalues_reload");
+							v_nulls = l_load_struct_gep(b,
+														StructTupleTableSlot,
+														v_tmpslot,
+														FIELDNO_TUPLETABLESLOT_ISNULL,
+														"v_outernulls_reload");
+						}
+						else
+						{
+							v_values = v_outervalues;
+							v_nulls = v_outernulls;
+						}
 					}
 					else if (opcode == EEOP_SCAN_VAR)
 					{
@@ -2429,6 +2492,18 @@ llvm_compile_expr(ExprState *state)
 
 			case EEOP_SUBPLAN:
 				build_EvalXFunc(b, mod, "ExecEvalSubPlan",
+								v_state, op, v_econtext);
+				LLVMBuildBr(b, opblocks[opno + 1]);
+				break;
+
+			case EEOP_RPR_NAV_SET:
+				build_EvalXFunc(b, mod, "ExecEvalRPRNavSet",
+								v_state, op, v_econtext);
+				LLVMBuildBr(b, opblocks[opno + 1]);
+				break;
+
+			case EEOP_RPR_NAV_RESTORE:
+				build_EvalXFunc(b, mod, "ExecEvalRPRNavRestore",
 								v_state, op, v_econtext);
 				LLVMBuildBr(b, opblocks[opno + 1]);
 				break;
