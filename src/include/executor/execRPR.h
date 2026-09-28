@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * execRPR.h
- *	  prototypes for execRPR.c (NFA-based Row Pattern Recognition engine)
+ *	  execRPR.c의 프로토타입 (NFA 기반 행 패턴 인식(RPR) 엔진)
  *
  *
  * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
@@ -16,18 +16,18 @@
 
 #include "nodes/execnodes.h"
 
-/* NFA context management */
+/* NFA 컨텍스트 관리 */
 extern RPRNFAContext *ExecRPRStartContext(WindowAggState *winstate,
 										  int64 startPos);
 extern void ExecRPRFreeContext(WindowAggState *winstate, RPRNFAContext *ctx);
 
-/* NFA processing */
+/* NFA 처리 */
 extern void ExecRPRProcessRow(WindowAggState *winstate, int64 currentPos);
 extern void ExecRPRCleanupDeadContexts(WindowAggState *winstate,
 									   RPRNFAContext *excludeCtx);
 extern void ExecRPRFinalizeAllContexts(WindowAggState *winstate, int64 lastPos);
 
-/* NFA statistics */
+/* NFA 통계 */
 extern void ExecRPRRecordContextSuccess(WindowAggState *winstate,
 										int64 matchLen);
 extern void ExecRPRRecordContextFailure(WindowAggState *winstate,

@@ -1,32 +1,32 @@
 /*-------------------------------------------------------------------------
  *
  * rpr.c
- *	  Row Pattern Recognition pattern compilation for planner
+ *	  플래너를 위한 행 패턴 인식 패턴 컴파일
  *
- * This file contains functions for optimizing the RPR pattern parse tree and
- * compiling it to a flat element array for NFA execution by WindowAgg.
+ * 이 파일은 RPR 패턴 파스 트리를 최적화하고 WindowAgg 가 NFA로 실행할 수
+ * 있도록 평탄화된 요소 배열로 컴파일하는 함수를 담고 있다.
  *
- * Key components:
- *   1. Pattern Optimization: Simplifies patterns before compilation
- *      (e.g., flatten nested SEQ/ALT, merge consecutive vars)
- *   2. Pattern Compilation: Converts parse tree to flat element array for NFA
- *   3. Absorption Analysis: Computes flags for O(n^2)->O(n) optimization
+ * 주요 구성 요소:
+ *   1.  패턴 최적화: 컴파일 전에 패턴을 단순화한다 (예: 중첩된 SEQ/ALT를
+ *      평탄화하고, 연속된 변수를 병합)
+ *   2. 패턴 컴파일: 파스 트리를 NFA용 평탄화된 요소 배열로 변환한다
+ *   3. 흡수 분석: O(n^2)->O(n) 최적화를 위한 플래그를 계산한다
  *
- * Context Absorption Optimization:
- *   When a pattern starts with a greedy unbounded element (e.g., A+ or (A B)+),
- *   newer contexts cannot produce longer matches than older contexts.
- *   By absorbing (eliminating) redundant newer contexts, we reduce
- *   complexity from O(n^2) to O(n) for patterns like A+ B.
+ * 컨텍스트 흡수 최적화:
+ *   패턴이 탐욕적 무제한 요소로 시작하면(예: A+ 또는 (A B)+), 더 최근
+ *   컨텍스트는 더 오래된 컨텍스트보다 긴 매치를 만들어 낼 수 없다.  불필요한
+ *   최근 컨텍스트를 흡수(제거)하면 A+ B와 같은 패턴에서 복잡도를 O(n^2)에서
+ *   O(n)으로 줄일 수 있다.
  *
- *   The absorption analysis uses two element flags:
- *   - RPR_ELEM_ABSORBABLE: marks WHERE to compare (comparison point)
- *   - RPR_ELEM_ABSORBABLE_BRANCH: marks the absorbable region
+ *   흡수 분석은 두 가지 요소 플래그를 사용한다:
+ *   - RPR_ELEM_ABSORBABLE: 어디를 비교할지 표시한다(판단 지점)
+ *   - RPR_ELEM_ABSORBABLE_BRANCH: 흡수 가능 영역을 표시한다
  *
- *   EXPLAIN shows both on the Pattern: line, # for the comparison point and
- *   ~ for the region.
+ *   EXPLAIN은 Pattern: 줄에 둘 다 표시하며,
+ *   #는 판단 지점을, ~는 영역을 나타낸다.
  *
- *   See computeAbsorbability() and the detailed comments before
- *   isUnboundedStart() for the full design explanation.
+ *   전체 설계 설명은 computeAbsorbability()와 isUnboundedStart() 앞의 상세한
+ *   주석을 참고하라.
  *
  * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -44,7 +44,7 @@
 #include "miscadmin.h"
 #include "optimizer/rpr.h"
 
-/* Forward declarations */
+/* 전방 선언 */
 static int64 rprNodeRowCount(RPRPatternNode *node);
 static int64 rprBodyRowCount(List *children);
 static bool rprBodyHasUniformLength(List *children);
@@ -95,10 +95,10 @@ static void computeAbsorbability(RPRPattern *pattern);
 
 /*
  * rprNodeRowCount
- *		Rows the node always consumes, or -1 if that varies.
+ *		노드가 항상 소비하는 행 수, 달라질 수 있으면 -1 이다.
  *
- * Alternatives of equal length count as fixed: they may pick different
- * variables, but never different rows.
+ * 길이가 같은 Alternative들은 고정으로 취급한다: 서로 다른 변수를 고를 수는
+ * 있지만, 행 수는 결코 달라지지 않는다.
  */
 static int64
 rprNodeRowCount(RPRPatternNode *node)
@@ -136,7 +136,7 @@ rprNodeRowCount(RPRPatternNode *node)
 			if (node->min != node->max)
 				return -1;
 			len *= node->min;
-			/* A count this large cannot arise from real rows anyway */
+			/* 이렇게 큰 카운트는 실제 행에서는 나올 수 없다 */
 			if (len >= RPR_QUANTITY_INF)
 				return -1;
 			return len;
@@ -148,7 +148,7 @@ rprNodeRowCount(RPRPatternNode *node)
 
 /*
  * rprBodyRowCount
- *		Rows the children always consume in sequence, or -1 if that varies.
+ *		children이 순서대로 항상 소비하는 행 수, 달라질 수 있으면 -1 이다.
  */
 static int64
 rprBodyRowCount(List *children)
@@ -163,7 +163,7 @@ rprBodyRowCount(List *children)
 			return -1;
 		total += len;
 
-		/* A count this large cannot arise from real rows anyway */
+		/* 이렇게 큰 카운트는 실제 행에서는 나올 수 없다 */
 		if (total >= RPR_QUANTITY_INF)
 			return -1;
 	}
@@ -172,7 +172,7 @@ rprBodyRowCount(List *children)
 
 /*
  * rprBodyHasUniformLength
- *		Do the children always consume the same number of rows?
+ *		children이 항상 같은 수의 행을 소비하는가?
  */
 static bool
 rprBodyHasUniformLength(List *children)
@@ -182,11 +182,11 @@ rprBodyHasUniformLength(List *children)
 
 /*
  * rprChildrenMatchAt
- *		Do the cells of children at [start, start + list_length(content))
- *		match content element for element?
+ *		[start, start + list_length(content)) 위치의 children 셀들이 content와
+ *		요소 단위로 일치하는가?
  *
- * Returns false when that range does not lie inside children, so a caller
- * walking towards either end of the list can just ask.
+ * 그 범위가 children 안에 들어가지 않으면 false를 반환하므로, 리스트의 양쪽
+ * 끝을 향해 훑어 가는 호출자는 그냥 물어보기만 하면 된다.
  */
 static bool
 rprChildrenMatchAt(List *children, int start, List *content)
@@ -211,11 +211,11 @@ rprChildrenMatchAt(List *children, int start, List *content)
 
 /*
  * rprGroupContent
- *		The elements a GROUP stands for, as they appear in a sequence.
+ *		GROUP이 나타내는 요소들을, 시퀀스에 나타나는 순서 그대로.
  *
- * A GROUP holds a single child, and a multi-element body arrives wrapped in a
- * SEQ, so unwrap that to compare against elements of the enclosing sequence:
- * (A B)+ holds the sequence A B.
+ * GROUP은 자식을 하나만 가지며, 다중 요소 본문은
+ * SEQ로 감싸여 들어오므로, 이를 풀어서 둘러싼 시퀀스의
+ * 요소들과 비교한다: (A B)+는 시퀀스 A B를 가진다.
  */
 static List *
 rprGroupContent(RPRPatternNode *group)
@@ -236,12 +236,12 @@ rprGroupContent(RPRPatternNode *group)
 
 /*
  * rprTryAddIteration
- *		Raise a GROUP's quantifier by one iteration, if that is representable.
+ *		표현 가능하다면 GROUP의 수량자를 반복 1 회만큼 늘린다.
  *
- * An unbounded max stands for "no limit", not a count, so it is left alone and
- * nothing can overflow.  A finite bound has to stay below RPR_QUANTITY_INF:
- * one landing on the marker would read as unbounded.  Returns false without
- * touching the node when either bound has no room.
+ * 무제한 max는 카운트가 아니라 "no limit"을 나타내므로 그대로 두며,
+ * 오버플로가 일어날 수 없다.  유한한 한계는 RPR_QUANTITY_INF 보다 작아야
+ * 한다: 그 마커에 도달하면 무제한으로 읽히기 때문이다.  두 한계 중
+ * 어느 하나라도 여유가 없으면 노드를 건드리지 않고 false를 반환한다.
  */
 static bool
 rprTryAddIteration(RPRPatternNode *group)
@@ -260,17 +260,16 @@ rprTryAddIteration(RPRPatternNode *group)
 
 /*
  * flattenSeqChildren
- *		Recursively optimize children and flatten nested SEQ.
+ *		children을 재귀적으로 최적화하고 중첩된 SEQ를 평탄화한다.
  *
- * Example:
+ * 예:
  *   SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
  *
- * Returns a new list with optimized children, with nested SEQ children
- * flattened into the parent list.  The helpers in this file follow two
- * conventions -- this one and flattenAltChildren() build a new list, since
- * either can end up longer than what it started with, while the rest compact
- * the cells they already have -- so a caller must always assign the return
- * value.
+ * 최적화된 children으로 이루어진 새 리스트를 반환하며, 중첩된
+ * SEQ의 children은 부모 리스트에 평탄화되어 들어간다. 이 파일의
+ * 헬퍼들은 두 가지 관례를 따른다 -- 이 함수와 flattenAltChildren()은
+ * 시작했을 때보다 길어질 수 있으므로 새 리스트를 만들고, 나머지는 이미
+ * 가진 셀들을 압축한다 -- 그래서 호출자는 반환값을 항상 대입해야 한다.
  */
 static List *
 flattenSeqChildren(List *children)
@@ -282,8 +281,8 @@ flattenSeqChildren(List *children)
 		RPRPatternNode *opt = optimizeRPRPattern(child);
 
 		/*
-		 * GROUP{1,1} should have been unwrapped by optimizeGroupPattern;
-		 * tryUnwrapGroup() does so regardless of reluctance.
+		 * GROUP{1,1}은 optimizeGroupPattern 에서 이미 풀렸어야 한다;
+		 * tryUnwrapGroup()은 reluctance와 무관하게 이를 수행한다.
 		 */
 		Assert(!(opt->nodeType == RPR_PATTERN_GROUP &&
 				 opt->min == 1 && opt->max == 1));
@@ -304,12 +303,12 @@ flattenSeqChildren(List *children)
 
 /*
  * mergeConsecutiveVars
- *		Merge consecutive identical VAR nodes.
+ *		연속으로 동일한 VAR 노드를 병합한다.
  *
- * Examples:
- *   A{m1,M1} A{m2,M2} -> A{m1+m2, M1+M2} where INF + x = INF.
+ * 예:
+ *   A{m1,M1} A{m2,M2} -> A{m1+m2, M1+M2}  (INF + x = INF)
  *
- * Only merges non-reluctant VAR nodes with the same variable name.
+ * 같은 변수 이름을 가진, reluctant가 아닌 VAR 노드만 병합한다.
  */
 static List *
 mergeConsecutiveVars(List *children)
@@ -324,7 +323,7 @@ mergeConsecutiveVars(List *children)
 
 		if (node->nodeType == RPR_PATTERN_VAR && !node->reluctant)
 		{
-			/* Fold the VARs that follow into node while they fit */
+			/* 뒤따르는 VAR들을 맞는 한 node로 접어 넣는다 */
 			while (readpos + runlen < list_length(children))
 			{
 				RPRPatternNode *other;
@@ -337,13 +336,12 @@ mergeConsecutiveVars(List *children)
 					break;
 
 				/*
-				 * A greedy quantifier followed by a reluctant one over the
-				 * same variable is not expressible as a single quantifier:
-				 * the pair settles the first quantifier's count before the
-				 * second one decides, which the standard's
-				 * leftmost-choice-first rule (ISO/IEC TR 19075-5 7.2) makes
-				 * observable.  Merging them would change the preferred match,
-				 * so stop here.
+				 * 같은 변수에 대해 탐욕적 수량자 뒤에 소극적 수량자가
+				 * 오는 경우는 하나의 수량자로 표현할 수 없다: 표준의
+				 * leftmost-choice-first 규칙(ISO/IEC TR 19075-5 7.2)이
+				 * 관찰 가능하게 만드는 대로, 이 쌍은 두 번째 수량자가
+				 * 결정되기 전에 첫 번째 수량자의 카운트를 먼저 정한다.
+				 * 이들을 병합하면 선호되는 매치가 바뀌므로, 여기서 멈춘다.
 				 */
 				if (other->reluctant)
 					break;
@@ -352,19 +350,19 @@ mergeConsecutiveVars(List *children)
 					break;
 
 				/*
-				 * RPR_QUANTITY_INF means unbounded, not a count: a finite sum
-				 * landing on it is representable, so reject it separately.
+				 * RPR_QUANTITY_INF 는 카운트가 아니라 무제한을 의미한다: 그
+				 * 값에 도달하는 유한한 합은 표현 가능하므로, 따로 거부한다.
 				 */
 				if (node->max == RPR_QUANTITY_INF ||
 					other->max == RPR_QUANTITY_INF)
 					newmax = RPR_QUANTITY_INF;
 				else if (pg_add_s32_overflow(node->max, other->max, &newmax) ||
 						 newmax >= RPR_QUANTITY_INF)
-					break;		/* fallback: leave the pair unmerged */
+					break;		/* 대체 경로: 이 쌍은 병합하지 않고 둔다 */
 
 				if (pg_add_s32_overflow(node->min, other->min, &newmin) ||
 					newmin >= RPR_QUANTITY_INF)
-					break;		/* fallback: leave the pair unmerged */
+					break;		/* 대체 경로: 이 쌍은 병합하지 않고 둔다 */
 
 				node->min = newmin;
 				node->max = newmax;
@@ -373,8 +371,8 @@ mergeConsecutiveVars(List *children)
 		}
 
 		/*
-		 * Survivors are compacted towards the front.  writepos never passes
-		 * readpos, so this cannot overwrite a cell still to be read.
+		 * 살아남은 것들은 앞으로 압축된다.  writepos는 readpos를
+		 * 결코 앞지르지 않으므로, 아직 읽어야 할 셀을 덮어쓸 수 없다.
 		 */
 		lfirst(list_nth_cell(children, writepos++)) = node;
 		readpos += runlen;
@@ -385,19 +383,19 @@ mergeConsecutiveVars(List *children)
 
 /*
  * mergeConsecutiveGroups
- *		Merge consecutive identical GROUP nodes.
+ *		연속으로 동일한 GROUP 노드를 병합한다.
  *
- * Example:
+ * 예:
  *   (A B)+ (A B)+ -> (A B){2,}
  *
- * Only merges non-reluctant GROUP nodes with identical children.
+ * 동일한 children을 가진, reluctant가 아닌 GROUP 노드만 병합한다.
  *
- * The body must consume a fixed number of rows.  Otherwise the merge changes
- * which match is preferred: the two groups split the iterations between them,
- * and that split is a choice point the merged form does not have.  With a
- * fixed body, rows consumed rise in step with the iteration count, so both
- * forms reach the same rows in the same order; without one, they need not --
- * (A | B B)+ (A | B B)+ prefers a four-row match where (A | B B){2,} takes two.
+ * 본문은 고정된 수의 행을 소비해야 한다.  그렇지 않으면 병합이
+ * 선호되는 매치를 바꾼다: 두 그룹은 반복 횟수를 서로 나눠 가지며, 이는
+ * 병합된 형태에는 없는 선택 지점이다.  본문이 고정이면 소비하는 행 수가
+ * 반복 횟수에 맞춰 늘어나므로, 두 형태 모두 같은 순서로 같은 행에
+ * 도달한다; 고정이 아니면 그렇지 않을 수 있다 -- (A | B B)+ (A | B B)+는
+ * (A | B B){2,}가 두 번 반복하는 자리에서 네 행짜리 매치를 선호한다.
  */
 static List *
 mergeConsecutiveGroups(List *children)
@@ -412,7 +410,7 @@ mergeConsecutiveGroups(List *children)
 
 		if (node->nodeType == RPR_PATTERN_GROUP && !node->reluctant)
 		{
-			/* Fold the GROUPs that follow into node while they fit */
+			/* 뒤따르는 GROUP들을 맞는 한 node로 접어 넣는다 */
 			while (readpos + runlen < list_length(children))
 			{
 				RPRPatternNode *other;
@@ -427,24 +425,24 @@ mergeConsecutiveGroups(List *children)
 				if (!equal(node->children, other->children))
 					break;
 
-				/* The body must consume a fixed number of rows; see above */
+				/* 본문은 고정된 수의 행을 소비해야 한다; 위 설명 참고 */
 				if (!rprBodyHasUniformLength(node->children))
 					break;
 
 				/*
-				 * RPR_QUANTITY_INF means unbounded, not a count: a finite sum
-				 * landing on it is representable, so reject it separately.
+				 * RPR_QUANTITY_INF 는 카운트가 아니라 무제한을 의미한다: 그
+				 * 값에 도달하는 유한한 합은 표현 가능하므로, 따로 거부한다.
 				 */
 				if (node->max == RPR_QUANTITY_INF ||
 					other->max == RPR_QUANTITY_INF)
 					newmax = RPR_QUANTITY_INF;
 				else if (pg_add_s32_overflow(node->max, other->max, &newmax) ||
 						 newmax >= RPR_QUANTITY_INF)
-					break;		/* fallback: leave the pair unmerged */
+					break;		/* 대체 경로: 이 쌍은 병합하지 않고 둔다 */
 
 				if (pg_add_s32_overflow(node->min, other->min, &newmin) ||
 					newmin >= RPR_QUANTITY_INF)
-					break;		/* fallback: leave the pair unmerged */
+					break;		/* 대체 경로: 이 쌍은 병합하지 않고 둔다 */
 
 				node->min = newmin;
 				node->max = newmax;
@@ -453,8 +451,8 @@ mergeConsecutiveGroups(List *children)
 		}
 
 		/*
-		 * Survivors are compacted towards the front.  writepos never passes
-		 * readpos, so this cannot overwrite a cell still to be read.
+		 * 살아남은 것들은 앞으로 압축된다.  writepos는 readpos를
+		 * 결코 앞지르지 않으므로, 아직 읽어야 할 셀을 덮어쓸 수 없다.
 		 */
 		lfirst(list_nth_cell(children, writepos++)) = node;
 		readpos += runlen;
@@ -465,14 +463,14 @@ mergeConsecutiveGroups(List *children)
 
 /*
  * mergeConsecutiveAlts
- *		Merge consecutive identical ALT nodes into a GROUP.
+ *		연속으로 동일한 ALT 노드를 GROUP으로 병합한다.
  *
- * Example:
+ * 예:
  *   (A | B) (A | B) (A | B) -> (A | B){3}
  *
- * After GROUP{1,1} unwrap, bare alternations like (A | B) become ALT nodes
- * in the SEQ.  This step detects consecutive identical ALT nodes and wraps
- * them in a GROUP with the appropriate quantifier.
+ * GROUP{1,1}을 풀고 나면 (A | B) 같은 단독 alternation은
+ * SEQ 안에서 ALT 노드가 된다. 이 단계는 연속으로 동일한 ALT
+ * 노드를 찾아내어, 이를 적절한 수량자를 가진 GROUP으로 감싼다.
  */
 static List *
 mergeConsecutiveAlts(List *children)
@@ -485,10 +483,13 @@ mergeConsecutiveAlts(List *children)
 		RPRPatternNode *node = list_nth_node(RPRPatternNode, children, readpos);
 		int			count = 1;
 
-		/* A quantifier never lands on an ALT, so none of these is reluctant */
+		/*
+		 * 수량자는 결코 ALT에 붙지 않으므로,
+		 * 이 중 어느 것도 reluctant가 아니다
+		 */
 		if (node->nodeType == RPR_PATTERN_ALT)
 		{
-			/* Count the run of ALTs identical to this one */
+			/* 이것과 동일한 ALT의 연속 구간 길이를 센다 */
 			while (readpos + count < list_length(children))
 			{
 				RPRPatternNode *other;
@@ -503,7 +504,7 @@ mergeConsecutiveAlts(List *children)
 
 			if (count > 1)
 			{
-				/* Wrap the run into GROUP{count,count}(ALT) */
+				/* 이 구간을 GROUP{count,count}(ALT)로 감싼다 */
 				RPRPatternNode *group = makeNode(RPRPatternNode);
 
 				group->nodeType = RPR_PATTERN_GROUP;
@@ -517,8 +518,8 @@ mergeConsecutiveAlts(List *children)
 		}
 
 		/*
-		 * Survivors are compacted towards the front.  writepos never passes
-		 * readpos, so this cannot overwrite a cell still to be read.
+		 * 살아남은 것들은 앞으로 압축된다.  writepos는 readpos를
+		 * 결코 앞지르지 않으므로, 아직 읽어야 할 셀을 덮어쓸 수 없다.
 		 */
 		lfirst(list_nth_cell(children, writepos++)) = node;
 		readpos += count;
@@ -529,32 +530,32 @@ mergeConsecutiveAlts(List *children)
 
 /*
  * mergeGroupPrefixSuffix
- *		Merge sequence prefix/suffix into GROUP with matching children.
+ *		시퀀스의 prefix/suffix를 일치하는 children을 가진 GROUP으로 병합한다.
  *
- * When a GROUP's children appear as a prefix before and/or suffix after
- * the GROUP in a SEQ, merge them by incrementing the GROUP's quantifier.
- * This runs iteratively: A B A B (A B)+ A B -> (A B){4,}.
+ * GROUP의 children이 SEQ 안에서 그 GROUP 앞의 prefix로, 또는 뒤의 suffix로
+ * (또는 둘 다로) 나타나면, GROUP의 수량자를 늘려서 이들을 병합한다. 이 과정은
+ * 반복적으로 실행된다: A B A B (A B)+ A B -> (A B){4,}.
  *
- * Algorithm, in two passes over the whole sequence:
- *   1. PREFIX phase: for each GROUP, compare the last N survivors kept so
- *      far against the GROUP's children.  On match, drop them and increment
- *      the GROUP's min/max.  Repeat until no match.
- *   2. SUFFIX phase: for each GROUP, compare the next N elements not yet
- *      read against the GROUP's children.  On match, skip them and
- *      increment min/max.  Repeat until no match.
+ * 알고리즘은 전체 시퀀스에 대해 두 단계로 진행한다:
+ *   1.  PREFIX 단계: 각 GROUP에 대해, 지금까지 남겨 둔 마지막 N개의
+ *      survivor를 GROUP의 children과 비교한다.  일치하면 그것들을 버리고
+ *      GROUP의 min/max를 늘린다.  더 이상 일치하지 않을 때까지 반복한다.
+ *   2.  SUFFIX 단계: 각 GROUP에 대해, 아직 읽지 않은 다음 N개의 요소를
+ *      GROUP의 children과 비교한다.  일치하면 이들을 건너뛰고 min/max를
+ *      늘린다.  더 이상 일치하지 않을 때까지 반복한다.
  *
- * Examples:
+ * 예:
  *   A B (A B)+ -> (A B){2,}
  *   (A B)+ A B -> (A B){2,}
  *   A B (A B)+ A B -> (A B){3,}
  *
- * The two phases are not equally safe.  A prefix copy is mandatory and comes
- * before the group, exactly like the leading mandatory iterations it becomes,
- * so the decision trees stay isomorphic for any content.  A suffix copy comes
- * after the group has already decided to stop, which the merged form defers
- * until after the last iteration's own choices.  Merge a suffix only when the
- * content consumes a fixed number of rows, which leaves it nothing to decide;
- * see mergeConsecutiveGroups for why that condition is the right one.
+ * 두 단계가 똑같이 안전한 것은 아니다.  prefix 사본은 필수이며 그룹 앞에
+ * 오는데, 이는 그 사본이 되는 선행 필수 반복과 정확히 같은 자리이므로,
+ * 어떤 내용에 대해서도 결정 트리가 동형으로 유지된다.  suffix 사본은
+ * 그룹이 멈추기로 이미 결정한 뒤에 오는데, 병합된 형태는 이를 마지막
+ * 반복 자체의 선택 뒤로 미룬다.  suffix는 내용이 고정된 수의 행을
+ * 소비할 때만 병합한다. 그래야 결정할 것이 남지 않기 때문이다;
+ * 이 조건이 맞는 이유는 mergeConsecutiveGroups 를 참고하라.
  */
 static List *
 mergeGroupPrefixSuffix(List *children)
@@ -564,17 +565,15 @@ mergeGroupPrefixSuffix(List *children)
 	int			readpos;
 
 	/*
-	 * PREFIX phase.  Every copy that sits immediately before a GROUP is
-	 * folded into it, over the whole sequence, before any suffix is
-	 * considered.  A copy between two GROUPs is a suffix of the one before it
-	 * and a prefix of the one after, and this order hands it to the second,
-	 * which is the safer of the two rules: a mandatory copy before a group
-	 * already sits where the leading iterations it becomes would sit, so
-	 * folding it as a prefix holds for any content, while folding one as a
-	 * suffix needs a fixed-length body.
+	 * PREFIX 단계.  GROUP 바로 앞에 놓인 모든 사본은, 어떤 suffix를 고려하기
+	 * 전에 전체 시퀀스에 걸쳐 그 GROUP에 접혀 들어간다.  두 GROUP 사이의
+	 * 사본은 앞 GROUP의 suffix이면서 뒤 GROUP의 prefix인데, 이 순서는 그것을
+	 * 둘 중 더 안전한 규칙인 뒤쪽에 넘긴다: 그룹 앞의 필수 사본은 이미 그것이
+	 * 되는 선행 반복이 있을 자리에 있으므로, prefix로 접는 것은 어떤 내용에도
+	 * 성립하는 반면, suffix로 접는 것은 고정 길이 본문을 필요로 한다.
 	 *
-	 * A prefix copy is one of the survivors already stored, so folding it is
-	 * a step back of the write cursor.
+	 * prefix 사본은 이미 저장된 survivor 중 하나이므로, 이를 접는 것은 write
+	 * 커서를 한 칸 뒤로 되돌리는 것이다.
 	 */
 	writepos = 0;
 	numChildren = list_length(children);
@@ -594,8 +593,8 @@ mergeGroupPrefixSuffix(List *children)
 		}
 
 		/*
-		 * Survivors are compacted towards the front.  writepos never passes
-		 * readpos, so this cannot overwrite a cell still to be read.
+		 * 살아남은 것들은 앞으로 압축된다.  writepos는 readpos를
+		 * 결코 앞지르지 않으므로, 아직 읽어야 할 셀을 덮어쓸 수 없다.
 		 */
 		lfirst(list_nth_cell(children, writepos++)) = child;
 	}
@@ -603,13 +602,12 @@ mergeGroupPrefixSuffix(List *children)
 	children = list_truncate(children, writepos);
 
 	/*
-	 * SUFFIX phase.  A suffix copy comes after the GROUP has already decided
-	 * to stop, which the merged form defers until after the last iteration's
-	 * own choices, so the body must consume a fixed number of rows; see
-	 * above.
+	 * SUFFIX 단계.  suffix 사본은 GROUP이 멈추기로 이미 결정한 뒤에 오는데,
+	 * 병합된 형태는 이를 마지막 반복 자체의 선택 뒤로 미루므로, 본문은 고정된
+	 * 수의 행을 소비해야 한다; 위 설명 참고.
 	 *
-	 * Such a copy is still unread, so folding it is a step forward of the
-	 * read cursor.
+	 * 이런 사본은 아직 읽지 않은 상태이므로, 이를 접는 것은 read 커서를 한 칸
+	 * 앞으로 내보내는 것이다.
 	 */
 	writepos = 0;
 	readpos = 0;
@@ -640,20 +638,20 @@ mergeGroupPrefixSuffix(List *children)
 
 /*
  * optimizeSeqPattern
- *		Optimize SEQ pattern node.
+ *		SEQ 패턴 노드를 최적화한다.
  *
- * Optimizations, in the order they run:
- *   1. Recursively optimize the children and flatten nested SEQ
- *   2. Merge consecutive identical VAR nodes
- *   3. Merge consecutive identical GROUP nodes
- *   4. Merge consecutive identical ALT nodes into GROUP
- *   5. Merge prefix/suffix into GROUP with matching children
- *   6. Merge consecutive identical GROUP nodes once more
- *   7. Unwrap single-item SEQ
+ * 최적화는 다음 순서로 실행된다:
+ *   1. children을 재귀적으로 최적화하고 중첩된 SEQ를 평탄화한다
+ *   2. 연속으로 동일한 VAR 노드를 병합한다
+ *   3. 연속으로 동일한 GROUP 노드를 병합한다
+ *   4. 연속으로 동일한 ALT 노드를 GROUP으로 병합한다
+ *   5. prefix/suffix를 일치하는 children을 가진 GROUP으로 병합한다
+ *   6. 연속으로 동일한 GROUP 노드를 한 번 더 병합한다
+ *   7. 단일 항목 SEQ를 푼다
  *
- * That order carries meaning: 1 is what optimizes the children, so every pass
- * after it sees a flat list of finished nodes, and 6 runs for the reason
- * given there.
+ * 이 순서에는 의미가 있다: 1 은 children을 최적화하므로,
+ * 그 뒤의 모든 단계는 완성된 노드로 이루어진 평평한 리스트를
+ * 보게 되며, 6 은 아래에 나오는 이유로 실행된다.
  */
 static RPRPatternNode *
 optimizeSeqPattern(RPRPatternNode *pattern)
@@ -665,16 +663,16 @@ optimizeSeqPattern(RPRPatternNode *pattern)
 	pattern->children = mergeGroupPrefixSuffix(pattern->children);
 
 	/*
-	 * Two identical GROUPs can end up next to each other with nothing having
-	 * put them side by side: the ALT merge wraps a run into a GROUP that may
-	 * land beside an identical one, and folding a prefix or a suffix away can
-	 * close the gap between two.  So the GROUP merge gets a second look.  One
-	 * is enough: it only drops elements and raises quantifiers, so it creates
-	 * no copy for the prefix/suffix pass to fold in turn.
+	 * 서로 나란히 놓이게 만든 것이 없어도 동일한 두 GROUP이 이웃하게 될 수
+	 * 있다: ALT 병합은 하나의 구간을 GROUP으로 감싸는데 이것이 동일한 GROUP
+	 * 옆에 놓일 수 있고, prefix나 suffix를 접어 넣으면 두 GROUP 사이의 틈이
+	 * 닫힐 수 있다.  그래서 GROUP 병합을 한 번 더 살펴본다.  한 번이면
+	 * 충분하다: 이 단계는 요소를 없애고 수량자를 늘릴 뿐이므로, prefix/suffix
+	 * 단계가 다시 접어 넣을 사본을 만들어 내지 않는다.
 	 */
 	pattern->children = mergeConsecutiveGroups(pattern->children);
 
-	/* Unwrap single-item SEQ: SEQ[A] -> A */
+	/* 단일 항목 SEQ를 푼다: SEQ[A] -> A */
 	if (list_length(pattern->children) == 1)
 		return (RPRPatternNode *) linitial(pattern->children);
 
@@ -683,16 +681,15 @@ optimizeSeqPattern(RPRPatternNode *pattern)
 
 /*
  * flattenAltChildren
- *		Recursively optimize children and flatten nested ALT nodes.
+ *		children을 재귀적으로 최적화하고 중첩된 ALT 노드를 평탄화한다.
  *
- * Example:
+ * 예:
  *   (A | (B | C)) -> (A | B | C)
  *
- * Splices each nested ALT's children into the parent list at the position the
- * ALT occupied, so the flattened alternatives keep their place.  Like
- * flattenSeqChildren(), this pass can end up longer than what it started
- * with, so it builds a new list rather than compacting the cells it has; the
- * caller must assign the result.
+ * 중첩된 각 ALT의 children을, 그 ALT가 있던 위치에 부모 리스트로 이어 붙여서,
+ * 평탄화된 alternative들이 자기 자리를 유지하게 한다.  flattenSeqChildren()과
+ * 마찬가지로, 이 단계도 시작했을 때보다 길어질 수 있으므로 가진 셀을 압축하는
+ * 대신 새 리스트를 만든다; 호출자는 결과를 대입해야 한다.
  */
 static List *
 flattenAltChildren(List *children)
@@ -714,14 +711,14 @@ flattenAltChildren(List *children)
 
 /*
  * removeDuplicateAlternatives
- *		Remove duplicate alternatives from a list.
+ *		리스트에서 중복된 alternative를 제거한다.
  *
- * Examples:
+ * 예:
  *   (A | B | A) -> (A | B)
  *   (X | Y | X | Z | Y) -> (X | Y | Z)
  *
- * Keeps the first of each and compacts the survivors towards the front of the
- * list it was given, so the caller must assign the truncated result.
+ * 각각의 첫 등장만 남기고, 주어진 리스트의 앞쪽으로 survivor를 압축하므로,
+ * 호출자는 잘라낸 결과를 대입해야 한다.
  */
 static List *
 removeDuplicateAlternatives(List *children)
@@ -734,9 +731,9 @@ removeDuplicateAlternatives(List *children)
 		bool		isDuplicate = false;
 
 		/*
-		 * Survivors are compacted towards the front, so those already kept
-		 * are the cells below writepos.  writepos never passes readpos, so
-		 * the store below cannot overwrite a cell still to be read.
+		 * survivor는 앞으로 압축되므로, 이미 유지된 것들은 writepos 아래의
+		 * 셀에 있다.  writepos는 readpos를 결코 앞지르지 않으므로, 아래로의
+		 * 저장이 아직 읽어야 할 셀을 덮어쓸 수 없다.
 		 */
 		for (int keptpos = 0; keptpos < writepos; keptpos++)
 		{
@@ -757,23 +754,23 @@ removeDuplicateAlternatives(List *children)
 
 /*
  * optimizeAltPattern
- *		Optimize ALT pattern node.
+ *		ALT 패턴 노드를 최적화한다.
  *
- * Optimizations:
- *   1. Flatten nested ALT
- *   2. Remove duplicate alternatives
- *   3. Unwrap single-item ALT
+ * 최적화:
+ *   1. 중첩된 ALT를 평탄화한다
+ *   2. 중복된 alternative를 제거한다
+ *   3. 단일 항목 ALT를 푼다
  */
 static RPRPatternNode *
 optimizeAltPattern(RPRPatternNode *pattern)
 {
-	/* Recursively optimize children and flatten nested ALT */
+	/* children을 재귀적으로 최적화하고 중첩된 ALT를 평탄화한다 */
 	pattern->children = flattenAltChildren(pattern->children);
 
-	/* Remove duplicate alternatives */
+	/* 중복된 alternative를 제거한다 */
 	pattern->children = removeDuplicateAlternatives(pattern->children);
 
-	/* Unwrap single-item ALT: ALT[A] -> A */
+	/* 단일 항목 ALT를 푼다: ALT[A] -> A */
 	if (list_length(pattern->children) == 1)
 		return (RPRPatternNode *) linitial(pattern->children);
 
@@ -782,31 +779,30 @@ optimizeAltPattern(RPRPatternNode *pattern)
 
 /*
  * tryMultiplyQuantifiers
- *		Try to flatten (child{p,q}){m,n} into child{p*m, q*n}.
+ *		(child{p,q}){m,n}을 child{p*m, q*n}으로 평탄화해 본다.
  *
- * Below, p,q are the child's {min,max} and m,n the outer {min,max}.
+ * 아래에서 p,q는 자식의 {min,max}이고 m,n은 바깥쪽의 {min,max}이다.
  *
- * Flattening is valid only when the repetition counts the nested quantifiers
- * can produce form exactly the contiguous interval [p*m, q*n].  For an outer
- * iteration count t (m <= t <= n) the child contributes any count in
- * [t*p, t*q], and t = 0 contributes {0}.  The union of those intervals is
- * contiguous, hence flattenable, when:
+ * 중첩된 수량자들이 만들어 낼 수 있는 반복 횟수가 정확히 연속 구간 [p*m,
+ * q*n]을 이룰 때에만 평탄화가 유효하다.  바깥쪽 반복 횟수 t(m <= t <= n)에
+ * 대해 자식은 [t*p, t*q]의 어떤 카운트든 낼 수 있고, t = 0 은 {0}을 낸다. 이
+ * 구간들의 합집합이 연속되어, 즉 평탄화 가능한 것은 다음일 때다:
  *
- *   - m == n: a single outer count, so the result is just [m*p, m*q]; or
- *   - p == 0: every interval starts at 0, so they all overlap; or
- *   - consecutive intervals touch and the zero case (if any) connects:
- *       p <= Max(m,1)*(q-p) + 1   (touch; trivially true if q is unbounded)
- *       and (m >= 1 or p <= 1)    (when m == 0, {0} must reach [p,q])
+ *   - m == n: 바깥쪽 카운트가 하나뿐이므로 결과는 그냥 [m*p, m*q]이다; 또는
+ *   - p == 0: 모든 구간이 0 에서 시작하므로 전부 겹친다; 또는
+ *   - 연속된 구간들이 맞닿고, (있다면) 0 인 경우가 이어질 때:
+ *       p <= Max(m,1)*(q-p) + 1   (맞닿음; q가 무제한이면 자명하게 참)
+ *       그리고 (m >= 1 또는 p <= 1) (m == 0 일 때 {0}이 [p,q]에 닿아야 한다)
  *
- * Otherwise gaps appear and the pattern is left unflattened: (A{2}){2,3}
- * yields {4,6} (not 4..6), and (A{2,})* yields {0} UNION [2,INF) (not
- * [0,INF), so A* would wrongly admit a single A).
+ * 그렇지 않으면 틈이 생기며 패턴은 평탄화하지 않은 채로 둔다: (A{2}){2,3}은
+ * {4,6}을 낳고(4..6 이 아니라), (A{2,})*는 {0} UNION [2,INF)를 낳는다
+ * ([0,INF)가 아니라서, 그렇지 않으면 A*가 단 하나의 A도 잘못 허용하게 된다).
  *
- * Contiguity settles the set of counts, not which count is preferred, so a
- * further condition is needed; see the comment on safe below.
+ * 연속성은 카운트의 집합을 정할 뿐, 어느 카운트가 선호되는지는 정하지
+ * 않으므로, 추가 조건이 필요하다; 아래 safe에 대한 주석을 참고하라.
  *
- * Returns the child node with multiplied quantifiers if successful,
- * otherwise returns the original pattern unchanged.
+ * 성공하면 수량자를 곱한 자식 노드를 반환하고, 그렇지 않으면 원래 패턴을
+ * 그대로 반환한다.
  */
 static RPRPatternNode *
 tryMultiplyQuantifiers(RPRPatternNode *pattern)
@@ -816,7 +812,7 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 	int32		newmin;
 	int32		newmax;
 
-	/* Parser always creates GROUP with exactly one child */
+	/* 파서는 항상 자식이 정확히 하나인 GROUP을 만든다 */
 	Assert(list_length(pattern->children) == 1);
 
 	if (pattern->reluctant)
@@ -830,15 +826,15 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		return pattern;
 
 	/*
-	 * Flattening erases the outer block boundaries, so how the child's
-	 * iterations split across blocks must not matter.  A fixed-length body
-	 * ensures that -- splits with the same total span the same rows -- as
-	 * does an exact child quantifier, which admits only one split.  Otherwise
-	 * preferment shifts: ((A | B B){1,2}){2} would become (A | B B){2,4},
-	 * which stops at two A's where the nested form prefers A (B B) A A.
+	 * 평탄화는 바깥쪽 블록 경계를 지우므로, 자식의 반복이 블록 사이에 어떻게
+	 * 나뉘는지는 문제가 되지 않아야 한다.  고정 길이 본문은 이를 보장한다 --
+	 * 총 길이가 같은 분할은 같은 행에 이르므로 -- 정확한 자식 수량자도
+	 * 마찬가지인데, 이는 오직 하나의 분할만 허용하기 때문이다.  그렇지 않으면
+	 * 선호가 바뀐다: ((A | B B){1,2}){2}는 (A | B B){2,4}가 되는데, 중첩된
+	 * 형태가 A (B B) A A를 선호하는 자리에서 A 두 개로 멈춘다.
 	 *
-	 * A VAR child has no body to measure, and its own quantifier already
-	 * settles this, so the test applies to a GROUP child only.
+	 * VAR 자식은 측정할 본문이 없고 자신의 수량자가 이미 이를 결정하므로, 이
+	 * 검사는 GROUP 자식에만 적용한다.
 	 */
 	if (child->min != child->max &&
 		child->nodeType == RPR_PATTERN_GROUP &&
@@ -846,9 +842,9 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		return pattern;
 
 	/*
-	 * Decide whether the achievable counts form one contiguous interval.  The
-	 * child quantifier is {child->min, child->max} and the outer one is
-	 * {pattern->min, pattern->max}; either max may be RPR_QUANTITY_INF.
+	 * 달성 가능한 카운트들이 하나의 연속 구간을 이루는지 판단한다.  자식
+	 * 수량자는 {child->min, child->max}이고 바깥쪽 수량자는 {pattern->min,
+	 * pattern->max}이며, 둘 중 어느 max도 RPR_QUANTITY_INF 일 수 있다.
 	 */
 	if (pattern->min == pattern->max || child->min == 0)
 		safe = true;
@@ -859,11 +855,10 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 		bool		order_ok;
 
 		/*
-		 * Consecutive intervals [t*min, t*max] and [(t+1)*min, (t+1)*max]
-		 * touch when (t+1)*min <= t*max + 1, i.e. min <= t*(max-min) + 1.
-		 * This is tightest at the smallest t in play, Max(pattern->min, 1).
-		 * An unbounded child->max makes every interval reach INF, so they
-		 * always touch.
+		 * 연속된 구간 [t*min, t*max]와 [(t+1)*min, (t+1)*max]는 (t+1)*min <=
+		 * t*max + 1, 즉 min <= t*(max-min) + 1 일 때 맞닿는다.  이는 진행
+		 * 중인 가장 작은 t, 즉 Max(pattern->min, 1)에서 가장 타이트하다.
+		 * 자식의 max가 무제한이면 모든 구간이 INF에 이르므로 항상 맞닿는다.
 		 */
 		if (child->max == RPR_QUANTITY_INF)
 			touch = true;
@@ -872,18 +867,18 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 					 (int64) Max(pattern->min, 1) * (child->max - child->min) + 1);
 
 		/*
-		 * A skippable outer (min 0) also needs {0} adjacent to the child
-		 * range.
+		 * 스킵 가능한 바깥쪽(min 0)은 {0}이 자식 범위에 인접할 것도
+		 * 필요로 한다.
 		 */
 		zero_ok = (pattern->min >= 1 || child->min <= 1);
 
 		/*
-		 * Contiguity is necessary but not sufficient: the flattened form must
-		 * prefer the same match too.  The nested form settles the first
-		 * iteration's count before iterating again, so it stops early when
-		 * the tail cannot reach the child's lower bound -- (A{2,3}){1,2}
-		 * prefers three rows where the flattened A{2,6} takes four.  Only a
-		 * bounded lower bound >= 2 can be undershot.
+		 * 연속성은 필요조건이지만 충분조건은 아니다: 평탄화된 형태도 같은
+		 * 매치를 선호해야 한다.  중첩된 형태는 다시 반복하기 전에 첫 반복의
+		 * 카운트를 먼저 정하므로, 꼬리가 자식의 하한에 이를 수 없을 때 일찍
+		 * 멈춘다 -- (A{2,3}){1,2}는 평탄화된 A{2,6}이 네 행을 취하는 자리에서
+		 * 세 행을 선호한다.  하한이 2 이상으로 제한된 경우만 이렇게 미달할
+		 * 수 있다.
 		 */
 		order_ok = (child->min <= 1 || child->max == RPR_QUANTITY_INF);
 
@@ -893,14 +888,14 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 	if (!safe)
 		return pattern;
 
-	/* Flatten the child quantifier, declining the rewrite if it does not fit */
+	/* 자식 수량자를 평탄화하며, 맞지 않으면 재작성을 포기한다 */
 	if (pg_mul_s32_overflow(pattern->min, child->min, &newmin) ||
 		newmin >= RPR_QUANTITY_INF)
 		return pattern;
 
 	/*
-	 * RPR_QUANTITY_INF means unbounded, not a count: a finite product landing
-	 * on it is representable, so reject it separately.
+	 * RPR_QUANTITY_INF 는 카운트가 아니라 무제한을 의미한다: 그 값에 도달하는
+	 * 유한한 곱은 표현 가능하므로, 따로 거부한다.
 	 */
 	if (pattern->max == RPR_QUANTITY_INF || child->max == RPR_QUANTITY_INF)
 		newmax = RPR_QUANTITY_INF;
@@ -915,38 +910,37 @@ tryMultiplyQuantifiers(RPRPatternNode *pattern)
 
 /*
  * tryUnwrapGroup
- *		Try to unwrap GROUP{1,1} node.
+ *		GROUP{1,1} 노드를 풀어 본다.
  *
- * Examples:
+ * 예:
  *   (A){1,1}   -> A
- *   (A B){1,1} -> SEQ(A, B)  (unwraps the inner SEQ)
- *   (A)?       -> A?         (propagate quantifier to single VAR child)
- *   (A)+?      -> A+?        (propagate quantifier including reluctant)
+ *   (A B){1,1} -> SEQ(A, B)  (내부 SEQ를 푼다)
+ *   (A)?  -> A?  (단일 VAR 자식에 수량자를 전파) (A)+?  -> A+?
+ *   (reluctant를 포함해 수량자를 전파)
  *
- * If GROUP has min=1, max=1, return the child directly (reluctant on
- * {1,1} is meaningless).  If GROUP has a single VAR child with default
- * quantifier {1,1}, propagate the GROUP's quantifier to the child and
- * unwrap.  Otherwise returns the pattern unchanged.
+ * GROUP이 min=1, max=1 이면 자식을 그대로 반환한다({1,1}에서 reluctant는
+ * 의미가 없다).  GROUP이 기본 수량자 {1,1}을 가진 단일 VAR 자식이면, GROUP의
+ * 수량자를 자식에 전파하고 푼다.  그 외에는 패턴을 그대로 반환한다.
  *
- * Note: Parser always creates GROUP with exactly one child via list_make1().
+ * 참고: 파서는 list_make1()로 항상 자식이 정확히 하나인 GROUP을 만든다.
  */
 static RPRPatternNode *
 tryUnwrapGroup(RPRPatternNode *pattern)
 {
 	RPRPatternNode *child;
 
-	/* Parser always creates GROUP with single child */
+	/* 파서는 항상 자식이 하나인 GROUP을 만든다 */
 	Assert(list_length(pattern->children) == 1);
 
 	child = (RPRPatternNode *) linitial(pattern->children);
 
-	/* GROUP{1,1}: unwrap directly (reluctant on {1,1} is meaningless) */
+	/* GROUP{1,1}: 곧바로 푼다({1,1}에서 reluctant는 의미가 없다) */
 	if (pattern->min == 1 && pattern->max == 1)
 		return child;
 
 	/*
-	 * Single VAR child with default {1,1}: propagate GROUP's quantifier to
-	 * the child and unwrap.  E.g., (A)?? -> A??, (A)+? -> A+?
+	 * 기본값 {1,1}을 가진 단일 VAR 자식: GROUP의 수량자를 자식에 전파하고
+	 * 푼다.  예: (A)??  -> A??, (A)+?  -> A+?
 	 */
 	if (child->nodeType == RPR_PATTERN_VAR &&
 		child->min == 1 && child->max == 1)
@@ -962,11 +956,11 @@ tryUnwrapGroup(RPRPatternNode *pattern)
 
 /*
  * optimizeGroupPattern
- *		Optimize GROUP pattern node.
+ *		GROUP 패턴 노드를 최적화한다.
  *
- * Optimizations:
- *   1. Quantifier multiplication: (A{m}){n} -> A{m*n}
- *   2. Unwrap GROUP{1,1}
+ * 최적화:
+ *   1. 수량자 곱셈: (A{m}){n} -> A{m*n}
+ *   2. GROUP{1,1} 풀기
  */
 static RPRPatternNode *
 optimizeGroupPattern(RPRPatternNode *pattern)
@@ -974,42 +968,42 @@ optimizeGroupPattern(RPRPatternNode *pattern)
 	ListCell   *lc;
 	RPRPatternNode *result;
 
-	/* Recursively optimize children */
+	/* children을 재귀적으로 최적화한다 */
 	foreach(lc, pattern->children)
 	{
 		lfirst(lc) = optimizeRPRPattern((RPRPatternNode *) lfirst(lc));
 	}
 
-	/* Try quantifier multiplication */
+	/* 수량자 곱셈을 시도한다 */
 	result = tryMultiplyQuantifiers(pattern);
 	if (result != pattern)
 		return result;
 
-	/* Try unwrapping GROUP{1,1} */
+	/* GROUP{1,1} 풀기를 시도한다 */
 	return tryUnwrapGroup(pattern);
 }
 
 /*
  * optimizeRPRPattern
- *		Optimize RPRPatternNode tree (dispatcher).
+ *		RPRPatternNode 트리를 최적화한다(디스패처).
  *
- * Dispatches to type-specific optimization functions.
- * Returns the optimized pattern (may be a different node).
+ * 타입별 최적화 함수로 디스패치한다.
+ * 최적화된 패턴을 반환한다(다른 노드일 수 있다).
  */
 static RPRPatternNode *
 optimizeRPRPattern(RPRPatternNode *pattern)
 {
 	RPRPatternNode *result = pattern;
 
-	/* Pattern nodes from parser are never NULL */
+	/* 파서가 낸 패턴 노드는 결코 NULL이 아니다 */
 	Assert(pattern != NULL);
 
 	check_stack_depth();
 
 	/*
-	 * A fixed count leaves reluctance nothing to decide.  Drop it here: the
-	 * merge and multiplication rewrites below decline a reluctant node, so
-	 * {n,n}? would otherwise miss what {n,n} gets.
+	 * 카운트가 고정이면 reluctance가 결정할 것이 남지 않는다.  여기서 없앤다:
+	 * 아래의 병합과 곱셈 재작성은 reluctant 노드를 거부하므로, 그렇지 않으면
+	 * {n,n}?이 {n,n}이 얻는 것을 놓치게 된다.
 	 */
 	if (pattern->min == pattern->max)
 		pattern->reluctant = false;
@@ -1029,7 +1023,7 @@ optimizeRPRPattern(RPRPatternNode *pattern)
 			break;
 	}
 
-	/* Again: a rewrite may have produced a fixed count of its own */
+	/* 다시: 재작성이 그 자체로 고정 카운트를 만들어 냈을 수 있다 */
 	if (result->min == result->max)
 		result->reluctant = false;
 
@@ -1038,11 +1032,11 @@ optimizeRPRPattern(RPRPatternNode *pattern)
 
 /*
  * scanRPRPatternRecursive
- *		Recursively scan pattern parse tree (pass 1 internal).
+ *		패턴 파스 트리를 재귀적으로 스캔한다(패스 1 내부용).
  *
- * Collects unique variable names and counts elements while tracking depth.
- * Variables from DEFINE clause are already in varNames; this adds any
- * additional variables found in the pattern.
+ * 고유한 변수 이름을 모으고 요소 수를 세면서 depth를
+ * 추적한다.  DEFINE 절의 변수는 이미 varNames 에 있으므로,
+ * 이 함수는 패턴에서 발견한 추가 변수만 덧붙인다.
  */
 static void
 scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
@@ -1050,12 +1044,12 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 {
 	int			i;
 
-	/* Pattern nodes from parser are never NULL */
+	/* 파서가 낸 패턴 노드는 결코 NULL이 아니다 */
 	Assert(node != NULL);
 
 	check_stack_depth();
 
-	/* Check recursion depth limit before overflow occurs */
+	/* 오버플로가 나기 전에 재귀 depth 한계를 확인한다 */
 	if (depth >= RPR_DEPTH_MAX)
 		ereport(ERROR,
 				errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
@@ -1063,34 +1057,34 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 				errdetail("Pattern nesting depth %d exceeds maximum %d.",
 						  depth, RPR_DEPTH_MAX - 1));
 
-	/* Track maximum depth */
+	/* 최대 depth를 추적한다 */
 	*maxDepth = Max(*maxDepth, depth);
 
 	switch (node->nodeType)
 	{
 		case RPR_PATTERN_VAR:
-			/* Count element */
+			/* 요소를 센다 */
 			(*numElements)++;
 
-			/* Collect variable name if not already present */
+			/* 아직 없다면 변수 이름을 모은다 */
 			for (i = 0; i < *numVars; i++)
 			{
 				if (strcmp(varNames[i], node->varName) == 0)
-					return;		/* Already have this variable */
+					return;		/* 이미 이 변수를 가지고 있다 */
 			}
 
 			/*
-			 * Variable not in DEFINE clause - this is valid per ISO/IEC
-			 * 19075-5 Feature R020.  Such variables are implicitly TRUE. Add
-			 * to varNames so they get a varId >= the number of DEFINE clause
-			 * expressions, which executor treats as TRUE.
+			 * DEFINE 절에 없는 변수 - ISO/IEC 19075-5 Feature R020에 따라
+			 * 유효하다.  이런 변수는 암묵적으로 TRUE이다.  varNames 에
+			 * 추가해서, DEFINE 절 표현식 개수 이상의 varId 를 받게 하며,
+			 * 실행기는 이를 TRUE로 취급한다.
 			 */
 			Assert(*numVars <= RPR_VARID_MAX);
 			varNames[(*numVars)++] = node->varName;
 			break;
 
 		case RPR_PATTERN_SEQ:
-			/* Sequence: just recurse into children */
+			/* 시퀀스: children으로 그냥 재귀한다 */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
 				scanRPRPatternRecursive(child, varNames,
@@ -1101,32 +1095,35 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 		case RPR_PATTERN_GROUP:
 
 			/*
-			 * Add BEGIN element if group has non-trivial quantifier (not
-			 * {1,1})
+			 * 그룹의 수량자가 사소하지 않으면(즉 {1,1}이 아니면)
+			 * BEGIN 요소를 추가한다
 			 */
 			if (node->min != 1 || node->max != 1)
 				(*numElements)++;
 
-			/* Recurse into children at increased depth */
+			/* depth를 늘려 children으로 재귀한다 */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
 				scanRPRPatternRecursive(child, varNames,
 										numVars, numElements, depth + 1, maxDepth);
 			}
 
-			/* Add END element if group has non-trivial quantifier (not {1,1}) */
+			/*
+			 * 그룹의 수량자가 사소하지 않으면({1,1}이 아니면)
+			 * END 요소를 추가한다
+			 */
 			if (node->min != 1 || node->max != 1)
 				(*numElements)++;
 			break;
 
 		case RPR_PATTERN_ALT:
-			/* Count ALT start element */
+			/* ALT 시작 요소를 센다 */
 			(*numElements)++;
 
-			/* Recurse into children at increased depth */
+			/* depth를 늘려 children으로 재귀한다 */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
-				/* Each branch is terminated by a SEP branch-separator marker */
+				/* 각 분기는 SEP 분기-구분자 마커로 끝난다 */
 				(*numElements)++;
 				scanRPRPatternRecursive(child, varNames,
 										numVars, numElements, depth + 1, maxDepth);
@@ -1137,11 +1134,11 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 
 /*
  * scanRPRPattern
- *		Scan pattern parse tree (pass 1 entry point).
+ *		패턴 파스 트리를 스캔한다(패스 1 진입점).
  *
- * Collects unique variable names (appending to those from DEFINE clause),
- * counts total elements (including FIN marker), and tracks maximum depth.
- * Reports error if element count exceeds RPR_ELEMIDX_MAX.
+ * (DEFINE 절에서 온 것에 이어) 고유한 변수 이름을 모으고, (FIN 마커를 포함해)
+ * 전체 요소 수를 세고, 최대 depth를 추적한다.  요소 수가 RPR_ELEMIDX_MAX 를
+ * 넘으면 오류를 보고한다.
  */
 static void
 scanRPRPattern(RPRPatternNode *node, char **varNames, int *numVars,
@@ -1152,7 +1149,7 @@ scanRPRPattern(RPRPatternNode *node, char **varNames, int *numVars,
 
 	scanRPRPatternRecursive(node, varNames, numVars, numElements, 0, maxDepth);
 
-	(*numElements)++;			/* +1 for FIN marker */
+	(*numElements)++;			/* FIN 마커를 위한 +1 */
 
 	if (*numElements > RPR_ELEMIDX_MAX)
 		ereport(ERROR,
@@ -1164,10 +1161,10 @@ scanRPRPattern(RPRPatternNode *node, char **varNames, int *numVars,
 
 /*
  * makeRPRPattern
- *		Allocate and initialize RPRPattern structure.
+ *		RPRPattern 구조체를 할당하고 초기화한다.
  *
- * Creates the pattern structure, copies variable names, and allocates
- * the elements array. The elements array is zero-initialized.
+ * 패턴 구조체를 만들고, 변수 이름을 복사하고, elements 배열을 할당한다.
+ * elements 배열은 0 으로 초기화된다.
  */
 static RPRPattern *
 makeRPRPattern(int numVars, int numElements, RPRDepth maxDepth,
@@ -1179,18 +1176,21 @@ makeRPRPattern(int numVars, int numElements, RPRDepth maxDepth,
 	result = makeNode(RPRPattern);
 	result->numVars = numVars;
 
-	/* depth < RPR_DEPTH_MAX, so maxDepth + 1 does not exceed RPR_DEPTH_MAX. */
+	/*
+	 * depth < RPR_DEPTH_MAX 이므로,
+	 * maxDepth + 1 은 RPR_DEPTH_MAX 를 넘지 않는다.
+	 */
 	Assert(maxDepth < RPR_DEPTH_MAX);
-	result->maxDepth = maxDepth + 1;	/* +1: depth is 0-based */
+	result->maxDepth = maxDepth + 1;	/* +1: depth는 0 부터 시작한다 */
 	result->numElements = numElements;
 
-	/* Copy varNames (pattern must have at least one variable) */
+	/* varNames 를 복사한다(패턴은 변수를 적어도 하나 가져야 한다) */
 	Assert(numVars > 0);
 	result->varNames = palloc_array(char *, numVars);
 	for (i = 0; i < numVars; i++)
 		result->varNames[i] = pstrdup(varNamesStack[i]);
 
-	/* Allocate elements array (zero-init for reserved fields) */
+	/* elements 배열을 할당한다(예약 필드를 위해 0 으로 초기화) */
 	Assert(numElements >= 2);
 	result->elements = palloc0_array(RPRPatternElement, numElements);
 
@@ -1199,9 +1199,9 @@ makeRPRPattern(int numVars, int numElements, RPRDepth maxDepth,
 
 /*
  * getVarIdFromPattern
- *		Get variable ID for a variable name from RPRPattern.
+ *		RPRPattern에서 변수 이름에 대한 변수 ID를 구한다.
  *
- * Returns the index of the variable in the varNames array.
+ * varNames 배열에서 그 변수의 인덱스를 반환한다.
  */
 static RPRVarId
 getVarIdFromPattern(RPRPattern *pat, const char *varName)
@@ -1212,19 +1212,20 @@ getVarIdFromPattern(RPRPattern *pat, const char *varName)
 			return (RPRVarId) i;
 	}
 
-	/* Should not happen - variable should already be collected */
+	/* 일어나면 안 된다 - 변수는 이미 수집되어 있어야 한다 */
 	elog(ERROR, "pattern variable \"%s\" not found", varName);
 	pg_unreachable();
 }
 
 /*
  * fillRPRPatternVar
- *		Fill a VAR pattern element.
+ *		VAR 패턴 요소를 채운다.
  *
- * Returns the empty-match flags for this VAR: RPR_ELEM_EMPTY_LOOP when it is
- * nullable (min 0, can match zero rows), plus RPR_ELEM_EMPTY_PREFERRED when its
- * preferred derivation is the empty one.  A bare variable consumes a row; only
- * a reluctant quantifier that may take zero repetitions prefers to skip it.
+ * 이 VAR에 대한 빈-매치 플래그를 반환한다:
+ * nullable이면(min 0 이라서 0 개 행에 매치할 수 있으면)
+ * RPR_ELEM_EMPTY_LOOP 를, 선호하는 도출이 빈 것이면
+ * RPR_ELEM_EMPTY_PREFERRED 를 추가로 반환한다.  단독 변수는 한 행을 소비한다;
+ * 0 회 반복을 취할 수 있는 reluctant 수량자만 건너뛰는 쪽을 선호한다.
  */
 static RPRElemFlags
 fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
@@ -1247,7 +1248,7 @@ fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 
 	if (node->min == 0)
 	{
-		/* nullable; a reluctant quantifier also prefers the empty match */
+		/* nullable이다; reluctant 수량자는 빈 매치도 선호한다 */
 		flags |= RPR_ELEM_EMPTY_LOOP;
 		if (node->reluctant)
 			flags |= RPR_ELEM_EMPTY_PREFERRED;
@@ -1257,31 +1258,32 @@ fillRPRPatternVar(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 
 /*
  * fillRPRPatternGroup
- *		Fill a GROUP pattern and its children.
+ *		GROUP 패턴과 그 children을 채운다.
  *
- * Creates elements for group content at increased depth, plus BEGIN/END
- * marker pair if the group has a non-trivial quantifier (not {1,1}).
+ * depth를 늘려 그룹 내용에 대한 요소들을 만들고, 그룹의 수량자가 사소하지
+ * 않으면({1,1}이 아니면) BEGIN/END 마커 쌍을 추가한다.
  *
- * Element layout for (A B){2,3}:
+ * (A B){2,3}에 대한 요소 배치:
  *
- *   [BEGIN]  [A]  [B]  [END]  [next element...]
+ *   [BEGIN]  [A]  [B]  [END]  [다음 요소...]
  *     |       ^           | |       ^
- *     |       +-- jump ---+ +-next--+ (END.jump: loop back to first child)
- *     +------- jump ------^           (BEGIN.jump: this group's END)
+ *     |       +-- jump ---+ +-next--+ (END.jump: 첫 자식으로 되돌아가는
+ *     +------- jump ------^           루프)
+ *                                     (BEGIN.jump: 이 그룹의 END)
  *
- * BEGIN.jump points at the group's own END, so either marker finds the other
- * in one step.  The skip path taken when min == 0 leaves through END.next
- * without arriving at the END: a count is only tested there, so a BEGIN
- * never takes the skip for reaching max.  END.jump points to the first child
- * (loop-back path).
- * BEGIN.next and END.next are set later by finalizeRPRPattern().
+ * BEGIN.jump는 그룹 자신의 END를 가리키므로, 어느 마커에서든
+ * 한 번에 다른 쪽을 찾을 수 있다.  min == 0 일 때 택하는 스킵
+ * 경로는 END에 도달하지 않고 END.next를 통해 빠져나간다: 카운트는
+ * 거기서만 검사하므로, BEGIN은 max에 도달하기 위한 스킵을
+ * 취하지 않는다.  END.jump는 첫 자식을 가리킨다(루프백 경로).
+ * BEGIN.next와 END.next는 나중에 finalizeRPRPattern()이 설정한다.
  *
- * Returns the group's empty-match flags.  RPR_ELEM_EMPTY_LOOP is set when the
- * group is nullable -- its min is 0 (can be skipped entirely) or its body is
- * nullable (every path through the body can match zero rows).
- * RPR_ELEM_EMPTY_PREFERRED is set when the group's preferred derivation is
- * empty: a reluctant min-0 group prefers to take no iteration, and otherwise
- * the group follows its body.  The END element inherits the body's bits.
+ * 그룹의 빈-매치 플래그를 반환한다.  그룹이 nullable이면(min이 0
+ * 이어서 완전히 건너뛸 수 있거나 본문이 nullable이면, 즉 본문을 지나는
+ * 모든 경로가 0 개 행에 매치할 수 있으면) RPR_ELEM_EMPTY_LOOP 를
+ * 설정한다.  그룹이 선호하는 도출이 빈 것이면(min이 0 인 reluctant 그룹은
+ * 반복을 취하지 않는 쪽을 선호하고, 그 외에는 그룹이 본문을 따른다)
+ * RPR_ELEM_EMPTY_PREFERRED 를 설정한다.  END 요소는 본문의 비트를 물려받는다.
  */
 static RPRElemFlags
 fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
@@ -1291,7 +1293,7 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 	RPRElemFlags bodyFlags = RPR_ELEM_EMPTY_LOOP | RPR_ELEM_EMPTY_PREFERRED;
 	RPRElemFlags result;
 
-	/* Add BEGIN marker if group has non-trivial quantifier (not {1,1}) */
+	/* 그룹의 수량자가 사소하지 않으면({1,1}이 아니면) BEGIN 마커를 추가한다 */
 	if (node->min != 1 || node->max != 1)
 	{
 		RPRPatternElement *elem = &pat->elements[*idx];
@@ -1304,19 +1306,24 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		elem->max = node->max;
 		Assert(elem->min >= 0 && elem->min < RPR_QUANTITY_INF &&
 			   elem->max >= 1 && elem->min <= elem->max);
-		elem->next = RPR_ELEMIDX_INVALID;	/* set by finalize */
-		elem->jump = RPR_ELEMIDX_INVALID;	/* set after END */
+		elem->next = RPR_ELEMIDX_INVALID;	/* finalize에서 설정 */
+		elem->jump = RPR_ELEMIDX_INVALID;	/* END 뒤에 설정 */
 		if (node->reluctant)
 			elem->flags |= RPR_ELEM_RELUCTANT;
 		(*idx)++;
-		groupStartIdx = *idx;	/* children start after BEGIN */
+		groupStartIdx = *idx;	/* children은 BEGIN 다음부터 시작한다 */
 	}
 
-	/* A concatenation is nullable / empty-preferred iff every child is (AND) */
+	/*
+	 * concatenation은 모든 자식이 그럴
+	 * 때에만(AND) nullable / empty-preferred이다
+	 */
 	foreach_node(RPRPatternNode, child, node->children)
 		bodyFlags &= fillRPRPattern(child, pat, idx, depth + 1);
 
-	/* Add group end marker if group has non-trivial quantifier (not {1,1}) */
+	/*
+	 * 그룹의 수량자가 사소하지 않으면({1,1}이 아니면) 그룹 끝 마커를 추가한다
+	 */
 	if (node->min != 1 || node->max != 1)
 	{
 		RPRPatternElement *beginElem = &pat->elements[beginIdx];
@@ -1330,14 +1337,14 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 		Assert(endElem->min >= 0 && endElem->min < RPR_QUANTITY_INF &&
 			   endElem->max >= 1 && endElem->min <= endElem->max);
 		endElem->next = RPR_ELEMIDX_INVALID;
-		endElem->jump = groupStartIdx;	/* loop to first child */
+		endElem->jump = groupStartIdx;	/* 첫 자식으로 루프 */
 		if (node->reluctant)
 			endElem->flags |= RPR_ELEM_RELUCTANT;
 
-		/* The END carries the body's bits, not the group's; see README V-6 */
+		/* END는 그룹이 아니라 본문의 비트를 물려받는다; README V-6 참고 */
 		endElem->flags |= bodyFlags;
 
-		/* Set BEGIN's link to its END (next is set by finalize) */
+		/* BEGIN의 링크를 그 END로 설정한다(next는 finalize가 설정) */
 		beginElem->jump = *idx;
 
 		(*idx)++;
@@ -1346,7 +1353,7 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 	result = bodyFlags;
 	if (node->min == 0)
 	{
-		/* skippable entirely; if reluctant, the group prefers to skip */
+		/* 완전히 스킵 가능하다; reluctant면 그룹은 스킵을 선호한다 */
 		result |= RPR_ELEM_EMPTY_LOOP;
 		if (node->reluctant)
 			result |= RPR_ELEM_EMPTY_PREFERRED;
@@ -1356,27 +1363,26 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
 
 /*
  * fillRPRPatternAlt
- *		Fill an ALT pattern and its alternatives.
+ *		ALT 패턴과 그 alternative들을 채운다.
  *
- * Creates the ALT marker and fills each alternative at increased depth,
- * terminating every alternative (including the last) with a SEP
- * branch-separator marker.  The branch link runs from ALT through the SEP
- * chain, never through the branch content: a branch's first element may
- * itself be a group BEGIN, whose jump is that group's END.
+ * ALT 마커를 만들고 depth를 늘려 각 alternative를 채우며, (마지막을 포함해)
+ * 모든 alternative를 SEP 분기-구분자 마커로 끝맺는다.  분기 링크는 ALT에서
+ * SEP 체인을 통해 이어지며, 분기 내용을 통하지는 않는다: 분기의 첫 요소가
+ * 그 자체로 그룹 BEGIN일 수 있는데, 이때 jump는 그 그룹의 END이다.
  *
- *   ALT.next  -> first branch content      SEP.next -> next branch content
- *   ALT.jump  -> first SEP                            (post-ALT on the last)
- *   SEP.jump  -> next SEP (-1 on the last)
+ *   ALT.next  -> 첫 분기 내용          SEP.next -> 다음 분기 내용
+ *   ALT.jump  -> 첫 SEP                          (마지막 분기에서는
+ *                                                 ALT 다음)
+ *   SEP.jump  -> 다음 SEP (마지막에서는 -1)
  *
- * SEP is a marker, never a state: each branch's tail is redirected past the
- * alternation.  A branch-terminal group's BEGIN skip needs no redirect of its
- * own, since it leaves through the group's END, which is that branch's tail.
+ * SEP는 마커일 뿐 상태가 아니다: 각 분기의 꼬리는 alternation을 지나
+ * 재지정된다.  분기 말단인 그룹의 BEGIN 스킵은 그룹의 END를 통해 빠져나가는데
+ * 그것이 곧 그 분기의 꼬리이므로, 따로 재지정할 필요가 없다.
  *
- * Returns the alternation's empty-match flags.  RPR_ELEM_EMPTY_LOOP is set if
- * any branch is nullable (OR: one nullable branch suffices).
- * RPR_ELEM_EMPTY_PREFERRED follows the first branch alone: lexicographic order
- * makes it the preferred one, so whether the later branches prefer empty does
- * not matter.
+ * alternation의 빈-매치 플래그를 반환한다.  어느 한 분기라도 nullable이면(OR:
+ * 하나의 nullable 분기로 충분하다) RPR_ELEM_EMPTY_LOOP 를 설정한다.
+ * RPR_ELEM_EMPTY_PREFERRED 는 첫 분기만 따른다: 사전식 순서가 그것을 선호되는
+ * 분기로 만들므로, 이후 분기들이 빈 것을 선호하는지는 중요하지 않다.
  */
 static RPRElemFlags
 fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
@@ -1388,12 +1394,12 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 	List	   *altBranchStarts = NIL;
 	List	   *altEndPositions = NIL;
 	int			afterAltIdx;
-	RPRElemFlags altFlags = 0;	/* OR of branch EMPTY_LOOP bits */
-	RPRElemFlags firstFlags = 0;	/* first branch's flags (for
-									 * EMPTY_PREFERRED) */
+	RPRElemFlags altFlags = 0;	/* 분기 EMPTY_LOOP 비트들의 OR */
+	RPRElemFlags firstFlags = 0;	/* 첫 분기의 플래그
+									 * (EMPTY_PREFERRED 용) */
 	bool		firstBranch = true;
 
-	/* Add alternation start marker */
+	/* alternation 시작 마커를 추가한다 */
 	elem = &pat->elements[*idx];
 	memset(elem, 0, sizeof(RPRPatternElement));
 	elem->varId = RPR_VARID_ALT;
@@ -1404,10 +1410,10 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 	elem->jump = RPR_ELEMIDX_INVALID;
 	(*idx)++;
 
-	/* ALT enters the first branch's content (the contiguous next element) */
+	/* ALT는 첫 분기 내용으로 들어간다(바로 다음 요소) */
 	pat->elements[altIdx].next = *idx;
 
-	/* Fill each alternative, terminated by a SEP branch-separator marker */
+	/* 각 alternative를 채우고, SEP 분기-구분자 마커로 끝맺는다 */
 	foreach_node(RPRPatternNode, alt, node->children)
 	{
 		int			branchStart = *idx;
@@ -1417,7 +1423,10 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		altBranchStarts = lappend_int(altBranchStarts, branchStart);
 		branchFlags = fillRPRPattern(alt, pat, idx, depth + 1);
 
-		/* nullable if ANY branch is; empty-preferred per the FIRST branch */
+		/*
+		 * 어느 분기든 nullable이면 nullable이다;
+		 * empty-preferred는 첫 분기 기준
+		 */
 		altFlags |= (branchFlags & RPR_ELEM_EMPTY_LOOP);
 		if (firstBranch)
 		{
@@ -1426,11 +1435,11 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		}
 		altEndPositions = lappend_int(altEndPositions, *idx - 1);
 
-		/* SEP terminates this branch, so it sits at branch end + 1 */
+		/* SEP가 이 분기를 끝맺으므로, 분기 끝 + 1 에 위치한다 */
 		sep = &pat->elements[*idx];
 		memset(sep, 0, sizeof(RPRPatternElement));
 		sep->varId = RPR_VARID_SEP;
-		sep->depth = depth;		/* ALT-level boundary, not branch-level */
+		sep->depth = depth;		/* 분기 수준이 아니라 ALT 수준 경계 */
 		sep->min = 1;
 		sep->max = 1;
 		sep->next = RPR_ELEMIDX_INVALID;
@@ -1440,12 +1449,11 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 
 	afterAltIdx = *idx;
 
-	/* ALT reaches the first branch's terminating SEP */
+	/* ALT는 첫 분기를 끝맺는 SEP에 도달한다 */
 	pat->elements[altIdx].jump = linitial_int(altEndPositions) + 1;
 
 	/*
-	 * Wire the SEP chain, and redirect each branch's exits past the
-	 * alternation.
+	 * SEP 체인을 연결하고, 각 분기의 출구를 alternation 뒤로 재지정한다.
 	 */
 	forboth(lc, altBranchStarts, lc2, altEndPositions)
 	{
@@ -1455,7 +1463,7 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		ListCell   *nextEnd = lnext(altEndPositions, lc2);
 		int			elemIdx;
 
-		/* SEP.jump -> next SEP; SEP.next -> next branch content */
+		/* SEP.jump -> 다음 SEP; SEP.next -> 다음 분기 내용 */
 		if (nextEnd != NULL)
 		{
 			pat->elements[sepIdx].jump = lfirst_int(nextEnd) + 1;
@@ -1468,11 +1476,10 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		}
 
 		/*
-		 * Redirect the branch's fall-through exit to after the alternation.
-		 * The natural exit is the element past the branch content, which is
-		 * this branch's SEP; a simple tail leaves next unset (finalize would
-		 * fall it through to the SEP), while an inner ALT already set next to
-		 * that position.
+		 * 분기의 자연스러운 출구를 alternation 뒤로 재지정한다.  자연스러운
+		 * 출구는 분기 내용 다음 요소, 즉 이 분기의 SEP인데, 단순한 꼬리는
+		 * next를 설정하지 않은 채로 두고(finalize가 SEP로 흘려보낸다), 내부
+		 * ALT는 이미 next를 그 위치로 설정해 두었다.
 		 */
 		if (pat->elements[endPos].next != RPR_ELEMIDX_INVALID)
 		{
@@ -1499,21 +1506,20 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 
 /*
  * fillRPRPattern
- *		Fill pattern elements array from parse tree (pass 2).
+ *		파스 트리로부터 요소 배열을 채운다(패스 2).
  *
- * Recursively traverses the parse tree and populates pre-allocated elements
- * array.
- * Dispatches to type-specific fill functions.
+ * 파스 트리를 재귀적으로 순회하며 미리 할당된 elements 배열을 채운다.  타입별
+ * 채우기 함수로 디스패치한다.
  *
- * Returns the pattern's empty-match flags (RPR_ELEM_EMPTY_LOOP for nullable,
- * RPR_ELEM_EMPTY_PREFERRED for empty-preferred).  For a SEQ, a concatenation is
- * nullable / empty-preferred only when every child is, so the children's flags
- * are AND-ed together.
+ * 패턴의 빈-매치 플래그를 반환한다(nullable이면 RPR_ELEM_EMPTY_LOOP,
+ * empty-preferred이면 RPR_ELEM_EMPTY_PREFERRED).
+ * SEQ에서는 모든 자식이 그럴 때에만 concatenation이
+ * nullable / empty-preferred이므로, 자식들의 플래그를 AND한다.
  */
 static RPRElemFlags
 fillRPRPattern(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 {
-	/* Pattern nodes from parser are never NULL */
+	/* 파서가 낸 패턴 노드는 결코 NULL이 아니다 */
 	Assert(node != NULL);
 
 	check_stack_depth();
@@ -1545,12 +1551,12 @@ fillRPRPattern(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth depth)
 
 /*
  * finalizeRPRPattern
- *		Finalize pattern structure after filling elements.
+ *		요소를 채운 뒤 패턴 구조체를 마무리한다.
  *
- * This performs:
- *   1. Initialize absorption flag to false
- *   2. Set up next pointers for sequential flow
- *   3. Add FIN marker at the end
+ * 이 함수가 하는 일:
+ *   1. 흡수 플래그를 false로 초기화
+ *   2. 순차 흐름을 위한 next 포인터 설정
+ *   3. 끝에 FIN 마커 추가
  */
 static void
 finalizeRPRPattern(RPRPattern *result)
@@ -1559,10 +1565,10 @@ finalizeRPRPattern(RPRPattern *result)
 	int			i;
 	RPRPatternElement *finElem;
 
-	/* Initialize absorption flag */
+	/* 흡수 플래그를 초기화한다 */
 	result->isAbsorbable = false;
 
-	/* Set up next pointers for elements that don't have one */
+	/* next가 없는 요소들의 next 포인터를 설정한다 */
 	for (i = 0; i < finIdx; i++)
 	{
 		RPRPatternElement *elem = &result->elements[i];
@@ -1570,12 +1576,12 @@ finalizeRPRPattern(RPRPattern *result)
 		if (elem->next == RPR_ELEMIDX_INVALID)
 			elem->next = (i < finIdx - 1) ? i + 1 : finIdx;
 
-		/* Verify quantifier range is valid */
+		/* 수량자 범위가 유효한지 검증한다 */
 		Assert(elem->min >= 0 && elem->min < RPR_QUANTITY_INF &&
 			   elem->max >= 1 && elem->min <= elem->max);
 	}
 
-	/* Add FIN marker at the end */
+	/* 끝에 FIN 마커를 추가한다 */
 	finElem = &result->elements[finIdx];
 	memset(finElem, 0, sizeof(RPRPatternElement));
 	finElem->varId = RPR_VARID_FIN;
@@ -1587,124 +1593,128 @@ finalizeRPRPattern(RPRPattern *result)
 }
 
 /*-------------------------------------------------------------------------
- * CONTEXT ABSORPTION: TWO-FLAG DESIGN
+ * 컨텍스트 흡수: 2-플래그 설계
  *-------------------------------------------------------------------------
  *
- * Context absorption eliminates redundant match searches by absorbing newer
- * contexts that cannot produce longer matches than older contexts. This
- * achieves O(n^2) -> O(n) performance improvement for patterns like A+ B.
+ * 컨텍스트 흡수는 더 오래된 컨텍스트보다 긴 매치를 만들어 낼 수 없는 더 최근
+ * 컨텍스트를 흡수하여 불필요한 매치 탐색을 없앤다.  이는 A+ B와 같은 패턴에서
+ * O(n^2) -> O(n) 성능 향상을 달성한다.
  *
- * Core Insight:
- *   For pattern A+ B, if Ctx1 starts at row 0 and Ctx2 starts at row 1,
- *   both matching A continuously, Ctx1 will always have more A matches.
- *   When B finally appears, Ctx1's match (0 to current) is always longer
- *   than Ctx2's match (1 to current). So Ctx2 can be safely eliminated.
+ * 핵심 통찰:
+ *   패턴 A+ B에 대해, Ctx1이 0 행에서 시작하고 Ctx2가 1 행에서 시작하여 둘 다
+ *   A에 계속 매치한다면, Ctx1은 항상 더 많은 A 매치를 가진다.  B가 마침내
+ *   나타나면, Ctx1의 매치(0 에서 현재까지)는 항상 Ctx2의
+ *   매치(1 에서 현재까지)보다 길다.  그러므로 Ctx2는 안전하게 제거할 수 있다.
  *
- * Two Flags:
+ * 두 플래그:
  *   1. RPR_ELEM_ABSORBABLE - "Absorption comparison point"
- *      WHERE contexts can be compared for absorption.
- *      - Simple unbounded VAR (A+): the VAR element itself
- *      - Unbounded GROUP ((A B)+): the END element only
+ *      흡수를 위해 컨텍스트를 비교할 수 있는 위치.
+ *      - 단순 무제한 VAR(A+): VAR 요소 자신
+ *      - 무제한 GROUP((A B)+): END 요소만
  *
  *   2. RPR_ELEM_ABSORBABLE_BRANCH - "Absorbable region marker"
- *      ALL elements within the absorbable region.
- *      - Used for tracking state.isAbsorbable at runtime
- *      - States leaving this region become non-absorbable permanently
+ *      흡수 가능 영역 안의 모든 요소.
+ *      - 런타임에 state.isAbsorbable 을 추적하는 데 사용
+ *      - 이 영역을 벗어난 상태는 영구히 흡수 불가가 된다
  *
- * Why Two Flags?
- *   For pattern "(A B)+", contexts at different positions (one at A,
- *   another at B) cannot be compared - they must synchronize at END.
+ * 왜 두 개의 플래그인가?
+ *   패턴 "(A B)+"에서는, (하나는 A에, 다른 하나는 B에 있는) 서로 다른 위치의
+ *   컨텍스트를 비교할 수 없다 - 반드시 END에서 동기화해야 한다.
  *
- *   Example: "(A B)+" with input A B A B A B...
- *     Row 0 (A): Ctx1 starts, matches A
- *     Row 1 (B): Ctx1 matches B -> END (count=1)
- *     Row 2 (A): Ctx1 loops to A, Ctx2 starts at A
- *     Row 3 (B): Ctx1 at END (count=2), Ctx2 at END (count=1)
- *                -> Both at END, comparable! Ctx1 absorbs Ctx2.
+ *   예: 입력 A B A B A B...에 대한 "(A B)+"
+ *     0 행 (A): Ctx1이 시작해 A에 매치
+ *     1 행 (B): Ctx1이 B에 매치 -> END (count=1)
+ *     2 행 (A): Ctx1이 A로 루프, Ctx2가 A에서 시작
+ *     3 행 (B): Ctx1은 END(count=2), Ctx2는 END(count=1)
+ *                -> 둘 다 END에 있어 비교 가능! Ctx1이 Ctx2를 흡수한다.
  *
- *   Contexts synchronize at END every group-length rows. Therefore:
- *   - ABSORBABLE marks END as comparison point (where to compare)
- *   - ABSORBABLE_BRANCH keeps state.isAbsorbable=true through A->B->END
+ *   컨텍스트는 그룹 길이만큼의 행마다 END에서 동기화된다.  따라서:
+ *   - ABSORBABLE은 END를 판단 지점으로 표시한다(어디를 비교할지)
+ *   - ABSORBABLE_BRANCH 는 A->B->END 내내
+ *     state.isAbsorbable=true를 유지시킨다
  *
- * Pattern Examples:
+ * 패턴 예:
  *
- *   Pattern: A+ B
- *   Element 0 (A): ABSORBABLE | ABSORBABLE_BRANCH  <- comparison point
- *   Element 1 (B): (none)
- *   -> Compare at A every row. When contexts move to B, absorption stops.
+ *   패턴: A+ B
+ *   요소 0 (A): ABSORBABLE | ABSORBABLE_BRANCH  <- 판단 지점
+ *   요소 1 (B): (없음)
+ *   -> 매 행마다 A에서 비교한다.  컨텍스트가 B로 이동하면 흡수가
+ *      멈춘다.
  *
- *   Pattern: (A B)+ C
- *   Element 0 (BEGIN): ABSORBABLE_BRANCH
- *   Element 1 (A): ABSORBABLE_BRANCH
- *   Element 2 (B): ABSORBABLE_BRANCH
- *   Element 3 (END): ABSORBABLE | ABSORBABLE_BRANCH  <- comparison point
- *   Element 4 (C): (none)
- *   -> Compare at END every 2 rows. When contexts move to C, absorption stops.
+ *   패턴: (A B)+ C
+ *   요소 0 (BEGIN): ABSORBABLE_BRANCH
+ *   요소 1 (A): ABSORBABLE_BRANCH
+ *   요소 2 (B): ABSORBABLE_BRANCH
+ *   요소 3 (END): ABSORBABLE | ABSORBABLE_BRANCH  <- 판단 지점
+ *   요소 4 (C): (없음)
+ *   -> 2 행마다 END에서 비교한다.  컨텍스트가 C로 이동하면 흡수가
+ *      멈춘다.
  *
- *   Pattern: (A+ B+)+ C
- *   Element 0 (BEGIN): ABSORBABLE_BRANCH
- *   Element 1 (A): ABSORBABLE | ABSORBABLE_BRANCH  <- comparison point
- *   Element 2 (B): (none)
- *   Element 3 (END): (none)
- *   Element 4 (C): (none)
- *   -> Compare at A during the first iteration. After moving to B+,
- *      absorption stops.
+ *   패턴: (A+ B+)+ C
+ *   요소 0 (BEGIN): ABSORBABLE_BRANCH
+ *   요소 1 (A): ABSORBABLE | ABSORBABLE_BRANCH  <- 판단 지점
+ *   요소 2 (B): (없음)
+ *   요소 3 (END): (없음)
+ *   요소 4 (C): (없음)
+ *   -> 첫 반복 동안 A에서 비교한다.  B+로 옮긴 뒤에는 흡수가 멈춘다.
  *
- * First Unbounded Portion Strategy:
- *   Along one path the algorithm only flags the FIRST unbounded portion
- *   starting from element 0; an alternation is walked branch by branch, so
- *   each branch may contribute one (A+ | B+ gives both). This is sufficient
- *   because:
- *   - Absorption in first portion already achieves O(n) complexity
- *   - Later portions have different synchronization characteristics
- *   - Nested unbounded patterns are too complex for simple absorption
- *   - Complex patterns (nested groups, etc.) naturally die from mismatch
+ * 첫 번째 무제한 구간 전략:
+ *   한 경로를 따라, 알고리즘은 요소 0 에서 시작하는 첫 번째 무제한 구간에만
+ *   플래그를 붙인다; alternation은 분기별로 훑으므로, 각 분기가 하나씩 기여할
+ *   수 있다(A+ | B+는 둘 다 얻는다).  이것으로 충분한 이유는:
+ *   - 첫 구간에서의 흡수만으로 이미 O(n) 복잡도를 달성한다
+ *   - 이후 구간은 동기화 특성이 다르다
+ *   - 중첩된 무제한 패턴은 단순한 흡수로 다루기에는 너무 복잡하다
+ *   - 복잡한 패턴(중첩 그룹 등)은 불일치로 인해 자연스럽게 무산된다
  *
- * Runtime Usage (in execRPR.c):
+ * 런타임 사용법(execRPR.c에서):
  *   - state.isAbsorbable = (previous && elem.ABSORBABLE_BRANCH)
- *   - Monotonic: once false, stays false (cannot re-enter region)
- *   - context.hasAbsorbableState: can absorb others (>=1 absorbable state)
- *   - context.allStatesAbsorbable: can be absorbed (ALL states absorbable)
- *   - Absorption check: if Ctx1.hasAbsorbable && Ctx2.allAbsorbable,
- *     compare counts at same elemIdx, absorb if Ctx1.count >= Ctx2.count
+ *   - 단조성: 한 번 false가 되면 계속
+ *     false이다(그 영역에 다시 들어올 수 없다)
+ *   - context.hasAbsorbableState: 다른 것을 흡수할 수
+ *     있다(흡수 가능한 상태가 1 개 이상)
+ *   - context.allStatesAbsorbable: 흡수될 수 있다(모든 상태가 흡수 가능)
+ *   - 흡수 검사: Ctx1.hasAbsorbable && Ctx2.allAbsorbable 이면, 같은
+ *     elemIdx 에서 카운트를 비교하여 Ctx1.count >= Ctx2.count이면 흡수한다
  *
  *-------------------------------------------------------------------------
  */
 
 /*
  * isFixedLengthChildren
- *		Check if every element in elem's scope has a fixed-length
- *		quantifier (min == max), nested subgroups included.
+ *		elem의 스코프 안 모든 요소가 (중첩된 서브그룹을 포함해) 고정 길이
+ *		수량자(min == max)를 가지는지 확인한다.
  *
- * A fixed-length group is semantically equivalent to unrolling each child
- * to {1,1} copies, which is the existing Case 2 already proven correct
- * for absorption.  This check recognizes fixed-length groups at compile
- * time without actually unrolling them.
+ * 고정 길이 그룹은 각 자식을 {1,1} 사본으로 풀어놓은 것과 의미상 동등한데,
+ * 이는 흡수에 대해 이미 옳다고 증명된 기존 Case 2 이다. 이 검사는 실제로
+ * 풀어놓지 않고도 컴파일 타임에 고정 길이 그룹을 알아 낸다.
  *
- * Walks the next chain from elem to the element that closes the enclosing
- * group, testing min == max on everything it passes.  A group's quantifier
- * sits on its BEGIN as well as on its END, so one test per element covers
- * a nested subgroup as well, and the walk needs no notion of how deeply
- * that subgroup nests: a GROUP{1,1} that tryUnwrapGroup() has not removed
- * emits no markers at all, and its children still have to be fixed-length
- * for the region to be.  ALT elements are rejected (alternation inside an
- * absorbable group is not supported).
+ * elem에서 시작해 둘러싼 그룹을 닫는 요소까지 next 체인을 따라가며, 지나는
+ * 모든 요소에 대해 min == max를 검사한다.  그룹의 수량자는 BEGIN에도
+ * END에도 있으므로, 요소당 한 번의 검사로 중첩된 서브그룹도 함께 다루며,
+ * 그 서브그룹이 얼마나 깊이 중첩됐는지 알 필요가 없다: tryUnwrapGroup()이
+ * 없애지 않은 GROUP{1,1}은 마커를 전혀 내지 않으며, 그 children도
+ * 이 영역이 고정 길이가 되려면 마찬가지로 고정 길이여야 한다.  ALT
+ * 요소는 거부된다(흡수 가능한 그룹 안의 alternation은 지원하지 않는다).
  *
- * Returns true if every element in the scope is fixed-length.
+ * 스코프 안 모든 요소가 고정 길이이면 true를 반환한다.
  */
 static bool
 isFixedLengthChildren(RPRPattern *pattern, RPRPatternElement *elem)
 {
 	RPRDepth	scopeDepth = elem->depth;
 
-	/* FIN bounds the walk where depth cannot, as in isUnboundedStart() */
+	/*
+	 * isUnboundedStart()에서처럼, depth가 할 수 없는 곳에서 FIN이 순회의
+	 * 한계가 된다
+	 */
 	for (; elem->depth >= scopeDepth && !RPRElemIsFin(elem);
 		 elem = &pattern->elements[elem->next])
 	{
-		/* FIN is the only element without a successor, and it stopped us */
+		/* FIN은 후속 요소가 없는 유일한 요소이며, 그래서 우리를 멈춰 세웠다 */
 		Assert(elem->next != RPR_ELEMIDX_INVALID);
 
-		/* Alternation inside an absorbable group is not supported */
+		/* 흡수 가능한 그룹 안의 alternation은 지원하지 않는다 */
 		if (RPRElemIsAlt(elem))
 			return false;
 
@@ -1717,40 +1727,39 @@ isFixedLengthChildren(RPRPattern *pattern, RPRPatternElement *elem)
 
 /*
  * isUnboundedStart
- *		Check if elem starts an unbounded greedy sequence.
+ *		elem이 무제한 탐욕적 시퀀스를 시작하는지 확인한다.
  *
- * For context absorption to work, the sequence starting at elem must be:
- *   - Unbounded (max = infinity)
- *   - Greedy (not reluctant)
- *   - At the start of current scope
+ * 컨텍스트 흡수가 동작하려면 elem에서 시작하는 시퀀스가 다음을 만족해야 한다:
+ *   - 무제한(max = 무한)
+ *   - 탐욕적(reluctant가 아님)
+ *   - 현재 스코프의 시작 지점
  *
- * Two cases are handled:
- *   1. Simple VAR: A+ B C - A has max=INF, gets both flags
- *   2. Unbounded GROUP with fixed-length children: (A B{2})+ C
- *      All children must have min == max (recursively for nested subgroups).
- *      This is equivalent to unrolling to {1,1} VARs, e.g., (A B B)+ C.
- *      All elements within the group get ABSORBABLE_BRANCH.
- *      Only the unbounded END gets ABSORBABLE (comparison point).
+ * 두 가지 경우를 다룬다:
+ *   1. 단순 VAR: A+ B C - A가 max=INF이며, 두 플래그를 모두 얻는다
+ *   2.  고정 길이 children을 가진 무제한 GROUP: (A B{2})+ C 모든 children이
+ *      (중첩된 서브그룹까지 재귀적으로) min == max여야 한다.  이는 {1,1}
+ *      VAR들로 풀어놓은 것, 예를 들어 (A B B)+ C와 동등하다.  그룹 안의 모든
+ *      요소가 ABSORBABLE_BRANCH 를 얻는다.
+ *      무제한 END만 ABSORBABLE(판단 지점)을 얻는다.
  *
- *      In the examples below, "step" is the number of VARs in one fully
- *      unrolled iteration of the group (its fixed per-iteration length).
- *      Examples:
- *        (A B{2})+ C          - B{2} has min==max, step=3
- *        (A (B C){2} D)+ E    - nested {2} subgroup, step=6
- *        ((A (B C){2}){2})+   - doubly nested {2}, step=10
- *        (A ((B C{3}){2} D){2} E)+ F  - deep nesting, step=20
+ *      아래 예에서 "step"은 그룹을 완전히 한 번 풀어놓았을 때의 VAR
+ *      개수이다(반복당 고정 길이).  예:
+ *        (A B{2})+ C          - B{2}는 min==max, step=3
+ *        (A (B C){2} D)+ E    - 중첩된 {2} 서브그룹, step=6
+ *        ((A (B C){2}){2})+   - 이중으로 중첩된 {2}, step=10
+ *        (A ((B C{3}){2} D){2} E)+ F  - 깊이 중첩, step=20
  *
- * Returns false for patterns where absorption cannot work:
- *   - A B+ (unbounded not at start)
- *   - A+? B (the unbounded quantifier itself is reluctant)
- *   - (A | B)+ (ALT inside group)
- *   - (A B+)+ (variable-length element inside group)
- *   - (A B{2,5})+ (min != max inside group)
+ * 흡수가 동작할 수 없는 패턴에는 false를 반환한다:
+ *   - A B+ (무제한이 시작 지점이 아님)
+ *   - A+? B (무제한 수량자 자체가 reluctant)
+ *   - (A | B)+ (그룹 안의 ALT)
+ *   - (A B+)+ (그룹 안의 가변 길이 요소)
+ *   - (A B{2,5})+ (그룹 안에서 min != max)
  *
- * The reluctance test covers only the quantifier examined here.  A
- * reluctant quantifier on an enclosing group -- (A+)??, where A+ itself
- * is greedy -- is rejected at that group's BEGIN by
- * computeAbsorbabilityRecursive(), before this function is reached.
+ * reluctance 검사는 여기서 살펴보는 수량자만 다룬다.
+ * 둘러싼 그룹에 붙은 reluctant 수량자 -- (A+)??에서
+ * A+ 자체는 탐욕적인 경우 -- 는 이 함수에 도달하기 전에
+ * computeAbsorbabilityRecursive()가 그 그룹의 BEGIN에서 거부한다.
  */
 static bool
 isUnboundedStart(RPRPattern *pattern, RPRPatternElement *elem)
@@ -1758,45 +1767,47 @@ isUnboundedStart(RPRPattern *pattern, RPRPatternElement *elem)
 	RPRDepth	startDepth = elem->depth;
 	RPRPatternElement *e;
 
-	/* Case 1: Simple unbounded VAR at start (greedy only) */
+	/* 경우 1: 시작 지점의 단순 무제한 VAR(탐욕적인 경우만) */
 	if (RPRElemIsVar(elem) && RPRElemIsUnbounded(elem) &&
 		!RPRElemIsReluctant(elem))
 	{
-		/* Set both flags on first element */
+		/* 첫 요소에 두 플래그를 모두 설정한다 */
 		elem->flags |= RPR_ELEM_ABSORBABLE_BRANCH | RPR_ELEM_ABSORBABLE;
 		return true;
 	}
 
 	/*
-	 * Case 2: Unbounded GROUP with fixed-length children.  Each child must
-	 * have min == max (recursively for nested subgroups), ensuring a fixed
-	 * step size per iteration so that count-dominance holds.
+	 * 경우 2: 고정 길이 children을 가진 무제한 GROUP.  각 자식은
+	 * (중첩된 서브그룹까지 재귀적으로) min == max여야 하며, 이는 반복당 step
+	 * 크기를 고정해서 count-dominance가 성립하게 한다.
 	 */
 	if (!isFixedLengthChildren(pattern, elem))
 		return false;
 
 	/*
-	 * Find the END that closes the group, at startDepth - 1.  Group markers
-	 * sit at their parent's depth, so the first element shallower than
-	 * startDepth is that END, not a nested subgroup's, which sits at
-	 * startDepth.  FIN bounds the walk where depth cannot: at startDepth == 0
-	 * nothing is shallower and FIN's next would walk off the array.
+	 * startDepth - 1 에서 그룹을 닫는 END를 찾는다.  그룹 마커는
+	 * 부모의 depth에 위치하므로, startDepth 보다 얕은 첫 요소가
+	 * (startDepth 에 있는 중첩 서브그룹의 것이 아니라) 바로 그 END이다.
+	 * depth가 할 수 없는 곳에서 FIN이 순회의 한계가 된다: startDepth ==
+	 * 0 이면 더 얕은 것이 없어서 FIN의 next는 배열 밖으로 나가 버린다.
 	 */
 	e = elem;
 	while (e->depth >= startDepth && !RPRElemIsFin(e))
 		e = &pattern->elements[e->next];
 
-	/* END must be unbounded greedy */
+	/* END는 무제한 탐욕적이어야 한다 */
 	if (e->depth == startDepth - 1 &&
 		RPRElemIsEnd(e) && RPRElemIsUnbounded(e) &&
 		!RPRElemIsReluctant(e))
 	{
 		RPRPatternElement *endElem = e;
 
-		/* END points back to first child */
+		/* END는 첫 자식을 다시 가리킨다 */
 		Assert(&pattern->elements[e->jump] == elem);
 
-		/* Set ABSORBABLE_BRANCH on all children, ABSORBABLE on END only */
+		/*
+		 * 모든 children에 ABSORBABLE_BRANCH 를, END에만 ABSORBABLE을 설정한다
+		 */
 		for (e = elem; e != endElem; e = &pattern->elements[e->next])
 			e->flags |= RPR_ELEM_ABSORBABLE_BRANCH;
 		endElem->flags |= RPR_ELEM_ABSORBABLE_BRANCH | RPR_ELEM_ABSORBABLE;
@@ -1808,20 +1819,19 @@ isUnboundedStart(RPRPattern *pattern, RPRPatternElement *elem)
 
 /*
  * computeAbsorbabilityRecursive
- *		Recursively check absorbability starting from the given element.
+ *		주어진 요소부터 재귀적으로 흡수 가능성을 검사한다.
  *
- * If elem is ALT, recursively checks each branch independently.  Each
- * branch gets its own absorbability status, and if any branch is
- * absorbable, the ALT element itself is marked with
- * RPR_ELEM_ABSORBABLE_BRANCH.
+ * elem이 ALT이면 각 분기를 독립적으로 재귀 검사한다.  각 분기는 자신의 흡수
+ * 가능성 상태를 가지며, 어느 한 분기라도 흡수 가능하면 ALT 요소 자체가
+ * RPR_ELEM_ABSORBABLE_BRANCH 로 표시된다.
  *
- * If BEGIN, skips to first child -- but only when the group's own
- * quantifier is greedy.  Absorption assumes an earlier context subsumes a
- * later one, which a reluctant group inverts; isUnboundedStart() sees only
- * the quantifier it is handed, so the greedy A+ in (A+)?? needs this check.
+ * BEGIN이면 첫 자식으로 건너뛴다 -- 단, 그룹 자체의 수량자가 탐욕적일 때만.
+ * 흡수는 더 이른 컨텍스트가 더 늦은 것을 포섭한다고 가정하는데, reluctant
+ * 그룹은 이를 뒤집으므로, isUnboundedStart()는 건네받은 수량자만 보기 때문에
+ * (A+)??에서 탐욕적인 A+에는 이 검사가 필요하다.
  *
- * Otherwise (VAR), checks if the element starts an unbounded sequence via
- * isUnboundedStart.
+ * 그 외(VAR)이면 isUnboundedStart 를 통해
+ * 그 요소가 무제한 시퀀스를 시작하는지 확인한다.
  */
 static void
 computeAbsorbabilityRecursive(RPRPattern *pattern,
@@ -1832,7 +1842,7 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 
 	if (RPRElemIsAlt(elem))
 	{
-		/* ALT: recursively check each branch via the SEP chain */
+		/* ALT: SEP 체인을 통해 각 분기를 재귀적으로 검사한다 */
 		RPRPatternElement *branch = &pattern->elements[elem->next];
 		RPRElemIdx	sepIdx = elem->jump;
 
@@ -1841,7 +1851,7 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 			RPRPatternElement *sepElem;
 			bool		branchAbsorbable = false;
 
-			/* Recursively check this branch's content */
+			/* 이 분기의 내용을 재귀적으로 검사한다 */
 			computeAbsorbabilityRecursive(pattern, branch, &branchAbsorbable);
 			if (branchAbsorbable)
 				*hasAbsorbable = true;
@@ -1850,29 +1860,28 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 			sepElem = &pattern->elements[sepIdx];
 			Assert(RPRElemIsSep(sepElem));
 
-			/* The last branch's SEP has no link, ending the walk */
+			/* 마지막 분기의 SEP는 링크가 없어 순회가 끝난다 */
 			branch = &pattern->elements[sepElem->next];
 			sepIdx = sepElem->jump;
 		}
 
-		/* Mark ALT element if any branch is absorbable */
+		/* 어느 분기라도 흡수 가능하면 ALT 요소를 표시한다 */
 		if (*hasAbsorbable)
 			elem->flags |= RPR_ELEM_ABSORBABLE_BRANCH;
 	}
 	else if (RPRElemIsBegin(elem))
 	{
 		/*
-		 * Not an absorbable region.  The group's quantifier sits on its BEGIN
-		 * as well as its END, so this element answers for the group.
+		 * 흡수 가능 영역이 아니다.  그룹의 수량자는 BEGIN에도 END에도
+		 * 있으므로, 이 요소가 그룹을 대표해 답한다.
 		 */
 		if (RPRElemIsReluctant(elem))
 			return;
 
 		/*
-		 * BEGIN: first try to treat this BEGIN's children as an unbounded
-		 * group directly (handles nested fixed-length groups like ((A{2}
-		 * B{3}){2})+).  If that fails, skip to first child and recurse as
-		 * before.
+		 * BEGIN: 먼저 이 BEGIN의 children을 곧바로 무제한 그룹으로 다뤄
+		 * 본다(((A{2} B{3}){2})+ 같은 중첩된 고정 길이 그룹을 처리한다).
+		 * 실패하면 첫 자식으로 건너뛰어 이전처럼 재귀한다.
 		 */
 		if (isUnboundedStart(pattern, &pattern->elements[elem->next]))
 		{
@@ -1885,7 +1894,7 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 										  &pattern->elements[elem->next],
 										  hasAbsorbable);
 
-			/* Mark BEGIN element if contents are absorbable */
+			/* 내용이 흡수 가능하면 BEGIN 요소를 표시한다 */
 			if (*hasAbsorbable)
 				elem->flags |= RPR_ELEM_ABSORBABLE_BRANCH;
 		}
@@ -1893,12 +1902,12 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 	else
 	{
 		/*
-		 * A recursion starts only at the first element of a scope, never an
-		 * END: the BEGIN case above covers a group's body through its END.
+		 * 재귀는 스코프의 첫 요소에서만 시작하며, 결코 END에서 시작하지
+		 * 않는다: 위의 BEGIN 경우가 그룹의 본문을 END까지 다룬다.
 		 */
 		Assert(!RPRElemIsEnd(elem));
 
-		/* Non-ALT, non-BEGIN: check if unbounded start */
+		/* ALT도 BEGIN도 아니면: 무제한 시작인지 검사한다 */
 		if (isUnboundedStart(pattern, elem))
 			*hasAbsorbable = true;
 	}
@@ -1906,63 +1915,62 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 
 /*
  * computeAbsorbability
- *		Determine if pattern supports context absorption optimization.
+ *		패턴이 컨텍스트 흡수 최적화를 지원하는지 판단한다.
  *
- * Context absorption eliminates redundant match searches by absorbing
- * newer contexts that cannot produce longer matches than older contexts.
- * This achieves O(n^2) -> O(n) performance improvement.
+ * 컨텍스트 흡수는 더 오래된 컨텍스트보다 긴 매치를 만들어 낼 수 없는 더 최근
+ * 컨텍스트를 흡수하여 불필요한 매치 탐색을 없앤다.  이는 O(n^2) -> O(n) 성능
+ * 향상을 달성한다.
  *
- * Only greedy unbounded quantifiers at pattern start can be absorbable.
- * Reluctant quantifiers are excluded because they don't maintain monotonic
- * decrease property required for safe absorption -- both the unbounded
- * quantifier itself and any group quantifier enclosing it.
+ * 패턴 시작 지점의 탐욕적 무제한 수량자만 흡수 가능할 수 있다.  reluctant
+ * 수량자는 -- 무제한 수량자 자체이든 그것을 둘러싼 그룹 수량자이든 -- 안전한
+ * 흡수에 필요한 단조 감소 속성을 유지하지 않으므로 제외한다.
  *
- * This function sets two flags:
- *   RPR_ELEM_ABSORBABLE: Absorption comparison point
- *     - Simple unbounded VAR: the VAR itself (e.g., A in A+)
- *     - Unbounded GROUP: the END element (e.g., END in (A B)+)
- *   RPR_ELEM_ABSORBABLE_BRANCH: All elements in absorbable region
- *     - Simple unbounded VAR: the VAR itself
- *     - Unbounded GROUP: the whole body (including nested subgroups) and the
- *       group's END
- *     - in either case, plus any enclosing BEGIN/ALT on the path to it
+ * 이 함수는 두 플래그를 설정한다:
+ *   RPR_ELEM_ABSORBABLE: 흡수 판단 지점
+ *     - 단순 무제한 VAR: VAR 자신(예: A+에서 A)
+ *     - 무제한 GROUP: END 요소(예: (A B)+에서 END)
+ *   RPR_ELEM_ABSORBABLE_BRANCH: 흡수 가능 영역 안의 모든 요소
+ *     - 단순 무제한 VAR: VAR 자신
+ *     - 무제한 GROUP: (중첩된 서브그룹을 포함한) 본문 전체와 그룹의 END
+ *     - 어느 경우든, 거기까지 가는 경로에 있는 둘러싼 BEGIN/ALT도 포함
  *
- * Examples:
- *   A+ B C         - absorbable (A gets both flags)
- *   (A B)+ C       - absorbable (BEGIN,A,B,END get BRANCH, END gets ABSORBABLE)
- *   A B+           - NOT absorbable (unbounded not at start)
- *   A+? B C        - NOT absorbable (reluctant quantifier)
- *   (A+ B+)+       - only first A+ on first iteration (nested unbounded not supported)
- *   A+ | B+        - both branches absorbable independently
- *   A+ | C D       - only A+ branch absorbable (C D branch not absorbable)
- *   ((A+ B) | C) D - nested ALT: A+ branch is absorbable
+ * 예:
+ *   A+ B C         - 흡수 가능(A가 두 플래그를 모두 얻는다)
+ *   (A B)+ C       - 흡수 가능(BEGIN,A,B,END가 BRANCH를, END가
+ *                    ABSORBABLE을 얻는다)
+ *   A B+           - 흡수 불가(무제한이 시작 지점이 아님)
+ *   A+? B C        - 흡수 불가(reluctant 수량자)
+ *   (A+ B+)+       - 첫 반복의 첫 A+만(중첩된 무제한은 지원하지 않음)
+ *   A+ | B+        - 두 분기 모두 독립적으로 흡수 가능
+ *   A+ | C D       - A+ 분기만 흡수 가능(C D 분기는 흡수 불가)
+ *   ((A+ B) | C) D - 중첩된 ALT: A+ 분기가 흡수 가능
  */
 static void
 computeAbsorbability(RPRPattern *pattern)
 {
 	bool		hasAbsorbable = false;
 
-	/* Parser always produces at least one element + FIN */
+	/* 파서는 항상 요소를 적어도 하나 + FIN을 만들어 낸다 */
 	Assert(pattern->numElements >= 2);
 
-	/* Start recursion from first element */
+	/* 첫 요소부터 재귀를 시작한다 */
 	computeAbsorbabilityRecursive(pattern, pattern->elements, &hasAbsorbable);
 	pattern->isAbsorbable = hasAbsorbable;
 }
 
 /*
  * buildRPRPattern
- *		Compile pattern parse tree to flat bytecode array.
+ *		패턴 파스 트리를 평탄화된 바이트코드 배열로 컴파일한다.
  *
- * Compilation phases:
- *   1. Optimize parse tree (flatten, merge, deduplicate)
- *   2. Scan: collect variables, count elements (pass 1)
- *   3. Allocate result structure
- *   4. Fill elements from parse tree (pass 2)
- *   5. Finalize pattern structure
- *   6. Compute context absorption eligibility
+ * 컴파일 단계:
+ *   1. 파스 트리 최적화(평탄화, 병합, 중복 제거)
+ *   2. 스캔: 변수를 모으고 요소 수를 센다(패스 1)
+ *   3. 결과 구조체 할당
+ *   4. 파스 트리로부터 요소를 채운다(패스 2)
+ *   5. 패턴 구조체 마무리
+ *   6. 컨텍스트 흡수 가능 여부 계산
  *
- * Called from createplan.c during plan creation.
+ * 플랜 생성 중 createplan.c에서 호출된다.
  */
 RPRPattern *
 buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
@@ -1977,77 +1985,76 @@ buildRPRPattern(RPRPatternNode *pattern, List *defineClause,
 	RPRDepth	maxDepth;
 	int			idx;
 
-	/* Caller must check for NULL pattern before calling */
+	/* 호출자는 호출 전에 NULL 패턴인지 확인해야 한다 */
 	Assert(pattern != NULL);
-	/* RPR is ROWS-only: transformRPR() rejects RANGE/GROUPS up front */
+	/* RPR은 ROWS 전용이다: transformRPR()이 RANGE/GROUPS를 미리 거부한다 */
 	Assert(frameOptions & FRAMEOPTION_ROWS);
 
-	/* Optimize the pattern tree */
+	/* 패턴 트리를 최적화한다 */
 	optimized = optimizeRPRPattern(copyObject(pattern));
 
 	numVars = 0;
 
 	/*
-	 * Populate varNamesStack with the DEFINE variable names in DEFINE order.
-	 * This ensures varId == defineClause index, eliminating runtime mapping.
+	 * DEFINE 순서대로 DEFINE 변수 이름으로 varNamesStack 을 채운다.  이렇게
+	 * 하면 varId == defineClause 인덱스가 되어, 런타임 매핑이 필요 없다.
 	 */
 	foreach_node(TargetEntry, te, defineClause)
 	{
-		/* Parser always assigns a name to each DEFINE entry */
+		/* 파서는 각 DEFINE 항목에 항상 이름을 붙인다 */
 		Assert(te->resname != NULL);
 
 		varNamesStack[numVars++] = te->resname;
 	}
 
-	/* Scan pattern: collect variables, count elements, validate limits */
+	/* 패턴을 스캔한다: 변수를 모으고, 요소 수를 세고, 한계를 검증한다 */
 	scanRPRPattern(optimized, varNamesStack, &numVars, &numElements, &maxDepth);
 
 	/*
-	 * numVars may reach RPR_VARID_MAX + 1 (valid varIds are 0 ..
-	 * RPR_VARID_MAX)
+	 * numVars 는 RPR_VARID_MAX + 1 에 이를 수 있다(유효한 varIds 는
+	 * 0..RPR_VARID_MAX 이다)
 	 */
 	Assert(numVars <= RPR_VARID_MAX + 1);
 
-	/* Allocate result structure */
+	/* 결과 구조체를 할당한다 */
 	result = makeRPRPattern(numVars, numElements, maxDepth, varNamesStack);
 
-	/* Fill elements (pass 2) */
+	/* 요소를 채운다(패스 2) */
 	idx = 0;
 	fillRPRPattern(optimized, result, &idx, 0);
 
-	/* Finalize: set up next pointers, flags, and add FIN marker */
+	/* 마무리: next 포인터, 플래그를 설정하고 FIN 마커를 추가한다 */
 	finalizeRPRPattern(result);
 
 	/*
-	 * Compute context absorption eligibility. Absorption requires both
-	 * structural absorbability and runtime conditions. Check runtime
-	 * conditions first to avoid unnecessary pattern analysis.
+	 * 컨텍스트 흡수 가능 여부를 계산한다.  흡수는 구조적 흡수 가능성과 런타임
+	 * 조건을 모두 필요로 한다.  불필요한 패턴 분석을 피하려고 런타임 조건을
+	 * 먼저 검사한다.
 	 *
-	 * Runtime conditions for absorption:
+	 * 흡수를 위한 런타임 조건:
 	 *
-	 * 1. SKIP TO PAST LAST ROW required (not SKIP TO NEXT ROW): with NEXT
-	 * ROW, matches overlap and every row must report its own match, so
-	 * absorption (sharing one result) is not semantically possible.  A
-	 * completed context does linger until its own start row is queried; that
-	 * is the inherent cost of per-row match reporting, not redundancy
-	 * absorption could remove.
+	 * 1. (SKIP TO NEXT ROW가 아니라) SKIP TO PAST LAST ROW가 필요하다:
+	 * NEXT ROW에서는 매치가 겹치고 모든 행이 자신의 매치를 보고해야 하므로,
+	 * 흡수(결과 하나를 공유하는 것)는 의미상 가능하지 않다.  완료된
+	 * 컨텍스트는 자신의 시작 행이 조회될 때까지 남아 있는데, 이는 행 단위
+	 * 매치 보고에 내재한 비용이지 흡수로 없앨 수 있는 중복이 아니다.
 	 *
-	 * 2. Unbounded frame end required (not ROWS with bounded end): With a
-	 * bounded frame (e.g., ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING),
-	 * matches may be truncated at frame boundaries. This changes the
-	 * absorption semantics - older contexts don't necessarily produce longer
-	 * matches when frame limits apply differently to each context.
+	 * 2. (한계가 있는 ROWS가 아니라) 무제한 프레임 끝이 필요하다.
+	 * 프레임에 한계가 있으면(예: ROWS BETWEEN CURRENT ROW AND 10 FOLLOWING),
+	 * 매치가 프레임 경계에서 잘릴 수 있다.  이는 흡수 의미론을 바꾼다 -
+	 * 프레임 한계가 각 컨텍스트에 다르게 적용될 때는 더 오래된 컨텍스트가
+	 * 반드시 더 긴 매치를 만들어 내지는 않는다.
 	 *
-	 * 3. No DEFINE may depend on match_start: such a variable is evaluated
-	 * against the start of its own match, so two contexts that differ only in
-	 * where they started can classify the same row differently and the older
-	 * one no longer covers the newer.
+	 * 3. 어떤 DEFINE도 match_start 에 의존해서는 안 된다: 그런 변수는
+	 * 자신의 매치 시작을 기준으로 평가되므로, 시작 위치만 다른 두 컨텍스트가
+	 * 같은 행을 다르게 분류할 수 있고, 더 오래된 쪽이 더 이상 더 최근 것을
+	 * 포괄하지 못하게 된다.
 	 */
 	if (rpSkipTo == ST_PAST_LAST_ROW &&
 		(frameOptions & FRAMEOPTION_END_UNBOUNDED_FOLLOWING) &&
 		!hasMatchStartDependent)
 	{
-		/* Runtime conditions met - check structural absorbability */
+		/* 런타임 조건 충족 - 구조적 흡수 가능성을 검사한다 */
 		computeAbsorbability(result);
 	}
 

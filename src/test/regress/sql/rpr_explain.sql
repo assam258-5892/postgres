@@ -1,49 +1,48 @@
 -- ============================================================
--- RPR EXPLAIN Tests
--- Tests for Row Pattern Recognition EXPLAIN output
+-- RPR EXPLAIN 테스트
+-- 행 패턴 인식(RPR) EXPLAIN 출력에 대한 테스트
 -- ============================================================
 --
--- Views and tables in this file are intentionally not dropped,
--- so that pg_upgrade/pg_dump can test RPR syntax serialization.
+-- 이 파일의 뷰와 테이블은 일부러 drop하지 않는데, pg_upgrade/pg_dump 가 RPR
+-- 구문 직렬화를 테스트할 수 있게 하기 위해서다.
 --
--- This test suite validates EXPLAIN output for RPR queries,
--- including NFA statistics shown in EXPLAIN ANALYZE:
+-- 이 테스트 모음은 RPR 질의의 EXPLAIN 출력을 검증하며,
+-- EXPLAIN ANALYZE에 나타나는 NFA 통계도 포함한다:
 --   - NFA States: peak, total, merged
 --   - NFA Contexts: peak, total, pruned
 --   - NFA: matched (len min/max/avg), mismatched (len min/max/avg)
 --   - NFA: absorbed (len min/max/avg), skipped (len min/max/avg)
---   - Pattern deparse formatting
---   - Multiple output formats (text, JSON, XML)
+--   - Pattern 디파스 형식
+--   - 여러 출력 형식 (text, JSON, XML)
 --
--- Test Coverage:
---   Basic NFA Statistics Tests
---   State Statistics Tests
---   Context Statistics Tests
---   Match Length Statistics Tests
---   Mismatch Length Statistics Tests
---   JSON Format Tests
---   XML Format Tests
---   Multiple Partitions Tests
---   Edge Cases
---   Complex Pattern Tests
---   Real-world Pattern Examples
---   Performance-oriented Tests
---   INITIAL vs no INITIAL comparison
---   Quantifier Variations
---   Regression Tests for Statistics Accuracy
---   Alternation Pattern Tests
---   Group Pattern Tests
---   Window Function Combinations
---   DEFINE Expression Variations
---   Large Scale Statistics Verification
+-- 테스트 범위:
+--   기본 NFA 통계 테스트
+--   상태 통계 테스트
+--   컨텍스트 통계 테스트
+--   매치 길이 통계 테스트
+--   미스매치 길이 통계 테스트
+--   JSON 형식 테스트
+--   XML 형식 테스트
+--   다중 파티션 테스트
+--   경계 사례
+--   복합 패턴 테스트
+--   실무 패턴 예제
+--   성능 지향 테스트
+--   INITIAL 대 no INITIAL 비교
+--   수량자 변형
+--   통계 정확도 회귀 테스트
+--   Alternation 패턴 테스트
+--   Group 패턴 테스트
+--   윈도우 함수 조합
+--   DEFINE 표현식 변형
+--   대규모 통계 검증
 --   Nav Mark Lookback/Lookahead (tuplestore trim)
 -- ============================================================
 
--- Filter function to normalize platform-dependent memory values
--- (not NFA statistics).
--- NFA statistics should not change between platforms; if they do, it could
--- indicate issues such as uninitialized memory access.
--- Works for text, JSON, and XML formats.
+-- 플랫폼에 따라 달라지는 메모리 값을 정규화하는 필터 함수
+-- (NFA 통계는 아니다).  NFA 통계는 플랫폼 사이에서 달라지면 안 된다; 만약
+-- 달라진다면 초기화되지 않은 메모리 접근 같은 문제를 나타내는 것일 수 있다.
+-- text, JSON, XML 형식 모두에 대해 동작한다.
 create function rpr_explain_filter(text) returns setof text
 language plpgsql as
 $$
@@ -52,25 +51,25 @@ declare
 begin
     for ln in execute $1
     loop
-        -- Normalize platform-dependent memory values
-        -- Keep NFA statistics numbers unchanged (they are test assertions)
+        -- 플랫폼에 따라 달라지는 메모리 값을 정규화한다
+        -- NFA 통계 숫자는 바꾸지 않고 그대로 둔다(테스트 단언이므로)
 
-        -- Text format: "Storage: Memory  Maximum Storage: 18kB"
+        -- text 형식: "Storage: Memory  Maximum Storage: 18kB"
         if ln ~ 'Storage:.*Maximum Storage:' then
             ln := regexp_replace(ln, '\m\d+kB', 'NkB', 'g');
         end if;
 
-        -- JSON format: "Maximum Storage": 17 (number in kB units)
+        -- JSON 형식: "Maximum Storage": 17 (kB 단위 숫자)
         if ln ~ '"Maximum Storage":' then
             ln := regexp_replace(ln, '"Maximum Storage": \d+', '"Maximum Storage": 0', 'g');
         end if;
 
-        -- XML format: <Maximum-Storage>17</Maximum-Storage> (number in kB units)
+        -- XML 형식: <Maximum-Storage>17</Maximum-Storage> (kB 단위 숫자)
         if ln ~ '<Maximum-Storage>' then
             ln := regexp_replace(ln, '<Maximum-Storage>\d+</Maximum-Storage>', '<Maximum-Storage>0</Maximum-Storage>', 'g');
         end if;
 
-        -- Sort Method memory is platform-dependent (32-bit vs 64-bit)
+        -- Sort Method 메모리는 플랫폼에 따라 달라진다 (32 비트 대 64 비트)
         if ln ~ 'Sort Method:.*Memory:' then
             ln := regexp_replace(ln, 'Memory: \d+kB', 'Memory: NkB');
         end if;
@@ -80,14 +79,14 @@ begin
 end;
 $$;
 
--- Setup: Create test tables
+-- 준비: 테스트 테이블 생성
 CREATE TABLE rpr_nfa_test (
     id serial,
     v int,
     cat char(1)
 );
 
--- Insert test data: 100 rows with predictable pattern
+-- 테스트 데이터 삽입: 예측 가능한 패턴을 가진 100 개의 행
 INSERT INTO rpr_nfa_test (v, cat)
 SELECT i,
        CASE
@@ -99,11 +98,11 @@ SELECT i,
        END
 FROM generate_series(1, 100) i;
 
--- Additional test table with more complex patterns
+-- 더 복잡한 패턴을 위한 추가 테스트 테이블
 CREATE TABLE rpr_nfa_complex (
     id serial,
     price int,
-    trend char(1)  -- U=up, D=down, S=stable
+    trend char(1)  -- U=상승, D=하락, S=안정
 );
 
 INSERT INTO rpr_nfa_complex (price, trend)
@@ -116,10 +115,10 @@ VALUES
     (131, 'U'), (133, 'U'), (130, 'D'), (127, 'D'), (124, 'D');
 
 -- ============================================================
--- Basic NFA Statistics Tests
+-- 기본 NFA 통계 테스트
 -- ============================================================
 
--- Simple pattern - should show basic statistics
+-- 단순 패턴 - 기본 통계를 보여야 한다
 CREATE VIEW rpr_ev_basic_simple AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -141,7 +140,7 @@ WINDOW w AS (
     DEFINE A AS cat = ''A'', B AS cat = ''B''
 )');
 
--- Pattern with no matches - 0 matched
+-- 매치가 없는 패턴 - matched 0
 CREATE VIEW rpr_ev_basic_nomatch AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -163,7 +162,7 @@ WINDOW w AS (
     DEFINE X AS cat = ''X'', Y AS cat = ''Y'', Z AS cat = ''Z''
 );');
 
--- Pattern matching every row - high match count
+-- 모든 행에 매치되는 패턴 - 높은 매치 개수
 CREATE VIEW rpr_ev_basic_allrows AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -185,8 +184,8 @@ WINDOW w AS (
     DEFINE R AS TRUE
 );');
 
--- Space before parenthesis in pattern deparse
--- Verifies that "A (B | C)" correctly outputs as "a (b | c)" with space
+-- pattern 디파스에서 괄호 앞의 공백
+-- "A (B | C)" 가 "a (b | c)" 로 공백을 두고 올바르게 출력되는지 검증한다
 CREATE VIEW rpr_ev_basic_deparse_space AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -206,8 +205,8 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );');
 
--- Sequential alternations at the same depth
--- Verifies that "((B | C) (D | E))*" correctly outputs as "((b | c) (d | e))*"
+-- 같은 깊이에서 연속된 alternation
+-- "((B | C) (D | E))*" 가 "((b | c) (d | e))*" 로 올바르게 출력되는지 검증한다
 CREATE VIEW rpr_ev_basic_deparse_seqalt AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -227,9 +226,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 1, B AS v % 5 = 2, C AS v % 5 = 3, D AS v % 5 = 4, E AS v % 5 = 0
 );');
 
--- ALT branch whose tail is a group
--- (A | (B C)+ (D E)+) means A | ((B C)+ (D E)+) by precedence, so the two
--- trailing groups must deparse inside one branch, not as separate branches.
+-- 꼬리가 group인 ALT 분기
+-- (A | (B C)+ (D E)+)는 우선순위상 A | ((B C)+ (D E)+)를 뜻하므로, 뒤쪽의 두
+-- group은 별개의 분기가 아니라 하나의 분기 안에서 디파스 되어야 한다.
 CREATE VIEW rpr_ev_basic_deparse_alttail AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -239,8 +238,8 @@ WINDOW w AS (
     DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_basic_deparse_alttail'), E'\n')) AS line WHERE line ~ 'PATTERN';
--- The viewdef above deparses the parse tree; this one deparses the compiled
--- element array, which enumerates ALT branches via the SEP terminators.
+-- 위의 viewdef는 파스 트리를 디파스하고, 이번 것은 컴파일된 요소 배열을
+-- 디파스하는데, 이는 SEP 종결자를 통해 ALT 분기를 나열한다.
 SELECT rpr_explain_filter('
 EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
 SELECT count(*) OVER w
@@ -251,8 +250,8 @@ WINDOW w AS (
     DEFINE A AS v % 6 = 1, B AS v % 6 = 2, C AS v % 6 = 3, D AS v % 6 = 4, E AS v % 6 = 5
 );');
 
--- Quoted identifiers in EXPLAIN pattern deparse
--- Mixed case names must be quoted to preserve round-trip safety
+-- EXPLAIN pattern 디파스 안의 따옴표 붙은 식별자 대소문자가 섞인 이름은
+-- 라운드트립 안전성을 지키기 위해 따옴표가 붙어야 한다
 SELECT rpr_explain_filter('
 EXPLAIN (COSTS OFF)
 SELECT count(*) OVER w
@@ -264,10 +263,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- State Statistics Tests (peak, total, merged)
+-- 상태 통계 테스트 (peak, total, merged)
 -- ============================================================
 
--- Simple quantifier pattern - A+ with short matches (no merging)
+-- 단순 수량자 패턴 - 짧은 매치를 가진 A+ (병합 없음)
 CREATE VIEW rpr_ev_state_simple_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -289,7 +288,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1
 );');
 
--- Alternation pattern - multiple state branches
+-- Alternation 패턴 - 여러 상태 분기
 CREATE VIEW rpr_ev_state_alt AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -315,7 +314,7 @@ WINDOW w AS (
         D AS cat = ''D'', E AS cat = ''E''
 );');
 
--- Complex pattern: quantified sequence with a star element
+-- 복합 패턴: star 요소를 가진 수량화된 시퀀스
 CREATE VIEW rpr_ev_state_complex AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -343,7 +342,7 @@ WINDOW w AS (
         C AS v % 3 = 0
 );');
 
--- Grouped pattern with quantifier - state count with grouping
+-- 수량자가 붙은 group 패턴 - group화된 상태 개수
 CREATE VIEW rpr_ev_state_group_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -365,7 +364,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- State explosion pattern - many alternations
+-- 상태 폭발 패턴 - 많은 alternation
 CREATE VIEW rpr_ev_state_explosion AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -387,7 +386,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- Consecutive ALT merge followed by different ALT
+-- 연속 ALT 병합 뒤에 다른 ALT가 이어지는 경우
 -- ((A | B) (A | B) (C | D)) -> (A|B){2} (C|D)
 CREATE VIEW rpr_ev_state_alt_merge_alt AS
 SELECT count(*) OVER w
@@ -410,7 +409,7 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Consecutive ALT merge followed by non-ALT element
+-- 연속 ALT 병합 뒤에 ALT가 아닌 요소가 이어지는 경우
 -- ((A | B) (A | B) C) -> (A|B){2} C
 CREATE VIEW rpr_ev_state_alt_merge_nonalt AS
 SELECT count(*) OVER w
@@ -433,7 +432,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );');
 
--- ALT prefix/suffix absorbed into GROUP: (A|B) (A|B)+ (A|B) -> (A|B){3,}
+-- GROUP에 흡수된 ALT prefix/suffix: (A|B) (A|B)+ (A|B) -> (A|B){3,}
 CREATE VIEW rpr_ev_state_alt_absorb_group AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -455,10 +454,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 0, B AS v % 2 = 1
 );');
 
--- Folding a copy that sits between two GROUPs leaves those GROUPs
--- adjacent, which nothing had put side by side before, so the GROUP
--- merge runs once more to collect them.  The copy reaches the fold as
--- a suffix of the GROUP before it.
+-- 두 GROUP 사이에 놓인 사본을 폴드하면 그 GROUP들이 서로 인접하게 되는데,
+-- 이전에는 아무것도 이 둘을 나란히 놓지 않았으므로 GROUP 병합이 한 번 더
+-- 실행되어 이들을 모은다. 이 사본은 앞의 GROUP의 suffix로서 폴드에 도달한다.
 -- (A B)+ A B (A B)+ A B -> (A B){4,}
 SELECT rpr_explain_filter('
 EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
@@ -471,7 +469,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- A leading copy reaches the fold as a prefix instead
+-- 앞쪽에 놓인 사본은 대신 prefix로서 폴드에 도달한다
 -- A B (A B)+ A B (A B)+ -> (A B){4,}
 SELECT rpr_explain_filter('
 EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
@@ -484,7 +482,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- The same with bounded quantifiers
+-- bounded 수량자로도 같은 상황
 -- (A B){2} A B (A B){2} -> (A B){5}
 SELECT rpr_explain_filter('
 EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
@@ -497,7 +495,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- Three GROUPs and two copies between them
+-- 세 개의 GROUP과 그 사이의 두 사본
 -- (A B)+ A B (A B)+ A B (A B)+ -> (A B){5,}
 SELECT rpr_explain_filter('
 EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
@@ -510,7 +508,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- High state count - alternation with plus quantifier
+-- 높은 상태 개수 - plus 수량자를 가진 alternation
 CREATE VIEW rpr_ev_state_alt_plus AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -532,8 +530,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 1, B AS v % 4 = 2, C AS v % 4 = 3, D AS v % 4 = 0
 );');
 
--- Early termination: first ALT branch (A) reaches FIN immediately,
--- pruning second branch (A B) before it can consume B.
+-- 조기 종료: 첫 번째 ALT 분기(A)가 즉시 FIN에 도달하여, 두 번째 분기(A B)가
+-- B를 소비하기도 전에 이를 pruning한다.
 CREATE VIEW rpr_ev_state_alt_prune AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -555,7 +553,7 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v > 1
 );');
 
--- Nested quantifiers causing state growth
+-- 상태 증가를 일으키는 중첩 수량자
 CREATE VIEW rpr_ev_state_nested_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 1000) AS s(v)
@@ -577,8 +575,8 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2
 );');
 
--- (A{2,})* must NOT flatten to a*: counts {0} UNION [2, INF) leave 1
--- unreachable.  The planner keeps it as (a{2,})*, not a*.
+-- (A{2,})*는 a*로 평탄화되면 안 된다: {0} UNION [2, INF) 개수는 1 을 도달
+-- 불가능하게 남긴다.  플래너는 이를 a*가 아니라 (a{2,})*로 유지한다.
 CREATE VIEW rpr_ev_nested_quant_no_flatten AS
 SELECT count(*) OVER w
 FROM generate_series(1, 6) AS s(v)
@@ -600,9 +598,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 <> 0
 );');
 
--- Overlapping DEFINEs let two branches reach the same state, so this is the
--- only case here with a nonzero merged count; the alt_merge names above mean
--- the optimizer's merge of consecutive ALTs, not this counter.
+-- 겹치는 DEFINE은 두 분기가 같은 상태에 도달하게 하므로, 이것이 merged 개수가
+-- 0 이 아닌 유일한 사례다; 위쪽의 alt_merge 라는 이름은 연속된 ALT에 대한
+-- 최적화기의 병합을 뜻하며, 이 카운터를 가리키는 것이 아니다.
 CREATE VIEW rpr_ev_state_dedup AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -625,10 +623,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Context Statistics Tests (peak, total, pruned + absorbed/skipped)
+-- 컨텍스트 통계 테스트 (peak, total, pruned + absorbed/skipped)
 -- ============================================================
 
--- Context absorption with unbounded quantifier at start
+-- 시작 부분에 unbounded 수량자가 있는 컨텍스트 흡수
 CREATE VIEW rpr_ev_ctx_absorb_unbounded AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -650,9 +648,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Bare unbounded quantifier: A+ absorbs redundant contexts
--- min=1 commits no match until the run ends,
--- so newer contexts absorb in-progress
+-- 단독 unbounded 수량자: A+는 중복된 컨텍스트를 흡수한다
+-- min=1 은 run이 끝날 때까지 어떤 매치도 확정하지 않으므로, 더 새로운
+-- 컨텍스트가 진행 중인 것을 흡수한다
 CREATE VIEW rpr_ev_ctx_absorb_plus AS
 SELECT count(*) OVER w
 FROM generate_series(1, 10) AS s(v)
@@ -674,9 +672,9 @@ WINDOW w AS (
     DEFINE A AS v > 0
 );');
 
--- Bare min=0 quantifier: A* is skipped, not absorbed
--- min=0 commits an empty match at creation,
--- so SKIP (not absorption) removes them
+-- 단독 min=0 수량자: A*는 흡수되지 않고 skip된다
+-- min=0 은 생성 시점에 빈 매치를 확정하므로,
+-- 흡수가 아니라 SKIP이 이들을 제거한다
 CREATE VIEW rpr_ev_ctx_absorb_star AS
 SELECT count(*) OVER w
 FROM generate_series(1, 10) AS s(v)
@@ -698,7 +696,7 @@ WINDOW w AS (
     DEFINE A AS v > 0
 );');
 
--- No absorption - bounded quantifier
+-- 흡수 없음 - bounded 수량자
 CREATE VIEW rpr_ev_ctx_no_absorb AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -720,7 +718,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Contexts skipped by SKIP PAST LAST ROW
+-- SKIP PAST LAST ROW에 의해 skip된 컨텍스트
 CREATE VIEW rpr_ev_ctx_skip AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -742,7 +740,7 @@ WINDOW w AS (
     DEFINE A AS v % 10 = 1, B AS v % 10 = 2, C AS v % 10 = 3
 );');
 
--- Unbounded group followed by a trailing element
+-- 뒤에 요소가 하나 더 이어지는 unbounded group
 CREATE VIEW rpr_ev_ctx_absorb_group AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -764,9 +762,9 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );');
 
--- Fixed-length group absorption: (A B B)+ C
--- B B merged to B{2}; absorbable with fixed-length check
--- step_size=3 (A + B + B); v % 7 cycle gives 2 iterations per match
+-- 고정 길이 group 흡수: (A B B)+ C
+-- B B는 B{2}로 병합된다; 고정 길이 검사와 함께 흡수 가능
+-- step_size=3 (A + B + B); v % 7 주기는 매치당 2 회의 반복을 낸다
 CREATE VIEW rpr_ev_ctx_absorb_fixedvar AS
 SELECT count(*) OVER w
 FROM generate_series(1, 70) AS s(v)
@@ -788,8 +786,8 @@ WINDOW w AS (
     DEFINE A AS v % 7 IN (1, 4), B AS v % 7 IN (2, 3, 5, 6), C AS v % 7 = 0
 );');
 
--- Nested fixed-length group absorption: (A (B C){2} D)+ E
--- step_size = 1 + (1+1)*2 + 1 = 6; v % 13 cycle gives 2 iterations + E
+-- 중첩된 고정 길이 group 흡수: (A (B C){2} D)+ E
+-- step_size = 1 + (1+1)*2 + 1 = 6; v % 13 주기는 2 회의 반복 + E를 낸다
 CREATE VIEW rpr_ev_ctx_absorb_nested AS
 SELECT count(*) OVER w
 FROM generate_series(1, 65) AS s(v)
@@ -815,8 +813,8 @@ WINDOW w AS (
            E AS v % 13 = 0
 );');
 
--- Doubly nested fixed-length group absorption: (A ((B C{3}){2} D){2} E)+ F
--- step_size = 1 + ((1+3)*2+1)*2 + 1 = 20; v % 41 cycle gives 2 iterations + F
+-- 이중으로 중첩된 고정 길이 group 흡수: (A ((B C{3}){2} D){2} E)+ F step_size
+-- = 1 + ((1+3)*2+1)*2 + 1 = 20; v % 41 주기는 2 회의 반복 + F를 낸다
 CREATE VIEW rpr_ev_ctx_absorb_deep AS
 SELECT count(*) OVER w
 FROM generate_series(1, 82) AS s(v)
@@ -850,9 +848,9 @@ WINDOW w AS (
            F AS v % 41 = 0
 );');
 
--- 3-level END chain absorption: ((A (B C){2}){2})+
--- step_size = (1 + (1+1)*2) * 2 = 10; v % 21 cycle gives 2 iterations
--- END chain: END(BC{2}) -> END(A..{2}) -> END(+, ABSORBABLE)
+-- 3 단계 END 체인 흡수: ((A (B C){2}){2})+
+-- step_size = (1 + (1+1)*2) * 2 = 10; v % 21 주기는 2 회의 반복을 낸다
+-- END 체인: END(BC{2}) -> END(A..{2}) -> END(+, ABSORBABLE)
 CREATE VIEW rpr_ev_ctx_absorb_endchain AS
 SELECT count(*) OVER w
 FROM generate_series(1, 42) AS s(v)
@@ -878,9 +876,9 @@ WINDOW w AS (
            C AS v % 21 IN (3, 5, 8, 10, 13, 15, 18, 20)
 );');
 
--- No absorption when DEFINE uses FIRST (match_start-dependent)
--- Same pattern as rpr_ev_ctx_absorb_unbounded but with FIRST in DEFINE.
--- Compare: absorbed count should be 0 here vs >0 above.
+-- DEFINE이 FIRST를 사용하면 흡수가 일어나지 않는다 (match_start 의존적)
+-- rpr_ev_ctx_absorb_unbounded 와 같은 패턴이지만 DEFINE에 FIRST를 쓴다.  비교:
+-- absorbed 개수가 위쪽에서는 >0 이지만 여기서는 0 이어야 한다.
 CREATE VIEW rpr_ev_ctx_no_absorb_first AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -902,10 +900,10 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0 AND v > FIRST(v)
 );');
 
--- Absorption preserved when DEFINE uses only LAST without offset
--- LAST(v) is match_start-independent (always currentpos), so absorption
--- remains active.  Compare: absorbed count should be >0, like
--- rpr_ev_ctx_absorb_unbounded above.
+-- DEFINE이 오프셋 없는 LAST만 사용하면 흡수가 유지된다
+-- LAST(v)는 match_start 와 무관하므로(항상 currentpos),
+-- 흡수는 계속 활성 상태다.  비교: 위쪽의
+-- rpr_ev_ctx_absorb_unbounded 처럼 absorbed 개수가 >0 이어야 한다.
 CREATE VIEW rpr_ev_ctx_absorb_last AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -927,7 +925,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS LAST(v) % 5 = 0
 );');
 
--- No absorption with compound PREV(FIRST()) (match_start-dependent)
+-- 복합 PREV(FIRST())에서는 흡수가 없다 (match_start 의존적)
 CREATE VIEW rpr_ev_ctx_no_absorb_compound AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -948,9 +946,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0 AND PREV(FIRST(v), 1) IS NOT NULL
 );');
 
--- Variable-length group body absorption: (A+ B)+ C
--- Body is not fixed-length, so the leading A+ is the comparison point
--- (Case 3); the group's own END gets no flag.
+-- 가변 길이 group 본체 흡수: (A+ B)+ C
+-- 본체가 고정 길이가 아니므로 앞쪽의 A+가 비교
+-- 지점이다(사례 3); group 자신의 END는 플래그를 받지 않는다.
 CREATE VIEW rpr_ev_ctx_absorb_group_greedy AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -972,9 +970,9 @@ WINDOW w AS (
     DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
 );');
 
--- No absorption when the enclosing group is reluctant: (A+ B)+? C
--- Same body, DEFINE and rows as above; only the group quantifier differs.
--- Compare: absorbed count 0 and no marker on a+, vs >0 and a+# above.
+-- 감싸는 group이 소극적(reluctant)이면 흡수가 없다: (A+ B)+?  C 본체, DEFINE,
+-- 행은 위와 같고 group 수량자만 다르다.  비교: 위쪽은 absorbed 개수 >0 에
+-- a+#가 붙지만, 여기서는 absorbed 개수 0 에 a+에 아무 마커도 없다.
 CREATE VIEW rpr_ev_ctx_no_absorb_reluctant_group AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -996,10 +994,10 @@ WINDOW w AS (
     DEFINE A AS v % 10 NOT IN (0, 9), B AS v % 10 = 9, C AS v % 10 = 0
 );');
 
--- A fixed count leaves reluctance nothing to decide, so (A+ B){2}? is
--- normalized to (A+ B){2} and absorbs where the unbounded (A+ B)+? above
--- does not.  The two spellings below have to report the same marker and the
--- same absorbed count as each other; that is what the normalization buys.
+-- 고정된 횟수는 소극성(reluctance)이 결정할 것을 남기지 않으므로, (A+ B){2}?는
+-- (A+ B){2}로 정규화되어, unbounded인 위쪽의 (A+ B)+? 와 달리 흡수가 일어난다.
+-- 아래의 두 표기는 서로 같은 마커와 같은 absorbed 개수를 내야 한다; 이것이 이
+-- 정규화가 주는 이득이다.
 CREATE VIEW rpr_ev_ctx_absorb_fixed_greedy AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1042,9 +1040,9 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Alternation, non-absorbable branch match survives absorption: A+ B | C
--- The dominating A+ run absorbs redundant contexts, but the recorded C matches
--- are not absorbable, so they survive (2 matched, not 0)
+-- Alternation, 흡수 불가 분기 매치는 흡수에서 살아남는다: A+ B | C 지배적인 A+
+-- run이 중복된 컨텍스트를 흡수하지만, 기록된 C 매치는 흡수 불가이므로
+-- 살아남는다(0 이 아니라 2 matched)
 CREATE VIEW rpr_ev_ctx_absorb_alt_nonabsorb AS
 WITH d(id, flags) AS (
     VALUES (1, ARRAY['A']), (2, ARRAY['A', 'C']), (3, ARRAY['A']),
@@ -1074,9 +1072,10 @@ WINDOW w AS (
     DEFINE A AS ''A'' = ANY(flags), B AS ''B'' = ANY(flags), C AS ''C'' = ANY(flags)
 );');
 
--- Alternation, both branches absorbable: A+ C | B+
--- A+ C never completes (C absent) so its A+ run absorbs redundant contexts;
--- the finalized B+ matches on the other branch survive (2 matched, not 0)
+-- Alternation, 두 분기 모두 흡수 가능: A+ C | B+ A+ C는(C가 없으므로) 결코
+-- 완결되지 않아 그 A+ run이 중복된 컨텍스트를 흡수한다; 다른 분기의 확정된 B+
+-- 매치는 살아남는다
+-- (0 이 아니라 2 matched)
 CREATE VIEW rpr_ev_ctx_absorb_alt_both AS
 WITH d(id, flags) AS (
     VALUES (1, ARRAY['A', 'B']), (2, ARRAY['A', 'B']), (3, ARRAY['A', 'B']),
@@ -1109,10 +1108,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Match Length Statistics Tests
+-- 매치 길이 통계 테스트
 -- ============================================================
 
--- Fixed length matches - all same length
+-- 고정 길이 매치 - 모두 같은 길이
 CREATE VIEW rpr_ev_mlen_fixed AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -1138,7 +1137,7 @@ WINDOW w AS (
         D AS cat = ''D'', E AS cat = ''E''
 );');
 
--- Unbounded quantifier over a repeating cycle
+-- 반복 주기에 걸친 unbounded 수량자
 CREATE VIEW rpr_ev_mlen_variable AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1160,7 +1159,7 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 );');
 
--- Very long matches
+-- 매우 긴 매치
 CREATE VIEW rpr_ev_mlen_long AS
 SELECT count(*) OVER w
 FROM generate_series(1, 200) AS s(v)
@@ -1182,7 +1181,7 @@ WINDOW w AS (
     DEFINE A AS v <= 195, B AS v > 195
 );');
 
--- Uniform match length with mismatches from gap rows (v%20 = 11..15)
+-- gap 행(v%20 = 11..15)에서 비롯된 미스매치를 포함한 균일한 매치 길이
 CREATE VIEW rpr_ev_mlen_with_mismatch AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1209,11 +1208,12 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Mismatch Length Statistics Tests
+-- 미스매치 길이 통계 테스트
 -- ============================================================
 
--- Pattern with complete match every cycle: 0 mismatched
--- A(1,2,3) B(4,5) C(6) repeats perfectly; X rows are pruned, not mismatched
+-- 매 주기마다 완전히 매치되는 패턴: mismatched 0
+-- A(1,2,3) B(4,5) C(6)이 완벽하게 반복된다;
+-- X 행은 미스매치가 아니라 pruning된다
 CREATE VIEW rpr_ev_mlen_no_mismatch AS
 SELECT count(*) OVER w
 FROM (
@@ -1249,7 +1249,7 @@ WINDOW w AS (
     DEFINE A AS cat = ''A'', B AS cat = ''B'', C AS cat = ''C''
 );');
 
--- Long partial matches that fail
+-- 실패하는 긴 부분 매치
 CREATE VIEW rpr_ev_mlen_long_partial AS
 SELECT count(*) OVER w
 FROM (
@@ -1257,10 +1257,10 @@ FROM (
            CASE
                WHEN i <= 20 THEN 'A'
                WHEN i <= 25 THEN 'B'
-               WHEN i = 26 THEN 'X'  -- breaks the pattern
+               WHEN i = 26 THEN 'X'  -- 패턴을 깬다
                WHEN i <= 50 THEN 'A'
                WHEN i <= 55 THEN 'B'
-               WHEN i = 56 THEN 'C'  -- completes pattern
+               WHEN i = 56 THEN 'C'  -- 패턴을 완결한다
                ELSE 'Y'
            END AS cat
     FROM generate_series(1, 60) i
@@ -1280,10 +1280,10 @@ FROM (
            CASE
                WHEN i <= 20 THEN ''A''
                WHEN i <= 25 THEN ''B''
-               WHEN i = 26 THEN ''X''  -- breaks the pattern
+               WHEN i = 26 THEN ''X''  -- 패턴을 깬다
                WHEN i <= 50 THEN ''A''
                WHEN i <= 55 THEN ''B''
-               WHEN i = 56 THEN ''C''  -- completes pattern
+               WHEN i = 56 THEN ''C''  -- 패턴을 완결한다
                ELSE ''Y''
            END AS cat
     FROM generate_series(1, 60) i
@@ -1296,10 +1296,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- JSON Format Tests
+-- JSON 형식 테스트
 -- ============================================================
 
--- JSON format output with all statistics
+-- 모든 통계를 포함한 JSON 형식 출력
 CREATE VIEW rpr_ev_json_basic AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1321,7 +1321,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2
 )');
 
--- JSON format with match length statistics
+-- 매치 길이 통계를 포함한 JSON 형식
 CREATE VIEW rpr_ev_json_matchlen AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1343,8 +1343,8 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 )');
 
--- JSON format with mismatch statistics
--- Pattern A B C expects 1,2,3 but gets 1,2,4 twice causing mismatches
+-- 미스매치 통계를 포함한 JSON 형식
+-- 패턴 A B C는 1,2,3 을 기대하지만 1,2,4 를 두 번 받아 미스매치를 일으킨다
 CREATE VIEW rpr_ev_json_mismatch AS
 SELECT count(*) OVER w
 FROM (VALUES (1),(2),(4), (1),(2),(4), (1),(2),(3)) AS t(v)
@@ -1366,9 +1366,9 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v = 2, C AS v = 3
 )');
 
--- JSON format with skipped context statistics
--- Alternation pattern with SKIP PAST LAST ROW
--- causes many contexts to be skipped
+-- skipped 컨텍스트 통계를 포함한 JSON 형식
+-- SKIP PAST LAST ROW를 쓰는 alternation 패턴은
+-- 많은 컨텍스트가 skip되게 한다
 CREATE VIEW rpr_ev_json_skip AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1391,10 +1391,10 @@ WINDOW w AS (
 )');
 
 -- ============================================================
--- XML Format Tests
+-- XML 형식 테스트
 -- ============================================================
 
--- XML format output
+-- XML 형식 출력
 CREATE VIEW rpr_ev_xml_basic AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -1416,9 +1416,9 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 )');
 
--- Absorbed contexts and a navigation, neither of which the case above emits,
--- so without this the XML spelling of the absorbed length group and of Nav
--- Mark goes unchecked.
+-- absorbed 컨텍스트와 내비게이션은 둘 다 위쪽 사례가
+-- 내지 않는 것이므로, 이것이 없으면 absorbed 길이 그룹과
+-- Nav Mark의 XML 표기가 검사되지 않은 채로 남는다.
 CREATE VIEW rpr_ev_xml_absorb AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1440,8 +1440,8 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0 AND PREV(v) IS NOT NULL, B AS v % 10 = 0
 )');
 
--- A pattern that mismatches at all, which the two cases above never do, so
--- this is where the mismatch length group appears in XML.
+-- 위쪽의 두 사례는 결코 하지 않는, 어떻게든 미스매치가 일어나는 패턴이므로,
+-- mismatch 길이 그룹이 XML에 나타나는 곳이 여기다.
 CREATE VIEW rpr_ev_xml_mismatch AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -1464,10 +1464,10 @@ WINDOW w AS (
 )');
 
 -- ============================================================
--- Multiple Partitions Tests
+-- 다중 파티션 테스트
 -- ============================================================
 
--- Statistics across multiple partitions
+-- 여러 파티션에 걸친 통계
 CREATE VIEW rpr_ev_part_multi AS
 SELECT count(*) OVER w
 FROM (
@@ -1499,7 +1499,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Different pattern behavior per partition
+-- 파티션마다 다른 패턴 동작
 CREATE VIEW rpr_ev_part_diff AS
 SELECT count(*) OVER w
 FROM (
@@ -1534,10 +1534,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Edge Cases
+-- 경계 사례
 -- ============================================================
 
--- Empty result set
+-- 빈 결과 집합
 CREATE VIEW rpr_ev_edge_empty AS
 SELECT count(*) OVER w
 FROM generate_series(1, 0) AS s(v)
@@ -1559,13 +1559,13 @@ WINDOW w AS (
     DEFINE A AS v = 1, B AS v = 2
 );');
 
--- Empty matches (length 0): mirror the test_728_* cases in rpr_nfa.sql.
--- Window aggregates over a length-0 frame return 0 / NULL, so the SELECT
--- result alone cannot distinguish "no match" from "empty match"; the
--- "NFA: N matched (len 0/0/0.0)" line in EXPLAIN is the only observable
--- proof that the empty matches were found.
+-- 빈 매치(길이 0): rpr_nfa.sql의 test_728_* 사례를 거울처럼
+-- 따른다.  길이 0 인 프레임에 대한 윈도우 집계는 0 / NULL을
+-- 반환하므로, SELECT 결과만으로는 "no match" 와 "empty match" 를
+-- 구별할 수 없다; EXPLAIN의 "NFA: N matched (len 0/0/0.0)"
+-- 줄만이 빈 매치가 발견되었다는 관찰 가능한 증거다.
 
--- (A?){0,3}: min=0, A never matches -> 3 length-0 matches
+-- (A?){0,3}: min=0, A가 결코 매치되지 않음 -> 길이 0 인 매치 3 개
 CREATE VIEW rpr_ev_edge_empty_match_min0 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 3) AS s(v)
@@ -1587,7 +1587,7 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );');
 
--- (A?){1,3}: min=1, one empty iteration satisfies min -> 3 length-0 matches
+-- (A?){1,3}: min=1, 빈 반복 하나가 min을 만족시킨다 -> 길이 0 인 매치 3 개
 CREATE VIEW rpr_ev_edge_empty_match_min1 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 3) AS s(v)
@@ -1609,8 +1609,8 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );');
 
--- (A?){2,3}: min=2 and A never matches, so two empty iterations fill
--- the lower bound -> 3 length-0 matches
+-- (A?){2,3}: min=2 이고 A가 결코 매치되지 않으므로, 빈 반복 두 개가 하한을
+-- 채운다 -> 길이 0 인 매치 3 개
 CREATE VIEW rpr_ev_edge_empty_match_min2 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 3) AS s(v)
@@ -1632,7 +1632,7 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );');
 
--- (A?){2,3} mixed: rows 1-2 match A (real), rows 3-4 fall back to empty
+-- (A?){2,3} 혼합: 1-2 행은 A에 매치되고(실제), 3-4 행은 빈 것으로 물러난다
 CREATE VIEW rpr_ev_edge_empty_match_mixed AS
 SELECT count(*) OVER w
 FROM generate_series(1, 4) AS s(v)
@@ -1654,7 +1654,7 @@ WINDOW w AS (
     DEFINE A AS v <= 2
 );');
 
--- (A? B?){2,3}: pure empty multi-element body -> 3 length-0 matches
+-- (A? B?){2,3}: 순수하게 빈 다중 요소 본체 -> 길이 0 인 매치 3 개
 CREATE VIEW rpr_ev_edge_empty_match_multi AS
 SELECT count(*) OVER w
 FROM generate_series(1, 3) AS s(v)
@@ -1676,7 +1676,7 @@ WINDOW w AS (
     DEFINE A AS FALSE, B AS FALSE
 );');
 
--- Single row
+-- 단일 행
 CREATE VIEW rpr_ev_edge_single_row AS
 SELECT count(*) OVER w
 FROM generate_series(1, 1) AS s(v)
@@ -1698,7 +1698,7 @@ WINDOW w AS (
     DEFINE A AS TRUE
 );');
 
--- Pattern longer than data
+-- 데이터보다 긴 패턴
 CREATE VIEW rpr_ev_edge_pattern_longer AS
 SELECT count(*) OVER w
 FROM generate_series(1, 5) AS s(v)
@@ -1724,7 +1724,7 @@ WINDOW w AS (
         F AS v = 6, G AS v = 7, H AS v = 8, I AS v = 9, J AS v = 10
 );');
 
--- All rows match as single match
+-- 모든 행이 하나의 매치로 매치된다
 CREATE VIEW rpr_ev_edge_single_match AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1747,10 +1747,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Complex Pattern Tests
+-- 복합 패턴 테스트
 -- ============================================================
 
--- Nested groups
+-- 중첩된 group
 CREATE VIEW rpr_ev_cpx_nested AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -1772,7 +1772,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );');
 
--- Multiple alternations
+-- 여러 alternation
 CREATE VIEW rpr_ev_cpx_multi_alt AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -1798,7 +1798,7 @@ WINDOW w AS (
         D AS cat = ''D'', E AS cat = ''E''
 );');
 
--- Optional elements
+-- 선택적 요소
 CREATE VIEW rpr_ev_cpx_optional AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1820,7 +1820,7 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 1, B AS v % 4 = 2, C AS v % 4 = 3
 );');
 
--- Bounded quantifiers
+-- bounded 수량자
 CREATE VIEW rpr_ev_cpx_bounded AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1842,7 +1842,7 @@ WINDOW w AS (
     DEFINE A AS v % 10 <> 0, B AS v % 10 = 0
 );');
 
--- Star quantifier
+-- star 수량자
 CREATE VIEW rpr_ev_cpx_star AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1865,10 +1865,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Real-world Pattern Examples
+-- 실무 패턴 예제
 -- ============================================================
 
--- Stock price pattern - V-shape (down then up)
+-- 주가 패턴 - V자형 (하락 후 상승)
 CREATE VIEW rpr_ev_real_vshape AS
 SELECT count(*) OVER w
 FROM rpr_nfa_complex
@@ -1890,7 +1890,7 @@ WINDOW w AS (
     DEFINE D AS trend = ''D'', U AS trend = ''U''
 );');
 
--- Stock price pattern - peak (up, stable, down)
+-- 주가 패턴 - 고점 (상승, 안정, 하락)
 CREATE VIEW rpr_ev_real_peak AS
 SELECT count(*) OVER w
 FROM rpr_nfa_complex
@@ -1912,7 +1912,7 @@ WINDOW w AS (
     DEFINE U AS trend = ''U'', S AS trend = ''S'', D AS trend = ''D''
 );');
 
--- Consecutive increasing values (using PREV)
+-- 연속적으로 증가하는 값 (PREV 사용)
 CREATE VIEW rpr_ev_real_increasing AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1935,10 +1935,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Performance-oriented Tests
+-- 성능 지향 테스트
 -- ============================================================
 
--- Large dataset with simple pattern
+-- 단순 패턴을 가진 대규모 데이터셋
 CREATE VIEW rpr_ev_perf_large_simple AS
 SELECT count(*) OVER w
 FROM generate_series(1, 1000) AS s(v)
@@ -1960,7 +1960,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- Large dataset with absorption
+-- 흡수를 포함한 대규모 데이터셋
 CREATE VIEW rpr_ev_perf_large_absorb AS
 SELECT count(*) OVER w
 FROM generate_series(1, 1000) AS s(v)
@@ -1982,7 +1982,7 @@ WINDOW w AS (
     DEFINE A AS v % 100 <> 0, B AS v % 100 = 0
 );');
 
--- Alternation with plus quantifier over 500 rows
+-- 500 개 행에 걸친 plus 수량자를 가진 alternation
 CREATE VIEW rpr_ev_perf_high_merge AS
 SELECT count(*) OVER w
 FROM generate_series(1, 500) AS s(v)
@@ -2005,12 +2005,12 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- INITIAL vs no INITIAL comparison
+-- INITIAL 대 no INITIAL 비교
 -- ============================================================
--- INITIAL is the only supported mode (SEEK is unimplemented), so omitting the
--- keyword changes nothing at run time and deparse adds it back.  Print the
--- whole viewdef: filtering to the PATTERN line would hide the INITIAL literal,
--- which is the only thing this test can pin.
+-- INITIAL은 유일하게 지원되는 모드이므로(SEEK은 구현되지 않았다), 키워드를
+-- 생략해도 실행 시점에는 아무것도 바뀌지 않으며 디파스가 이를 다시 덧붙인다.
+-- viewdef 전체를 출력한다: PATTERN 줄로만 필터링하면 이 테스트가 고정할 수
+-- 있는 유일한 것인 INITIAL 리터럴이 가려질 것이다.
 CREATE VIEW rpr_ev_initial_without AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -2023,10 +2023,10 @@ WINDOW w AS (
 SELECT pg_get_viewdef('rpr_ev_initial_without'::regclass);
 
 -- ============================================================
--- Quantifier Variations
+-- 수량자 변형
 -- ============================================================
 
--- Plus quantifier
+-- plus 수량자
 CREATE VIEW rpr_ev_quant_plus AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -2048,7 +2048,7 @@ WINDOW w AS (
     DEFINE A AS v % 4 <> 0
 );');
 
--- Star quantifier (zero or more)
+-- star 수량자 (0 회 이상)
 CREATE VIEW rpr_ev_quant_star AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -2070,7 +2070,7 @@ WINDOW w AS (
     DEFINE A AS v % 4 IN (1, 2), B AS v % 4 = 3
 );');
 
--- Question mark (zero or one)
+-- 물음표 (0 회 또는 1 회)
 CREATE VIEW rpr_ev_quant_question AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -2092,7 +2092,7 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 1, B AS v % 4 = 2, C AS v % 4 = 3
 );');
 
--- Exact count {n}
+-- 정확한 횟수 {n}
 CREATE VIEW rpr_ev_quant_exact AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -2114,7 +2114,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Range {n,m}
+-- 범위 {n,m}
 CREATE VIEW rpr_ev_quant_range AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -2136,7 +2136,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- At least {n,}
+-- 최소 {n,}
 CREATE VIEW rpr_ev_quant_atleast AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -2159,11 +2159,11 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Regression Tests for Statistics Accuracy
+-- 통계 정확도 회귀 테스트
 -- ============================================================
 
--- Verify state count accuracy
--- Pattern A+ B with 20 rows should show predictable state behavior
+-- 상태 개수의 정확성을 검증한다
+-- 20 개 행에 대한 패턴 A+ B는 예측 가능한 상태 동작을 보여야 한다
 CREATE VIEW rpr_ev_reg_state_count AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2185,7 +2185,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Verify context count with known absorption
+-- 알려진 흡수와 함께 컨텍스트 개수를 검증한다
 CREATE VIEW rpr_ev_reg_ctx_absorb AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -2207,7 +2207,7 @@ WINDOW w AS (
     DEFINE A AS v % 10 IN (1,2,3,4,5,6,7), B AS v % 10 = 8, C AS v % 10 = 9
 );');
 
--- Verify match length with fixed-length pattern
+-- 고정 길이 패턴으로 매치 길이를 검증한다
 CREATE VIEW rpr_ev_reg_matchlen AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -2230,10 +2230,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Alternation Pattern Tests
+-- Alternation 패턴 테스트
 -- ============================================================
 
--- Simple alternation
+-- 단순 alternation
 CREATE VIEW rpr_ev_alt_simple AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -2255,7 +2255,7 @@ WINDOW w AS (
     DEFINE A AS cat = ''A'', B AS cat = ''B'', C AS cat = ''C''
 );');
 
--- Multiple items in alternation
+-- alternation 안의 여러 항목
 CREATE VIEW rpr_ev_alt_multi_item AS
 SELECT count(*) OVER w
 FROM rpr_nfa_test
@@ -2281,7 +2281,7 @@ WINDOW w AS (
         D AS cat = ''D'', E AS cat = ''E''
 );');
 
--- Alternation with quantifiers
+-- 수량자를 가진 alternation
 CREATE VIEW rpr_ev_alt_with_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -2303,7 +2303,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 1, B AS v % 3 = 2, C AS v % 3 = 0
 );');
 
--- Multiple alternatives (4+)
+-- 여러 대안 (4 개 이상)
 CREATE VIEW rpr_ev_alt_four_plus AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -2323,7 +2323,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 0, B AS v % 5 = 1, C AS v % 5 = 2, D AS v % 5 = 3, E AS v % 5 = 4
 );');
 
--- Alternation at start
+-- 시작 부분의 alternation
 CREATE VIEW rpr_ev_alt_at_start AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -2343,7 +2343,7 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Multiple sequential alternations
+-- 여러 개의 연속된 alternation
 CREATE VIEW rpr_ev_alt_sequential AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -2363,7 +2363,7 @@ WINDOW w AS (
     DEFINE A AS v % 6 = 0, B AS v % 6 = 1, C AS v % 6 = 2, D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );');
 
--- Quantified alternatives
+-- 수량화된 대안
 CREATE VIEW rpr_ev_alt_quantified AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -2383,7 +2383,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );');
 
--- Alternation at end
+-- 끝부분의 alternation
 CREATE VIEW rpr_ev_alt_at_end AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -2403,9 +2403,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Nested ALT at start of branch inside outer ALT
--- Pattern: (A ((B | C) D | E)) - preceding VAR + inner ALT
--- as first branch element
+-- 바깥쪽 ALT 안의 분기 시작 부분에 있는 중첩 ALT
+-- Pattern: (A ((B | C) D | E)) - 앞의 VAR + 첫 번째 분기 요소로서의 내부 ALT
 CREATE VIEW rpr_ev_alt_nested_start AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2425,8 +2424,8 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 0, B AS v % 5 = 1, C AS v % 5 = 2, D AS v % 5 = 3, E AS v % 5 = 4
 );');
 
--- Nested ALT at end of branch inside outer ALT
--- Pattern: (C (A | B) | D) - inner ALT is last element in outer branch
+-- 바깥쪽 ALT 안의 분기 끝부분에 있는 중첩 ALT
+-- Pattern: (C (A | B) | D) - 내부 ALT가 바깥쪽 분기의 마지막 요소다
 CREATE VIEW rpr_ev_alt_nested_end AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2446,8 +2445,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Quantified group as the first alternation branch
--- Pattern: ((A B)+ | C) - leading group branch must open the enclosing paren
+-- 첫 번째 alternation 분기로 쓰인 수량화된 group
+-- Pattern: ((A B)+ | C) - 선행 group 분기는 감싸는 괄호를 열어야 한다
 CREATE VIEW rpr_ev_alt_grp_first AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2467,8 +2466,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Quantified group as the last alternation branch
--- Pattern: (C | (A B)+) - trailing group branch, no separator follows
+-- 마지막 alternation 분기로 쓰인 수량화된 group
+-- Pattern: (C | (A B)+) - 후행 group 분기, 뒤에 구분자가 따르지 않는다
 CREATE VIEW rpr_ev_alt_grp_last AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2488,8 +2487,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Quantified group as the middle branch of a three-way alternation
--- Pattern: (C | (A B)+ | D) - separator before D must survive the group branch
+-- 세 갈래 alternation의 가운데 분기로 쓰인 수량화된 group
+-- Pattern: (C | (A B)+ | D) - D 앞의 구분자는
+-- group 분기를 거치고도 살아남아야 한다
 CREATE VIEW rpr_ev_alt_grp_mid AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2509,8 +2509,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Quantified group as the first branch of a three-way alternation
--- Pattern: ((A B)+ | C | D) - leading group branch with two following branches
+-- 세 갈래 alternation의 첫 번째 분기로 쓰인 수량화된 group
+-- Pattern: ((A B)+ | C | D) - 뒤이어 두 분기가 따르는 선행 group 분기
 CREATE VIEW rpr_ev_alt_grp_first3 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2530,8 +2530,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Bounded-quantifier group as the first alternation branch
--- Pattern: ((A B){2} | C) - leading group branch with a range quantifier
+-- 첫 번째 alternation 분기로 쓰인 bounded 수량자 group
+-- Pattern: ((A B){2} | C) - 범위 수량자를 가진 선행 group 분기
 CREATE VIEW rpr_ev_alt_grp_bounded AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2551,8 +2551,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Two quantified groups in one alternation
--- Pattern: ((A B)+ | (C D)+) - both branches are groups
+-- 하나의 alternation 안에 있는 두 개의 수량화된 group
+-- Pattern: ((A B)+ | (C D)+) - 두 분기 모두 group이다
 CREATE VIEW rpr_ev_alt_grp_both AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2572,8 +2572,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Leading group branch in an alternation nested in a sequence
--- Pattern: (((A B)+ | C) D) - inner alternation opens with a group branch
+-- 시퀀스 안에 중첩된 alternation의 선행 group 분기
+-- Pattern: (((A B)+ | C) D) - 내부 alternation이 group 분기로 시작한다
 CREATE VIEW rpr_ev_alt_grp_seq_head AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2593,8 +2593,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Trailing group branch in an alternation nested in a sequence
--- Pattern: ((C | (A B)+) D) - group as last branch, then a sequence element
+-- 시퀀스 안에 중첩된 alternation의 후행 group 분기
+-- Pattern: ((C | (A B)+) D) - group이 마지막
+-- 분기이고, 그 뒤에 시퀀스 요소가 온다
 CREATE VIEW rpr_ev_alt_grp_seq_tail AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2614,8 +2615,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Quantified alternation whose first branch is a quantified group
--- Pattern: (((A B){2} | C)+) - single-ALT group wraps a leading group branch
+-- 첫 번째 분기가 수량화된 group인 수량화된 alternation
+-- Pattern: (((A B){2} | C)+) - single-ALT group이 선행 group 분기를 감싼다
 CREATE VIEW rpr_ev_alt_grp_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2635,9 +2636,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Unit (1,1) group as an alternation branch (emits no BEGIN/END)
--- Pattern: ((A B) | C) - control: a {1,1} group emits no BEGIN/END, so the
--- branch deparses as a plain sequence
+-- alternation 분기로 쓰인 단위(1,1) group (BEGIN/END를 내지 않는다)
+-- Pattern: ((A B) | C) - 대조군: {1,1} group은 BEGIN/END를 내지 않으므로, 그
+-- 분기는 평범한 시퀀스로 디파스된다
 CREATE VIEW rpr_ev_alt_grp_unit AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2657,9 +2658,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Quantified variable as the first alternation branch
--- Pattern: (A+ | C) - control: a quantified variable as the leading branch;
--- the ALT supplies the enclosing parentheses
+-- 첫 번째 alternation 분기로 쓰인 수량화된 변수
+-- Pattern: (A+ | C) - 대조군: 선행 분기로 쓰인 수량화된 변수; ALT가 감싸는
+-- 괄호를 제공한다
 CREATE VIEW rpr_ev_alt_var_first AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2679,8 +2680,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, C AS v % 4 = 2
 );');
 
--- Quantified group as the last branch of a three-way alternation
--- Pattern: (C | D | (A B)+) - control: trailing group needs no separator
+-- 세 갈래 alternation의 마지막 분기로 쓰인 수량화된 group
+-- Pattern: (C | D | (A B)+) - 대조군: 후행 group은 구분자가 필요 없다
 CREATE VIEW rpr_ev_alt_grp_last3 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2700,8 +2701,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Alternation nested in a leading branch must not swallow the trailing branch
--- Pattern: (D (A | B) | E) - inherited limit bounds the inner alternation
+-- 선행 분기에 중첩된 alternation이 후행 분기를 집어삼키면 안 된다
+-- Pattern: (D (A | B) | E) - 상속된 한계가 내부 alternation을 제한한다
 CREATE VIEW rpr_ev_alt_inner_bounded AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2721,8 +2722,8 @@ WINDOW w AS (
     DEFINE A AS v % 5 = 0, B AS v % 5 = 1, D AS v % 5 = 2, E AS v % 5 = 3
 );');
 
--- Group mid-branch followed by a sequence element needs no separator before it
--- Pattern: (C | (A B)+ D) - only the branch end takes a SEP, not D
+-- 분기 중간의 group 뒤에 시퀀스 요소가 오면 그 앞에 구분자가 필요 없다
+-- Pattern: (C | (A B)+ D) - 분기의 끝만 SEP를 받으며, D는 받지 않는다
 CREATE VIEW rpr_ev_alt_grp_then_seq AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2742,8 +2743,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2, D AS v % 4 = 3
 );');
 
--- Quantified group wrapping a lone alternation: the ALT supplies the parens
--- Pattern: ((A | B)+) - loneAlt path, single pair of parens
+-- 단독 alternation을 감싸는 수량화된 group: ALT가 괄호를 제공한다
+-- Pattern: ((A | B)+) - loneAlt 경로, 한 쌍의 괄호만
 CREATE VIEW rpr_ev_grp_lone_alt AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2763,8 +2764,9 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1
 );');
 
--- Quantified group wrapping a sequence whose last element is an alternation
--- Pattern: ((A (B | C))+) - group paren plus a nested alternation paren
+-- 마지막 요소가 alternation인 시퀀스를 감싸는 수량화된 group
+-- Pattern: ((A (B | C))+) - group의 괄호에
+-- 중첩된 alternation의 괄호가 더해진다
 CREATE VIEW rpr_ev_grp_seq_alt AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2784,8 +2786,8 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Quantified group wrapping a sequence whose first element is an alternation
--- Pattern: (((A | B) C)+) - leading nested alternation inside a group sequence
+-- 첫 번째 요소가 alternation인 시퀀스를 감싸는 수량화된 group
+-- Pattern: (((A | B) C)+) - group 시퀀스 안의 선행 중첩 alternation
 CREATE VIEW rpr_ev_grp_alt_seq AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2805,9 +2807,10 @@ WINDOW w AS (
     DEFINE A AS v % 4 = 0, B AS v % 4 = 1, C AS v % 4 = 2
 );');
 
--- Alternation non-last in a non-last branch, stacked three deep: each level's
--- inherited limit must bound the inner alternation against the next branch
--- Pattern: (((A | B) C | D) E | F) - three nested inherited-limit boundaries
+-- 마지막이 아닌 분기 안에서 마지막이 아닌 위치에 놓인 alternation을 3 단계로
+-- 쌓은 경우: 각 단계의 상속된 한계가 내부 alternation을 다음 분기에 대해
+-- 제한해야 한다
+-- Pattern: (((A | B) C | D) E | F) - 세 겹으로 중첩된 상속-한계 경계
 CREATE VIEW rpr_ev_alt_stack3 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2829,10 +2832,8 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );');
 
--- Same interaction stacked four deep,
--- to exercise the induction one step further
--- Pattern: ((((A | B) C | D) E | F) G | H) - four nested
--- inherited-limit boundaries
+-- 같은 상호작용을 4 단계로 쌓아, 귀납을 한 단계 더 밀어붙인 경우
+-- Pattern: ((((A | B) C | D) E | F) G | H) - 네 겹으로 중첩된 상속-한계 경계
 CREATE VIEW rpr_ev_alt_stack4 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2854,9 +2855,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );');
 
--- Three-deep stack whose innermost branch is a quantified group: the group's
--- BEGIN-to-END jump must not be mistaken for a branch separator at any depth
--- Pattern: (((A | B)+ C | D) E | F) - inherited limit plus loneAlt at the base
+-- 가장 안쪽 분기가 수량화된 group인 3 단계 스택: group의 BEGIN에서 END로의
+-- 점프는 어느 깊이에서도 분기 구분자로 오인되면 안 된다
+-- Pattern: (((A | B)+ C | D) E | F) - 상속된 한계에 더해 밑바닥의 loneAlt
 CREATE VIEW rpr_ev_alt_stack3_grp AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2878,9 +2879,9 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );');
 
--- Alternation trailing a paren-less sequence (last element of a non-last
--- branch, no same-depth sibling to bound it), nested three deep
--- Pattern: (A (B (C | D) | E) | F) - each inner alternation is branch-tail
+-- 괄호 없는 시퀀스 뒤에 오는 alternation(마지막이 아닌 분기의 마지막 요소이며,
+-- 이를 제한할 같은 깊이의 형제가 없음), 3 단계로 중첩된 경우
+-- Pattern: (A (B (C | D) | E) | F) - 각 내부 alternation이 분기의 꼬리다
 CREATE VIEW rpr_ev_alt_tail3 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2902,8 +2903,8 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );');
 
--- Same branch-tail alternation nested four deep
--- Pattern: (A (B (C (D | E) | F) | G) | H) - branch-tail alternation x4
+-- 같은 분기-꼬리 alternation을 4 단계로 중첩한 경우
+-- Pattern: (A (B (C (D | E) | F) | G) | H) - 분기-꼬리 alternation x4
 CREATE VIEW rpr_ev_alt_tail4 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2925,9 +2926,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );');
 
--- A nested alternation tail neighbouring a multi-element sequence branch: the
--- branch boundary must split "...branch-tail ALT" from a plain "G A" sequence
--- Pattern: (A (B (C (D | E) | F) | G A) | H) - seq branch beside an ALT tail
+-- 다중 요소 시퀀스 분기와 이웃한 중첩 alternation 꼬리: 분기 경계는
+-- "...branch-tail ALT" 를 평범한 "G A" 시퀀스로부터 나누어야 한다
+-- Pattern: (A (B (C (D | E) | F) | G A) | H) - ALT 꼬리 옆의 시퀀스 분기
 CREATE VIEW rpr_ev_alt_tail_seqbranch AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2949,10 +2950,9 @@ WINDOW w AS (
            E AS v % 8 = 4, F AS v % 8 = 5, G AS v % 8 = 6, H AS v % 8 = 7
 );');
 
--- A nested alternation that is sibling-bounded by a trailing sequence element
--- at the outer level (the ALT is not the branch tail; G follows it in-branch)
--- Pattern: ((A (B (C | D) | E) | F) G | H) - ALT bounded
--- by a following element
+-- 바깥쪽 단계의 후행 시퀀스 요소에 의해 형제로서 제한되는 중첩
+-- alternation(ALT는 분기의 꼬리가 아니다; 같은 분기 안에서 G가 그 뒤를 잇는다)
+-- Pattern: ((A (B (C | D) | E) | F) G | H) - 뒤따르는 요소에 의해 제한된 ALT
 CREATE VIEW rpr_ev_alt_mid_seqtail AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2975,10 +2975,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Group Pattern Tests
+-- Group 패턴 테스트
 -- ============================================================
 
--- Simple group
+-- 단순 group
 CREATE VIEW rpr_ev_grp_simple AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -3000,7 +3000,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- Group with bounded quantifier
+-- bounded 수량자를 가진 group
 CREATE VIEW rpr_ev_grp_bounded AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -3044,7 +3044,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- Deep nesting (3+ levels)
+-- 깊은 중첩 (3 단계 이상)
 CREATE VIEW rpr_ev_grp_deep AS
 SELECT count(*) OVER w
 FROM generate_series(1, 40) AS s(v)
@@ -3064,7 +3064,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 0, B AS v % 2 = 1
 );');
 
--- Bounded quantifier on alternation
+-- alternation에 붙은 bounded 수량자
 CREATE VIEW rpr_ev_grp_bounded_alt AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -3084,7 +3084,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );');
 
--- Nested groups with quantifiers
+-- 수량자를 가진 중첩 group
 CREATE VIEW rpr_ev_grp_nested_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -3104,7 +3104,7 @@ WINDOW w AS (
     DEFINE A AS v % 3 = 0, B AS v % 3 = 1, C AS v % 3 = 2
 );');
 
--- Partial nested quantification
+-- 부분적으로 중첩된 수량화
 CREATE VIEW rpr_ev_grp_partial_quant AS
 SELECT count(*) OVER w
 FROM generate_series(1, 60) AS s(v)
@@ -3125,10 +3125,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Window Function Combinations
+-- 윈도우 함수 조합
 -- ============================================================
 
--- count(*) with pattern
+-- 패턴과 함께 쓰인 count(*)
 CREATE VIEW rpr_ev_wfn_count AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3150,7 +3150,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- first_value with pattern
+-- 패턴과 함께 쓰인 first_value
 CREATE VIEW rpr_ev_wfn_first_value AS
 SELECT first_value(v) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3172,7 +3172,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- last_value with pattern
+-- 패턴과 함께 쓰인 last_value
 CREATE VIEW rpr_ev_wfn_last_value AS
 SELECT last_value(v) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3194,7 +3194,7 @@ WINDOW w AS (
     DEFINE A AS v % 5 <> 0, B AS v % 5 = 0
 );');
 
--- Multiple window functions
+-- 여러 윈도우 함수
 CREATE VIEW rpr_ev_wfn_multi AS
 SELECT
     count(*) OVER w,
@@ -3223,10 +3223,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- DEFINE Expression Variations
+-- DEFINE 표현식 변형
 -- ============================================================
 
--- Complex boolean expressions
+-- 복합 boolean 표현식
 CREATE VIEW rpr_ev_def_complex_bool AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -3252,7 +3252,7 @@ WINDOW w AS (
         B AS (v % 5 = 0) OR (v % 3 = 0)
 );');
 
--- Using PREV function
+-- PREV 함수 사용
 CREATE VIEW rpr_ev_def_prev AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3280,7 +3280,7 @@ WINDOW w AS (
         D AS v < PREV(v)
 );');
 
--- Using 1-arg PREV (implicit offset 1)
+-- 1 개 인자 PREV 사용 (암묵적 오프셋 1)
 CREATE VIEW rpr_ev_nav_prev1 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3294,7 +3294,7 @@ WINDOW w AS (
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_prev1'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
 
--- Using 1-arg NEXT (implicit offset 1)
+-- 1 개 인자 NEXT 사용 (암묵적 오프셋 1)
 CREATE VIEW rpr_ev_nav_next1 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3308,7 +3308,7 @@ WINDOW w AS (
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_next1'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
 
--- Using 2-arg PREV (explicit offset)
+-- 2 개 인자 PREV 사용 (명시적 오프셋)
 CREATE VIEW rpr_ev_nav_prev2 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3322,7 +3322,7 @@ WINDOW w AS (
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_prev2'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
 
--- Using 2-arg NEXT (explicit offset)
+-- 2 개 인자 NEXT 사용 (명시적 오프셋)
 CREATE VIEW rpr_ev_nav_next2 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -3336,7 +3336,7 @@ WINDOW w AS (
 );
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_ev_nav_next2'), E'\n')) AS line WHERE line ~ 'PATTERN|DEFINE|PREV|NEXT';
 
--- Using NULL comparisons
+-- NULL 비교 사용
 CREATE VIEW rpr_ev_def_null AS
 SELECT count(*) OVER w
 FROM (
@@ -3365,10 +3365,10 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Large Scale Statistics Verification
+-- 대규모 통계 검증
 -- ============================================================
 
--- 500 rows - verify statistics scale correctly
+-- 500 개 행 - 통계가 올바르게 확장되는지 검증한다
 CREATE VIEW rpr_ev_scale_500rows AS
 SELECT count(*) OVER w
 FROM generate_series(1, 500) AS s(v)
@@ -3390,7 +3390,7 @@ WINDOW w AS (
     DEFINE A AS v % 10 < 7, B AS v % 10 = 7, C AS v % 10 = 8
 );');
 
--- High match count scenario
+-- 높은 매치 개수 시나리오
 CREATE VIEW rpr_ev_scale_high_match AS
 SELECT count(*) OVER w
 FROM generate_series(1, 500) AS s(v)
@@ -3412,7 +3412,7 @@ WINDOW w AS (
     DEFINE A AS v % 2 = 1, B AS v % 2 = 0
 );');
 
--- Sparse five-element pattern over 500 rows
+-- 500 개 행에 걸친 희소한 다섯 요소 패턴
 CREATE VIEW rpr_ev_scale_high_skip AS
 SELECT count(*) OVER w
 FROM generate_series(1, 500) AS s(v)
@@ -3445,15 +3445,16 @@ WINDOW w AS (
 );');
 
 -- ============================================================
--- Nav Mark Lookback/Lookahead Tests
--- Verifies navigation offsets for tuplestore trim, resolved at executor init.
--- Lookback: how far back from currentpos
--- (PREV, LAST, compound PREV_LAST/NEXT_LAST).
--- Lookahead: how far forward from match_start
--- (FIRST, compound PREV_FIRST/NEXT_FIRST).
+-- Nav Mark Lookback/Lookahead 테스트
+-- tuplestore trim을 위한 내비게이션 오프셋을
+-- 검증하며, executor 초기화 시점에 해소된다.
+-- Lookback: currentpos로부터 얼마나 뒤쪽인가
+-- (PREV, LAST, 복합 PREV_LAST/NEXT_LAST).
+-- Lookahead: match_start 로부터 얼마나 앞쪽인가
+-- (FIRST, 복합 PREV_FIRST/NEXT_FIRST).
 -- ============================================================
 
--- Prepare statement for host variable offset test below
+-- 아래의 호스트 변수 오프셋 테스트를 위해 문(statement)을 준비한다
 PREPARE rpr_nav_offset_prep(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3463,7 +3464,7 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, $1)
 );
 
--- No navigation function
+-- 내비게이션 함수 없음
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3472,7 +3473,7 @@ WINDOW w AS (
     DEFINE A AS v > 0
 );
 
--- NEXT only: no backward navigation
+-- NEXT만: 후방 내비게이션 없음
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3481,7 +3482,7 @@ WINDOW w AS (
     DEFINE A AS v < NEXT(v)
 );
 
--- PREV(v): implicit offset 1
+-- PREV(v): 암묵적 오프셋 1
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3490,7 +3491,7 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v)
 );
 
--- PREV(v, 3): explicit constant offset 3
+-- PREV(v, 3): 명시적 상수 오프셋 3
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3499,8 +3500,8 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, 3)
 );
 
--- PREV(v, 1 + 1): a foldable offset has to arrive as a constant, or the trim
--- bound would print "runtime" instead of 2
+-- PREV(v, 1 + 1): 폴드 가능한 오프셋은 상수로 도착해야 한다.  그렇지 않으면
+-- trim 경계가 2 대신 "runtime" 을 출력할 것이다
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3509,7 +3510,7 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, 1 + 1)
 );
 
--- Two PREV with different offsets: max(1, 5) = 5
+-- 서로 다른 오프셋을 가진 두 개의 PREV: max(1, 5) = 5
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3518,18 +3519,18 @@ WINDOW w AS (
     DEFINE A AS PREV(v, 1) < v AND PREV(v, 5) < v
 );
 
--- Host variable offset: custom plan resolves $1=2 to constant 2
+-- 호스트 변수 오프셋: custom plan은 $1=2 를 상수 2 로 해소한다
 EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
 
--- Force generic plan: offset becomes "runtime" (Param node)
+-- generic plan을 강제한다: 오프셋이 "runtime"(Param 노드)이 된다
 SET plan_cache_mode = force_generic_plan;
 EXPLAIN (COSTS OFF) EXECUTE rpr_nav_offset_prep(2);
 RESET plan_cache_mode;
 DEALLOCATE rpr_nav_offset_prep;
 
--- EXPLAIN (GENERIC_PLAN) of an unbound parameter offset must not evaluate the
--- parameter: the offset stays "runtime" instead of failing with "no value
--- found for parameter 1".
+-- 바인딩되지 않은 매개변수 오프셋에 대한 EXPLAIN (GENERIC_PLAN)은
+-- 그 매개변수를 평가하면 안 된다: 오프셋은
+-- "no value found for parameter 1" 로 실패하는 대신 "runtime" 으로 남는다.
 EXPLAIN (GENERIC_PLAN, COSTS OFF)
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3539,7 +3540,7 @@ WINDOW w AS (
     DEFINE A AS v > PREV(v, $1)
 );
 
--- FIRST(v) with no offset (references the match start row)
+-- 오프셋 없는 FIRST(v) (매치 시작 행을 참조한다)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3548,7 +3549,7 @@ WINDOW w AS (
     DEFINE A AS v > FIRST(v)
 );
 
--- FIRST(v, 5): forward reach 5
+-- FIRST(v, 5): 전방 도달 거리 5
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3557,8 +3558,8 @@ WINDOW w AS (
     DEFINE A AS v > FIRST(v, 5)
 );
 
--- The same forward reach in the XML and JSON forms.  Only the text form is
--- exercised elsewhere, so the tag itself has no coverage.
+-- XML과 JSON 형식에서의 같은 전방 도달 거리.  text 형식만 다른 곳에서
+-- 검사되므로, 이 태그 자체는 커버리지가 없다.
 EXPLAIN (COSTS OFF, FORMAT XML) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3575,7 +3576,7 @@ WINDOW w AS (
     DEFINE A AS v > FIRST(v, 5)
 );
 
--- LAST(v, 1): backward reach 1, same as PREV(v, 1)
+-- LAST(v, 1): 후방 도달 거리 1, PREV(v, 1)과 같다
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3584,7 +3585,7 @@ WINDOW w AS (
     DEFINE A AS LAST(v, 1) > 0
 );
 
--- LAST(v) without offset + PREV(v): no match_start dependency, offset 1
+-- 오프셋 없는 LAST(v) + PREV(v): match_start 의존성 없음, 오프셋 1
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3593,7 +3594,7 @@ WINDOW w AS (
     DEFINE A AS LAST(v) > PREV(v)
 );
 
--- Compound PREV(FIRST(val, 1), 2): lookback from match_start,
+-- 복합 PREV(FIRST(val, 1), 2): match_start 로부터의 lookback,
 -- firstOffset = 1-2 = -1
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3603,7 +3604,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(v, 1), 2) > 0
 );
 
--- Compound NEXT(FIRST(val), 3): firstOffset = 0+3 = 3
+-- 복합 NEXT(FIRST(val), 3): firstOffset = 0+3 = 3
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3612,7 +3613,7 @@ WINDOW w AS (
     DEFINE A AS NEXT(FIRST(v), 3) > 0
 );
 
--- Compound PREV(LAST(val), 2): lookback = 0+2 = 2
+-- 복합 PREV(LAST(val), 2): lookback = 0+2 = 2
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3621,7 +3622,7 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(v), 2) > 0
 );
 
--- Compound NEXT(LAST(val, 1), 3): lookback = max(1-3, 0) = 0
+-- 복합 NEXT(LAST(val, 1), 3): lookback = max(1-3, 0) = 0
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3630,9 +3631,9 @@ WINDOW w AS (
     DEFINE A AS NEXT(LAST(v, 1), 3) > 0
 );
 
--- Compound forms with the outer offset left out, which defaults to 1: each of
--- the four arms combines it with the inner offset differently, and the value
--- decides both the trim bound and the row the navigation lands on.
+-- 바깥쪽 오프셋을 생략한 복합 형태로, 기본값은 1 이다: 네 가지 갈래 각각이
+-- 이를 안쪽 오프셋과 다르게 조합하며, 그 값이 trim 경계와 내비게이션이
+-- 도달하는 행을 모두 결정한다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3665,7 +3666,8 @@ WINDOW w AS (
     DEFINE A AS NEXT(LAST(v, 2)) > 0
 );
 
--- Compound PREV(LAST(val, N), M): constant near-overflow (N+M just fits int64)
+-- 복합 PREV(LAST(val, N), M): 상수가 overflow에
+-- 거의 근접(N+M이 int64에 딱 들어맞음)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3674,7 +3676,7 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(v, 4611686018427387903), 4611686018427387903) IS NOT NULL
 );
 
--- Compound PREV(LAST(val, N), M): constant overflow -> retain all
+-- 복합 PREV(LAST(val, N), M): 상수 overflow -> 모두 유지(retain all)
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3683,8 +3685,8 @@ WINDOW w AS (
     DEFINE A AS PREV(LAST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
 );
 
--- Compound NEXT(FIRST(val, N), M): constant lookahead overflow -> infinite
--- N + M overflows int64; forward reach is unbounded, displayed as infinite.
+-- 복합 NEXT(FIRST(val, N), M): 상수 lookahead overflow -> infinite N + M이
+-- int64를 넘치므로(overflow), 전방 도달 거리는 무한하며 infinite로 표시된다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3693,8 +3695,8 @@ WINDOW w AS (
     DEFINE A AS NEXT(FIRST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
 );
 
--- A navigation with a negative offset cannot run, so it contributes no reach
--- and its dimension reports nothing at all.
+-- 음수 오프셋을 가진 내비게이션은 실행될 수 없으므로 도달 거리에 아무것도
+-- 보태지 않으며, 그 차원은 아무것도 보고하지 않는다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3703,7 +3705,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
 );
 
--- The same query errors once it runs, since execution validates the offset.
+-- 같은 질의는 실행되고 나면 오류를 내는데, 실행이 오프셋을 검증하기 때문이다.
 EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3712,7 +3714,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(v, -3), 2) IS NOT NULL
 );
 
--- Same at the int64 limit, where the reach subtraction would otherwise wrap.
+-- int64 한계에서도 마찬가지인데, 그렇지 않으면 도달 거리 뺄셈이 wrap될 것이다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3721,7 +3723,7 @@ WINDOW w AS (
     DEFINE A AS PREV(FIRST(v, (-9223372036854775807)::int8), 2) IS NOT NULL
 );
 
--- The other dimension keeps its own aggregate.
+-- 다른 차원은 자기 자신의 집계를 유지한다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3730,9 +3732,9 @@ WINDOW w AS (
     DEFINE A AS PREV(v, 5) IS NOT NULL AND FIRST(v, -1) IS NOT NULL
 );
 
--- A null offset cannot run either, so it too contributes no reach.  Resolving
--- it to a placeholder 0 would instead let it join the aggregate and displace
--- the offset of the navigation that can run.
+-- null 오프셋도 실행될 수 없으므로 이 역시 도달 거리에 아무것도 보태지 않는다.
+-- 이를 자리표시자 0 으로 해소한다면, 대신 이것이 집계에 끼어들어 실행 가능한
+-- 내비게이션의 오프셋을 밀어낼 것이다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3741,7 +3743,7 @@ WINDOW w AS (
     DEFINE A AS FIRST(v, 7) IS NOT NULL AND PREV(FIRST(v, NULL::int), 2) IS NOT NULL
 );
 
--- And it errors once it runs, for the same reason the negative one does.
+-- 그리고 음수 오프셋과 같은 이유로, 실행되고 나면 오류를 낸다.
 EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3750,8 +3752,8 @@ WINDOW w AS (
     DEFINE A AS FIRST(v, 7) IS NOT NULL AND PREV(FIRST(v, NULL::int), 2) IS NOT NULL
 );
 
--- Dropping a navigation must not disturb the kind the survivor reports.  An
--- overflowing lookback still retains every row.
+-- 내비게이션을 제거해도 살아남은 쪽이 보고하는 kind는 흐트러지면 안 된다.
+-- overflow가 일어난 lookback은 여전히 모든 행을 유지한다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3761,7 +3763,7 @@ WINDOW w AS (
             AND PREV(LAST(v, 4611686018427387904), 4611686018427387904) IS NOT NULL
 );
 
--- And a parameter offset beside a dropped one is still settled per scan.
+-- 그리고 제거된 것 옆의 매개변수 오프셋도 여전히 스캔마다 정해진다.
 PREPARE test_dropped_with_runtime(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3775,7 +3777,7 @@ EXPLAIN (COSTS OFF) EXECUTE test_dropped_with_runtime(2);
 RESET plan_cache_mode;
 DEALLOCATE test_dropped_with_runtime;
 
--- NEXT(LAST()) reaches the same subtraction on the lookback side.
+-- NEXT(LAST())는 lookback 쪽에서 같은 뺄셈에 도달한다.
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3784,9 +3786,10 @@ WINDOW w AS (
     DEFINE A AS NEXT(LAST(v, 2), (-9223372036854775807)::int8) IS NOT NULL
 );
 
--- Compound PREV(LAST(val, $1), $2): parameter lookback overflow -> retain all
--- EXPLAIN shows "runtime" (unresolved at init); EXPLAIN ANALYZE shows
--- "retain all" (resolved per scan).
+-- 복합 PREV(LAST(val, $1), $2): 매개변수
+-- lookback overflow -> 모두 유지(retain all)
+-- EXPLAIN은 "runtime" 을 보여 준다(초기화 시점에는 해소되지 않음);
+-- EXPLAIN ANALYZE는 "retain all" 을 보여 준다(스캔마다 해소됨).
 PREPARE test_overflow_lookback(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3803,7 +3806,7 @@ EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
 RESET plan_cache_mode;
 DEALLOCATE test_overflow_lookback;
 
--- Compound NEXT(FIRST(val, $1), $2): parameter lookahead overflow -> infinite
+-- 복합 NEXT(FIRST(val, $1), $2): 매개변수 lookahead overflow -> infinite
 PREPARE test_overflow_lookahead(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3819,9 +3822,9 @@ EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
 RESET plan_cache_mode;
 DEALLOCATE test_overflow_lookahead;
 
--- Runtime (non-overflow) lookahead: a small parameter offset under a generic
--- plan keeps the FIRST offset unresolved at plan time, so EXPLAIN reports
--- "Nav Mark Lookahead: runtime" rather than a concrete value.
+-- runtime (overflow가 아닌) lookahead: generic plan 아래에서 작은 매개변수
+-- 오프셋은 FIRST 오프셋을 계획 시점에 해소되지 않은 채로 두므로, EXPLAIN은
+-- 구체적인 값이 아니라 "Nav Mark Lookahead: runtime" 을 보고한다.
 PREPARE p_first_runtime(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3835,10 +3838,10 @@ EXPLAIN (COSTS OFF) EXECUTE p_first_runtime(1, 1);
 RESET plan_cache_mode;
 DEALLOCATE p_first_runtime;
 
--- PREV(v) + PREV(v, $1): the implicit lookback of 1 has to count even when the
--- explicit offset resolves to 0, or PREV(v) would fail with "cannot fetch row
--- before WindowObject's mark position".  A generic plan settles the reach per
--- scan instead of at init.
+-- PREV(v) + PREV(v, $1): 명시적 오프셋이 0 으로 해소되더라도 암묵적 lookback인
+-- 1 은 반영되어야 한다.  그렇지 않으면 PREV(v)는 "cannot fetch row before
+-- WindowObject's mark position"으로 실패할 것이다.  generic plan은 초기화
+-- 시점이 아니라 스캔마다 도달 거리를 정한다.
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_implicit_offset(int8) AS
 SELECT count(*) OVER w
@@ -3852,12 +3855,12 @@ EXECUTE test_prev_implicit_offset(0);
 DEALLOCATE test_prev_implicit_offset;
 RESET plan_cache_mode;
 
--- NEEDS_EVAL executor offset paths: a Param nav offset stays non-Const under a
--- generic plan, so build_define_offsets() marks the offset NEEDS_EVAL and
--- resolve_nav_offsets() settles it once per scan.  Each query below exercises
--- a different navigation arm of that walker.
+-- NEEDS_EVAL executor 오프셋 경로: Param 내비게이션 오프셋은 generic plan
+-- 아래에서 non-Const로 남으므로, build_define_offsets() 는 그 오프셋을
+-- NEEDS_EVAL 로 표시하고 resolve_nav_offsets() 가 스캔마다 한 번씩 이를
+-- 정한다.  아래의 각 질의는 그 walker의 서로 다른 내비게이션 갈래를 검사한다.
 
--- Simple FIRST(v, $1): forward-reach FIRST arm.
+-- 단순 FIRST(v, $1): 전방 도달 거리 FIRST 갈래.
 PREPARE test_eval_first(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3871,7 +3874,7 @@ EXECUTE test_eval_first(1);
 RESET plan_cache_mode;
 DEALLOCATE test_eval_first;
 
--- Bare LAST(v, $1): backward-reach LAST-with-offset arm.
+-- 단독 LAST(v, $1): 후방 도달 거리 LAST-with-offset 갈래.
 PREPARE test_eval_last(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3885,7 +3888,7 @@ EXECUTE test_eval_last(1);
 RESET plan_cache_mode;
 DEALLOCATE test_eval_last;
 
--- Compound NEXT(LAST(v, $1), $2): backward-reach NEXT_LAST arm.
+-- 복합 NEXT(LAST(v, $1), $2): 후방 도달 거리 NEXT_LAST 갈래.
 PREPARE test_eval_nextlast(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3899,7 +3902,7 @@ EXECUTE test_eval_nextlast(1, 1);
 RESET plan_cache_mode;
 DEALLOCATE test_eval_nextlast;
 
--- Compound PREV(FIRST(v, $1), $2): forward-reach PREV_FIRST arm.
+-- 복합 PREV(FIRST(v, $1), $2): 전방 도달 거리 PREV_FIRST 갈래.
 PREPARE test_eval_prevfirst(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3910,9 +3913,9 @@ WINDOW w AS (
 );
 SET plan_cache_mode = force_generic_plan;
 EXECUTE test_eval_prevfirst(1, 1);
--- Observe the arm rather than only run it.  At plan time the line reads
--- "runtime"; once resolved it reads inner - outer, so 2 here is the PREV_FIRST
--- subtraction.  A bare FIRST would report the inner offset alone.
+-- 그 갈래를 실행만 하지 않고 관찰한다.  계획 시점에는 이 줄이 "runtime" 으로
+-- 나오며, 해소되고 나면 inner - outer로 나오므로 여기 2 는 PREV_FIRST
+-- 뺄셈이다.  단독 FIRST라면 inner 오프셋만 보고할 것이다.
 EXPLAIN (COSTS OFF) EXECUTE test_eval_prevfirst(3, 1);
 SELECT rpr_explain_filter('
 EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF)
@@ -3920,7 +3923,7 @@ EXECUTE test_eval_prevfirst(3, 1);');
 RESET plan_cache_mode;
 DEALLOCATE test_eval_prevfirst;
 
--- Runtime error: negative offset at execution time
+-- 실행 시점 오류: 실행 시점의 음수 오프셋
 PREPARE test_runtime_neg_offset(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3932,8 +3935,8 @@ WINDOW w AS (
 EXECUTE test_runtime_neg_offset(-1);
 DEALLOCATE test_runtime_neg_offset;
 
--- The same at generic-plan resolution time, and for each half of a compound
--- navigation on its own.
+-- generic plan 해소 시점에서도 마찬가지이며, 복합 내비게이션의 각 절반에
+-- 대해서도 각자 마찬가지다.
 PREPARE test_runtime_neg_compound_offset(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3948,7 +3951,7 @@ EXECUTE test_runtime_neg_compound_offset(-1, 1);
 RESET plan_cache_mode;
 DEALLOCATE test_runtime_neg_compound_offset;
 
--- Runtime error: null offset at execution time
+-- 실행 시점 오류: 실행 시점의 null 오프셋
 PREPARE test_runtime_null_offset(int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3960,12 +3963,12 @@ WINDOW w AS (
 EXECUTE test_runtime_null_offset(NULL);
 DEALLOCATE test_runtime_null_offset;
 
--- A correlated PARAM_EXEC nav offset (reaching the offset via SRF inlining) is
--- resolved per scan by resolve_nav_offsets(); after execution EXPLAIN ANALYZE
--- must display the concrete resolved bound (a number), not "runtime" --
--- that is, navMaxOffsetKind resolves to FIXED.
--- Plain EXPLAIN of the same query shows
--- "runtime"; only ANALYZE exercises the per-scan clear.
+-- 상관된 PARAM_EXEC 내비게이션
+-- 오프셋은(SRF 인라인을 통해 그 오프셋에 도달한다) resolve_nav_offsets() 에
+-- 의해 스캔마다 해소된다; 실행 후에는 EXPLAIN ANALYZE가 "runtime" 이
+-- 아니라 구체적으로 해소된 경계(숫자)를 표시해야 한다 -- 즉,
+-- navMaxOffsetKind 가 FIXED로 해소된다는 것이다.  같은 질의의 평범한
+-- EXPLAIN은 "runtime" 을 보여 준다; ANALYZE만이 스캔별 clear를 검사한다.
 CREATE TABLE rpr_exp_srf (v int);
 INSERT INTO rpr_exp_srf SELECT generate_series(1, 10);
 CREATE FUNCTION rpr_exp_srf_f(k int) RETURNS SETOF bigint AS $$
@@ -3980,11 +3983,11 @@ SELECT t FROM rpr_explain_filter(
    GROUP BY g.n') AS t
 WHERE t LIKE '%Nav Mark Lookback%';
 DROP FUNCTION rpr_exp_srf_f(int);
--- The kind a scan settles on is per scan, not sticky.  An outer offset that
--- overflows int64 gives up on the trim for that scan alone, and EXPLAIN
--- ANALYZE reports what the last rescan left behind: the same three offsets
--- in a different order have to read differently, retain all when the
--- overflow runs last and a bound again when a smaller offset follows it.
+-- 스캔이 정하는 kind는 스캔마다 정해지며 계속 유지되지 않는다.  int64를
+-- 넘치는(overflow) 바깥쪽 오프셋은 그 스캔에 대해서만 trim을 포기하며, EXPLAIN
+-- ANALYZE는 마지막 재스캔이 남긴 것을 보고한다: 같은 세 오프셋이라도 순서가
+-- 다르면 다르게 읽혀야 한다.  overflow가 마지막에 실행되면 retain all이 되고,
+-- 그 뒤에 더 작은 오프셋이 오면 다시 경계값이 된다.
 CREATE FUNCTION rpr_exp_srf_cmp(k int8) RETURNS SETOF bigint AS $$
   SELECT count(*) OVER w
   FROM rpr_exp_srf

@@ -778,15 +778,16 @@ _jumbleRangeTblEntry_eref(JumbleState *jstate,
 }
 
 /*
- * Custom query jumble function for WindowClause.defineClause.
+ * WindowClause.defineClause 를 위한 커스텀 쿼리 잠블(jumble) 함수.
  *
- * The DEFINE clause is stored as a list of TargetEntry, one per row pattern
- * variable, whose resname is the variable being defined.  TargetEntry.resname
- * is marked as query_jumble_ignore, however in a DEFINE clause, the resname
- * is semantically significant: it binds the condition to a PATTERN variable.
- * "DEFINE A AS p > 50, B AS p < 50" and "DEFINE B AS p > 50, A AS p < 50"
- * are different queries and must get different query ids. Therefore jumble
- * TargetEntry.resname is necessary for WindowClause.defineClause.
+ * DEFINE 절은 행 패턴 변수마다 하나씩 있는 TargetEntry 항목의 리스트로
+ * 저장되며, 그 resname이 정의되는 변수다.  TargetEntry.resname은
+ * query_jumble_ignore 로 표시되어 있지만, DEFINE 절에서는 resname이 의미상
+ * 중요하다: 그 조건을 PATTERN 변수에 묶어 주기 때문이다.
+ * "DEFINE A AS p > 50, B AS p < 50"과 "DEFINE B AS p > 50, A AS p < 50"은
+ * 서로 다른 질의이며 서로 다른 query id를 가져야 한다.  따라서
+ * WindowClause.defineClause 에는 TargetEntry.resname을 잠블하는 것이
+ * 필요하다.
  */
 static void
 _jumbleWindowClause_defineClause(JumbleState *jstate,
@@ -794,12 +795,12 @@ _jumbleWindowClause_defineClause(JumbleState *jstate,
 								 List *defineClause)
 {
 	/*
-	 * Jumble the list as the generated code would, so that a window without a
-	 * DEFINE clause keeps its query id.
+	 * DEFINE 절이 없는 윈도우도 자신의 query id를 유지하도록, 생성된 코드가
+	 * 하듯이 이 리스트를 잠블한다.
 	 */
 	_jumbleNode(jstate, (Node *) defineClause);
 
-	/* Then add the variable names, which TargetEntry.resname hides. */
+	/* 그다음 TargetEntry.resname이 감추고 있는 변수 이름들을 추가한다. */
 	foreach_node(TargetEntry, expr, defineClause)
 		JUMBLE_STRING(resname);
 }

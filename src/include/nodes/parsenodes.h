@@ -580,70 +580,71 @@ typedef struct SortBy
 } SortBy;
 
 /*
- * AFTER MATCH row pattern skip to types in row pattern common syntax
+ * 행 패턴 공통 구문에서 쓰이는 AFTER MATCH 행 패턴 건너뛰기 대상 타입
  */
 typedef enum RPSkipTo
 {
-	ST_NONE,					/* not a row pattern window; an omitted AFTER
-								 * MATCH gives ST_PAST_LAST_ROW */
+	ST_NONE,					/* 행 패턴 윈도우가 아니다;
+							 * AFTER MATCH를 생략하면 ST_PAST_LAST_ROW 값이
+							 * 된다 */
 	ST_NEXT_ROW,				/* SKIP TO NEXT ROW */
 	ST_PAST_LAST_ROW,			/* SKIP TO PAST LAST ROW */
 } RPSkipTo;
 
 /*
- * RPRPatternNodeType - Row Pattern Recognition pattern node types
+ * RPRPatternNodeType - 행 패턴 인식(RPR) 패턴 노드 타입
  */
 typedef enum RPRPatternNodeType
 {
-	RPR_PATTERN_VAR,			/* variable reference */
-	RPR_PATTERN_SEQ,			/* sequence (concatenation) */
-	RPR_PATTERN_ALT,			/* alternation (|) */
-	RPR_PATTERN_GROUP,			/* group (parentheses) */
+	RPR_PATTERN_VAR,			/* 변수 참조 */
+	RPR_PATTERN_SEQ,			/* 시퀀스(연결) */
+	RPR_PATTERN_ALT,			/* 교대(|) */
+	RPR_PATTERN_GROUP,			/* 그룹(괄호) */
 } RPRPatternNodeType;
 
 /*
- * RPR_QUANTITY_INF is the sentinel stored in RPRPatternNode.max for an
- * unbounded quantifier (*, +, or {n,}); later stages treat this max as
- * "no upper bound".  It lives here, next to the node, so the parser, the
- * planner (optimizer/rpr.h), and the executor all share one definition.
+ * RPR_QUANTITY_INF 값은 무제한 수량자(*, +, 또는 {n,})를 위해
+ * RPRPatternNode.max에 저장되는 센티널 값이다; 이후 단계들은 이 max를
+ * "no upper bound"로 취급한다. 이 값은 파서, 플래너 (optimizer/rpr.h),
+ * 실행기가 모두 하나의 정의를 공유하도록 이 자리, 즉 노드 바로 옆에 둔다.
  */
-#define RPR_QUANTITY_INF	PG_INT32_MAX	/* unbounded quantifier */
+#define RPR_QUANTITY_INF	PG_INT32_MAX	/* 무제한 수량자 */
 
 /*
- * RPRPatternNode - Row Pattern Recognition pattern parse tree node
+ * RPRPatternNode - 행 패턴 인식(RPR) 패턴 파스 트리 노드
  */
 typedef struct RPRPatternNode
 {
 	NodeTag		type;			/* T_RPRPatternNode */
 	RPRPatternNodeType nodeType;	/* VAR, SEQ, ALT, GROUP */
-	int32		min;			/* minimum repetitions (0 for *, ?) */
-	int32		max;			/* maximum repetitions (RPR_QUANTITY_INF for
-								 * *, +) */
-	bool		reluctant;		/* true for reluctant (non-greedy) */
-	ParseLoc	location;		/* token location, or -1 if unknown */
-	char	   *varName;		/* VAR: variable name */
-	List	   *children;		/* SEQ, ALT, GROUP: child nodes */
+	int32		min;			/* 최소 반복 횟수(*, ?의 경우 0) */
+	int32		max;			/* 최대 반복 횟수(*, +의 경우
+							 * RPR_QUANTITY_INF) */
+	bool		reluctant;		/* 소극적(비탐욕적)이면 true */
+	ParseLoc	location;		/* 토큰 위치, 알 수 없으면 -1 */
+	char	   *varName;		/* VAR: 변수 이름 */
+	List	   *children;		/* SEQ, ALT, GROUP: 자식 노드 */
 
 	/*
-	 * Transient parse flag, cleared by splitRPRTrailingAlt before the tree is
-	 * finalized: a glued quantifier such as "*|" is immediately followed by
-	 * the alternation operator '|'.  It is always false in a finalized tree,
-	 * so it has no effect on the pg_stat_statements queryid.
+	 * splitRPRTrailingAlt 함수가 트리를 확정하기 전에 지우는 일시적 파싱
+	 * 플래그다: "*|"처럼 들러붙은 수량자는 곧바로 교대 연산자 '|'가 뒤따른다.
+	 * 확정된 트리에서는 항상 false이므로 pg_stat_statements 의 queryid에는
+	 * 영향을 주지 않는다.
 	 */
 	bool		trailing_alt;
 } RPRPatternNode;
 
 /*
- * RPCommonSyntax - raw representation of row pattern common syntax
+ * RPCommonSyntax - 행 패턴 공통 구문의 원시 표현
  */
 typedef struct RPCommonSyntax
 {
 	NodeTag		type;
-	RPSkipTo	rpSkipTo;		/* Row Pattern AFTER MATCH SKIP type */
-	RPRPatternNode *rpPattern;	/* PATTERN parse tree */
-	List	   *rpDefs;			/* row pattern definitions clause (list of
-								 * ResTarget) */
-	ParseLoc	location;		/* PATTERN keyword location, or -1 if unknown */
+	RPSkipTo	rpSkipTo;		/* 행 패턴 AFTER MATCH SKIP 타입 */
+	RPRPatternNode *rpPattern;	/* PATTERN 파스 트리 */
+	List	   *rpDefs;			/* 행 패턴 정의 절(ResTarget
+							 * 리스트) */
+	ParseLoc	location;		/* PATTERN 키워드 위치, 알 수 없으면 -1 */
 } RPCommonSyntax;
 
 /*
@@ -664,10 +665,10 @@ typedef struct WindowDef
 	int			frameOptions;	/* frame_clause options, see below */
 	Node	   *startOffset;	/* expression for starting bound, if any */
 	Node	   *endOffset;		/* expression for ending bound, if any */
-	RPCommonSyntax *rpCommonSyntax; /* row pattern common syntax */
+	RPCommonSyntax *rpCommonSyntax; /* 행 패턴 공통 구문 */
 	ParseLoc	location;		/* parse location, or -1 if none/unknown */
-	ParseLoc	frameLocation;	/* ROWS/RANGE/GROUPS location, or -1 */
-	ParseLoc	excludeLocation;	/* EXCLUDE location, or -1 */
+	ParseLoc	frameLocation;	/* ROWS/RANGE/GROUPS 위치, 없으면 -1 */
+	ParseLoc	excludeLocation;	/* EXCLUDE 위치, 없으면 -1 */
 } WindowDef;
 
 /*
@@ -1632,17 +1633,16 @@ typedef struct GroupingSet
  * When refname isn't null, the partitionClause is always copied from there;
  * the orderClause might or might not be copied (see copiedOrder); the framing
  * options are never copied, per spec.
- * "defineClause" is Row Pattern Recognition DEFINE clause (list of
- * TargetEntry). TargetEntry.resname represents row pattern definition
- * variable name. "rpPattern" represents the PATTERN clause as a parse tree
- * (RPRPatternNode).
- * Parse analysis sets rpSkipTo, defineClause and rpPattern from one grammar
- * production, or none of them.  The planner does not keep them so:
- * grouping_planner() empties defineClause alone on a window clause that will
- * not run, one not in activeWindows.  Test rpPattern, never defineClause, for
- * "is this a row pattern window".  An empty defineClause beside a non-null
- * rpPattern means the clause will not run; a non-empty one does not mean it
- * will.
+ * "defineClause"는 행 패턴 인식(RPR) DEFINE 절이다(TargetEntry 리스트).
+ * TargetEntry.resname은 행 패턴 정의 변수 이름을 나타낸다.  "rpPattern"은
+ * PATTERN 절을 파스 트리로 나타낸다 (RPRPatternNode).  파싱 분석은 rpSkipTo,
+ * defineClause, rpPattern 을 하나의 문법 생성 규칙으로부터 함께 설정하거나,
+ * 아니면 셋 다 설정하지 않는다.  플래너는 이들을 그렇게 유지하지 않는다:
+ * grouping_planner()는 실행되지 않을 윈도우 절, 즉 activeWindows 에 없는 절에
+ * 대해서는 defineClause 만 비운다.  "is this a row pattern window"를 판단할
+ * 때는 defineClause 가 아니라 항상 rpPattern 을 검사하라.  rpPattern 이
+ * null이 아닌데 defineClause 가 비어 있으면 그 절은 실행되지 않는다는 뜻이고,
+ * defineClause 가 비어 있지 않다고 해서 실행된다는 뜻은 아니다.
  *
  */
 typedef struct WindowClause
@@ -1671,11 +1671,11 @@ typedef struct WindowClause
 	Index		winref;			/* ID referenced by window functions */
 	/* did we copy orderClause from refname? */
 	bool		copiedOrder pg_node_attr(query_jumble_ignore);
-	/* AFTER MATCH SKIP type; ST_NONE if this is not a row pattern window */
+	/* AFTER MATCH SKIP 타입; 행 패턴 윈도우가 아니면 ST_NONE */
 	RPSkipTo	rpSkipTo;
-	/* Row Pattern DEFINE clause (list of TargetEntry) */
+	/* 행 패턴 DEFINE 절(TargetEntry 리스트) */
 	List	   *defineClause pg_node_attr(custom_query_jumble);
-	/* Row Pattern PATTERN parse tree */
+	/* 행 패턴 PATTERN 파스 트리 */
 	RPRPatternNode *rpPattern;
 } WindowClause;
 

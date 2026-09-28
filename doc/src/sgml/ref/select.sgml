@@ -1081,13 +1081,11 @@ EXCLUDE NO OTHERS
    </para>
 
    <para>
-    The
-    optional
-    <replaceable class="parameter">row_pattern_common_syntax</replaceable>
-    defines the <firstterm>Row Pattern Recognition condition</firstterm> for
-    this window.
-    <replaceable class="parameter">row_pattern_common_syntax</replaceable>
-    includes the following subclauses.
+    선택적인
+    <replaceable class="parameter">row_pattern_common_syntax</replaceable>는 이
+    윈도우에 대한 <firstterm>행 패턴 인식 조건</firstterm>을 정의한다.
+    <replaceable class="parameter">row_pattern_common_syntax</replaceable>는
+    다음의 하위 절들을 포함한다.
 
 <synopsis>
 [ { AFTER MATCH SKIP PAST LAST ROW | AFTER MATCH SKIP TO NEXT ROW } ]
@@ -1095,160 +1093,131 @@ EXCLUDE NO OTHERS
 PATTERN ( <replaceable class="parameter">pattern_variable_name</replaceable> [ <replaceable>quantifier</replaceable> ] [ ... ] )
 DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS <replaceable class="parameter">expression</replaceable> [, ...]
 </synopsis>
-    <literal>AFTER MATCH SKIP PAST LAST ROW</literal> or <literal>AFTER MATCH
-    SKIP TO NEXT ROW</literal> controls how to proceed to the next row position
-    after a match is found. With <literal>AFTER MATCH SKIP PAST LAST
-    ROW</literal> (the default) the next row position is next to the last row
-    of the previous match. On the other hand, with <literal>AFTER MATCH SKIP TO
-    NEXT ROW</literal> the next row position is next to the first row of the
-    previous match. <literal>INITIAL</literal> or <literal>SEEK</literal>
-    specifies from which row in the frame pattern matching begins.
-    If <literal>INITIAL</literal> is specified, the match must start
-    from the first row in the frame. If <literal>SEEK</literal> is specified,
-    the set of matching rows does not necessarily start from the first row. The
-    default is <literal>INITIAL</literal>. Currently
-    only <literal>INITIAL</literal> is supported. <literal>DEFINE</literal>
-    defines definition variables along with a boolean
-    expression. <literal>PATTERN</literal> defines a sequence of rows that
-    satisfies certain conditions using variables defined
-    in the <literal>DEFINE</literal> clause (an empty
-    <literal>PATTERN()</literal> is not accepted by the syntax). Each pattern
-    variable can be followed by a quantifier to specify how many times it
-    should match: <literal>*</literal> (zero or more),
-    <literal>+</literal> (one or more),
-    <literal>?</literal> (zero or one),
+    <literal>AFTER MATCH SKIP PAST LAST ROW</literal> 또는 <literal>AFTER MATCH
+    SKIP TO NEXT ROW</literal>는 매치를 찾은 뒤 다음 행 위치로 어떻게
+    진행할지를 제어한다.  <literal>AFTER MATCH SKIP PAST LAST
+    ROW</literal>(기본값)를 쓰면 다음 행 위치는 이전 매치의 마지막 행 다음이
+    된다.  반대로 <literal>AFTER MATCH SKIP TO NEXT ROW</literal>를 쓰면 다음
+    행 위치는 이전 매치의 첫 번째 행 다음이 된다.  <literal>INITIAL</literal>
+    또는 <literal>SEEK</literal>는 프레임의 어느 행에서 패턴 매칭을 시작할지를
+    지정한다.  <literal>INITIAL</literal>을 지정하면 매치는 반드시 프레임의 첫
+    번째 행에서 시작해야 한다.  <literal>SEEK</literal>를 지정하면 매칭되는
+    행의 집합이 반드시 첫 번째 행에서 시작할 필요는 없다.  기본값은
+    <literal>INITIAL</literal>이다.  현재는 <literal>INITIAL</literal>만
+    지원된다.  <literal>DEFINE</literal>은 정의 변수를 boolean 식과 함께
+    정의한다.  <literal>PATTERN</literal>은 <literal>DEFINE</literal> 절에서
+    정의된 변수를 사용해 특정 조건을 만족하는 행의 시퀀스를 정의한다(빈
+    <literal>PATTERN()</literal>은 구문상 허용되지 않는다).  각 패턴 변수
+    뒤에는 몇 번 매치해야 하는지를 지정하는 수량자를 붙일 수 있다:
+    <literal>*</literal>(0회 이상), <literal>+</literal>(1회 이상),
+    <literal>?</literal>(0회 또는 1회),
     <literal>{</literal><replaceable>n</replaceable><literal>}</literal>
-    (exactly <replaceable>n</replaceable> times, n &gt; 0),
+    (정확히 <replaceable>n</replaceable>회, n &gt; 0),
     <literal>{</literal><replaceable>n</replaceable><literal>,}</literal>
-    (at least <replaceable>n</replaceable> times, n &gt;= 0),
+    (최소 <replaceable>n</replaceable>회, n &gt;= 0),
     <literal>{,</literal><replaceable>m</replaceable><literal>}</literal>
-    (at most <replaceable>m</replaceable> times, m &gt; 0), or
+    (최대 <replaceable>m</replaceable>회, m &gt; 0), 또는
     <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}</literal>
-    (between <replaceable>n</replaceable> and <replaceable>m</replaceable>
-    times, 0 &lt;= n &lt;= m, 0 &lt; m).
-    Reluctant quantifiers (e.g., <literal>*?</literal>, <literal>+?</literal>,
-    <literal>??</literal>,
+    (<replaceable>n</replaceable>회 이상 <replaceable>m</replaceable>회 이하, 0
+    &lt;= n &lt;= m, 0 &lt; m).  소극적(reluctant) 수량자(예:
+    <literal>*?</literal>, <literal>+?</literal>, <literal>??</literal>,
     <literal>{</literal><replaceable>n</replaceable><literal>,</literal><replaceable>m</replaceable><literal>}?</literal>)
-    are supported.
-    The exclusion (<literal>{-</literal> and <literal>-}</literal>) is not
-    accepted by the syntax, and the permutation
-    (<literal>PERMUTE</literal>) is rejected as an unsupported feature.
-    <literal>PERMUTE</literal> is recognized wherever
-    a <literal>(</literal> follows it, so a pattern variable of that name has
-    to be written <literal>"permute"</literal> in that position.
-    Patterns can be grouped using parentheses, and alternation (OR) can be
-    expressed using the vertical bar <literal>|</literal>.
-    For example, <literal>(A B)+</literal> matches one or more repetitions
-    of the sequence A followed by B, and <literal>A | B</literal> matches
-    either A or B.
-    If a pattern variable is not defined in
-    the <literal>DEFINE</literal> clause, it is not automatically added
-    to the <literal>DEFINE</literal> clause. Instead, the executor evaluates
-    the variable as <literal>TRUE</literal> at execution time, behaving as if
-    the following definition existed.
+    도 지원된다.  제외 구문(<literal>{-</literal>와 <literal>-}</literal>)은
+    구문상 허용되지 않으며, 순열(<literal>PERMUTE</literal>)은 지원되지 않는
+    기능으로 거부된다.  <literal>PERMUTE</literal>는 뒤에
+    <literal>(</literal>가 오면 그 자리에서 인식되므로, 그 이름의 패턴 변수는
+    해당 위치에서 <literal>"permute"</literal>로 써야 한다.  패턴은 괄호로 묶어
+    그룹화할 수 있고, 교대(OR)는 세로줄 <literal>|</literal>로 표현할 수 있다.
+    예를 들어 <literal>(A B)+</literal>는 A 다음에 B가 오는 시퀀스가 한 번 이상
+    반복되는 것에 매치하고, <literal>A | B</literal>는 A 또는 B 어느 쪽에도
+    매치한다.  패턴 변수가 <literal>DEFINE</literal> 절에서 정의되어 있지
+    않으면 그 변수는 <literal>DEFINE</literal> 절에 자동으로 추가되지 않는다.
+    대신 실행기는 실행 시점에 그 변수를 <literal>TRUE</literal>로 평가하며,
+    이는 다음과 같은 정의가 있는 것처럼 동작한다.
 
 <synopsis>
 <literal>variable_name</literal> AS TRUE
 </synopsis>
 
-    Conversely, variables defined in the <literal>DEFINE</literal> clause
-    but not used in the <literal>PATTERN</literal> clause are rejected
-    with an error.  The <literal>DEFINE</literal> clause itself is not
-    optional: leaving it out is a syntax error, even where every pattern
-    variable would evaluate as <literal>TRUE</literal>.
-    A variable may be defined only once in the <literal>DEFINE</literal>
-    clause; a second definition of the same name is rejected with an
-    error.
+    반대로 <literal>DEFINE</literal> 절에서 정의되었지만
+    <literal>PATTERN</literal> 절에서 쓰이지 않는 변수는 오류로 거부된다.
+    <literal>DEFINE</literal> 절 자체는 선택 사항이 아니다: 모든 패턴 변수가
+    <literal>TRUE</literal>로 평가되는 경우라도 이를 생략하면 구문 오류가 된다.
+    변수는 <literal>DEFINE</literal> 절에서 한 번만 정의할 수 있으며, 같은
+    이름을 다시 정의하면 오류로 거부된다.
    </para>
 
    <para>
-    Row pattern recognition constrains the frame clause it is attached to.
-    The frame must be written in <literal>ROWS</literal> mode
-    as <literal>BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING</literal>, or
-    as <literal>BETWEEN CURRENT ROW
-    AND <replaceable>offset</replaceable> FOLLOWING</literal> with
-    a positive <replaceable>offset</replaceable>.
-    <literal>RANGE</literal> and <literal>GROUPS</literal> mode, any other
-    frame start or end, and
-    any <replaceable>frame_exclusion</replaceable> option other
-    than <literal>EXCLUDE NO OTHERS</literal> are rejected with an error.
+    행 패턴 인식은 자신이 붙은 프레임 절을 제약한다.  프레임은
+    <literal>ROWS</literal> 모드에서 <literal>BETWEEN CURRENT ROW AND UNBOUNDED
+    FOLLOWING</literal>로 쓰거나, <literal>BETWEEN CURRENT ROW AND
+    <replaceable>offset</replaceable> FOLLOWING</literal>으로 쓰되 이때
+    <replaceable>offset</replaceable>은 양수여야 한다.
+    <literal>RANGE</literal>와 <literal>GROUPS</literal> 모드, 그 밖의 다른
+    프레임 시작 또는 끝, 그리고 <replaceable>frame_exclusion</replaceable> 옵션
+    중 <literal>EXCLUDE NO OTHERS</literal>가 아닌 것은 모두 오류로 거부된다.
    </para>
 
    <para>
-    Note that the maximum number of unique pattern variables
-    used in the <literal>PATTERN</literal> clause is 240.
-    Additionally, the maximum nesting depth of pattern groups
-    (parentheses) is 254 levels.  An alternation costs a level of its own,
-    so a pattern that nests alternations reaches the limit at about half
-    as many parentheses.
-    However, pattern optimizations such as flattening nested sequences
-    and simplifying nested quantifiers may reduce the effective depth,
-    so this limit is rarely reached in practice.
-    The pattern is also limited to 32767 elements, counted after these
-    optimizations: one for each occurrence of a pattern variable, two for
-    each group with a quantifier other than <literal>{1}</literal>, one
-    for each alternation plus one for each of its alternatives, and one
-    more for the pattern as a whole.  A larger pattern is rejected with
-    an error.
+    <literal>PATTERN</literal> 절에서 쓰이는 고유 패턴 변수의 최대 개수는 240
+    개이다.  또한 패턴 그룹(괄호)의 최대 중첩 깊이는 254 단계이다.  교대는 그
+    자체로 한 단계를 소모하므로, 교대를 중첩하는 패턴은 괄호 개수가 그 절반쯤일
+    때 이미 한계에 도달한다.  다만 중첩된 시퀀스를 평탄화하거나 중첩된 수량자를
+    단순화하는 등의 패턴 최적화가 실제 깊이를 줄일 수 있으므로, 실무에서 이
+    한계에 도달하는 경우는 드물다.  패턴은 또한 이러한 최적화를 거친 뒤 32767
+    개 요소로 제한된다: 패턴 변수가 나타날 때마다 1개, <literal>{1}</literal>
+    이외의 수량자를 가진 그룹마다 2개, 교대마다 1개에 그 각 대안마다 1개씩을
+    더하고, 패턴 전체에 대해 1개를 더 센다.  더 큰 패턴은 오류로 거부된다.
    </para>
 
    <para>
-    Row pattern recognition cannot appear anywhere in a common table
-    expression that belongs to a <literal>WITH RECURSIVE</literal> clause;
-    such a query is rejected with an error.  The same restriction reaches
-    <command>CREATE RECURSIVE VIEW</command>, which is rewritten
-    to <literal>WITH RECURSIVE</literal>.
+    행 패턴 인식은 <literal>WITH RECURSIVE</literal> 절에 속하는 공통 테이블 식
+    안의 어디에도 나타날 수 없으며, 그런 질의는 오류로 거부된다.  같은 제약은
+    <command>CREATE RECURSIVE VIEW</command>에도 미치는데, 이 명령은
+    <literal>WITH RECURSIVE</literal>로 재작성되기 때문이다.
    </para>
 
    <para>
-    A column reference in the <literal>DEFINE</literal> clause must be
-    written without a qualifier.  The SQL standard reserves the qualifier
-    slot for a pattern variable, so a table name or alias is rejected
-    there, and a pattern variable qualifier is rejected as not supported.
-    The column name therefore has to resolve on its own across the
-    whole <literal>FROM</literal> clause, and an ambiguous name is
-    rejected.  Where the name is not unique, rename the column in
-    the <literal>FROM</literal> clause, for example with a column alias on
-    a subquery.  A column of an outer query cannot be referenced from
-    a <literal>DEFINE</literal> condition, qualified or not; such a
-    reference is rejected as not supported.
+    <literal>DEFINE</literal> 절의 열 참조는 한정자 없이 써야 한다.  SQL 표준은
+    한정자 자리를 패턴 변수를 위해 예약해 두므로, 그 자리에 테이블 이름이나
+    별칭을 쓰면 거부되고 패턴 변수 한정자는 지원되지 않는 기능으로 거부된다.
+    따라서 열 이름은 <literal>FROM</literal> 절 전체에 걸쳐 단독으로 해석되어야
+    하며, 이름이 모호하면 거부된다.  이름이 유일하지 않은 경우에는 예를 들어
+    서브쿼리에 열 별칭을 주는 방식으로 <literal>FROM</literal> 절의 열 이름을
+    바꾸어야 한다.  바깥 질의의 열은 한정하든 하지 않든
+    <literal>DEFINE</literal> 조건에서 참조할 수 없으며, 그런 참조는 지원되지
+    않는 기능으로 거부된다.
    </para>
 
    <para>
-    The same applies to names that are not columns.  A parameter or
-    variable of the routine whose body contains the query is readable from
-    a <literal>DEFINE</literal> condition, but only unqualified: the
-    <productname>PostgreSQL</productname> spellings that qualify one with
-    the routine name or a block label occupy the reserved slot and are
-    rejected there.  To read a field of a composite parameter or record
-    variable, parenthesize it, as in <literal>(p).amount</literal>; that is
-    field selection on a value rather than a qualified name, so the slot
-    stays free.
+    같은 규칙이 열이 아닌 이름에도 적용된다.  질의를 본문으로 가진 루틴의
+    매개변수나 변수는 <literal>DEFINE</literal> 조건에서 읽을 수 있지만,
+    한정하지 않은 형태여야 한다: 루틴 이름이나 블록 레이블로 한정하는
+    <productname>PostgreSQL</productname>의 표기법은 예약된 자리를 차지하므로
+    그 자리에서 거부된다.  복합 매개변수나 레코드 변수의 필드를 읽으려면
+    <literal>(p).amount</literal>처럼 괄호로 묶으면 된다.  이는 한정된 이름이
+    아니라 값에 대한 필드 선택이므로, 그 자리는 비워진 채로 남는다.
    </para>
 
    <para>
-    A <application>PL/pgSQL</application> function written with
-    <literal>#variable_conflict use_variable</literal> is an exception, as
-    it is everywhere else: that setting makes
-    <application>PL/pgSQL</application> resolve any name one of its
-    variables owns before the query does, so inside such a function
-    qualified spellings such as <literal>fn.threshold</literal> keep
-    working, and a variable whose name matches a pattern variable takes
-    <literal>A.price</literal> as well.  This is the same shadowing the
-    setting applies to table columns; see
-    <xref linkend="plpgsql-var-subst"/>.
+    <application>PL/pgSQL</application> 함수를 <literal>#variable_conflict
+    use_variable</literal>로 작성했다면 이는 다른 모든 곳에서와 마찬가지로
+    예외이다: 이 설정은 <application>PL/pgSQL</application>이 질의보다 먼저
+    자신의 변수가 소유한 이름을 해석하게 만들므로, 그런 함수 안에서는
+    <literal>fn.threshold</literal>처럼 한정된 표기도 계속 동작하고, 패턴
+    변수와 이름이 같은 변수는 <literal>A.price</literal> 표기도 가져간다.  이는
+    이 설정이 테이블 열에 적용하는 것과 같은 가림(shadowing)이다.
+    <xref linkend="plpgsql-var-subst"/>를 참고하라.
    </para>
 
    <para>
-    Two planner optimizations are not applied to a window that uses row
-    pattern recognition.  A filter on the result of a monotonic window
-    function, such as <literal>rn &lt;= 3</literal> on
-    a <function>row_number()</function> computed in a subquery, is not
-    pushed down into the window as a run condition, so the window is
-    evaluated to the end of the partition instead of stopping early.  And
-    the frame clause is not replaced with a cheaper one, even when the
-    window functions using it do not depend on the frame.  Query results
-    are not affected, only the cost of evaluating the window.
+    행 패턴 인식을 사용하는 윈도우에는 두 가지 플래너 최적화가 적용되지 않는다.
+    이를테면 <literal>rn &lt;= 3</literal>처럼, 서브쿼리에서 계산된
+    <function>row_number()</function> 결과에 거는 단조 윈도우 함수 필터는 run
+    condition으로 윈도우 안에 푸시다운되지 않으므로, 윈도우는 일찍 멈추지 않고
+    파티션 끝까지 평가된다.  또한 프레임 절을 사용하는 윈도우 함수가 프레임에
+    의존하지 않는 경우에도, 프레임 절은 더 저렴한 것으로 대체되지 않는다.  질의
+    결과에는 영향이 없으며, 윈도우 평가 비용만 달라진다.
    </para>
 
    <para>
@@ -2365,27 +2334,24 @@ SELECT 2+2;
   </refsect2>
 
   <refsect2>
-   <title>Row Pattern Recognition</title>
+   <title>행 패턴 인식</title>
 
    <para>
-    <productname>PostgreSQL</productname> supports row pattern recognition
-    both in a <literal>WINDOW</literal> clause entry and in an
-    inline <literal>OVER ( ... )</literal> specification.  The SQL standard
-    defines more subclauses: <literal>MEASURES</literal> and
-    <literal>SUBSET</literal>.  They are not currently supported
-    in <productname>PostgreSQL</productname>.  Also in the standard there are
-    more variations in the <literal>AFTER MATCH</literal> clause.
+    <productname>PostgreSQL</productname>은 <literal>WINDOW</literal> 절 항목과
+    인라인 <literal>OVER ( ... )</literal> 명세 양쪽에서 행 패턴 인식을
+    지원한다.  SQL 표준은 <literal>MEASURES</literal>와
+    <literal>SUBSET</literal>이라는 추가 하위 절을 정의하지만, 이들은 현재
+    <productname>PostgreSQL</productname>에서 지원되지 않는다.  또한 표준에는
+    <literal>AFTER MATCH</literal> 절에 더 많은 변형이 있다.
    </para>
 
    <para>
-    The largest difference is in <literal>DEFINE</literal>: a column
-    reference qualified by a pattern variable, such
-    as <literal>A.price</literal>, is not implemented and is rejected as an
-    unsupported feature, even though the standard writes
-    its <literal>DEFINE</literal> examples that way.  An unqualified column
-    reference in a <literal>DEFINE</literal> expression therefore always
-    reads the row being tested, and other rows of the match are reachable
-    only through the navigation operations.
+    가장 큰 차이는 <literal>DEFINE</literal>에 있다:
+    <literal>A.price</literal>처럼 패턴 변수로 한정된 열 참조는, 표준이
+    <literal>DEFINE</literal> 예시를 그런 식으로 쓰고 있음에도 불구하고,
+    구현되어 있지 않으며 지원되지 않는 기능으로 거부된다.  따라서
+    <literal>DEFINE</literal> 식의 한정되지 않은 열 참조는 항상 검사 대상 행을
+    읽으며, 매치의 다른 행은 오직 내비게이션 연산을 통해서만 접근할 수 있다.
    </para>
   </refsect2>
 

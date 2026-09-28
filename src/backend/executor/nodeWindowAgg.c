@@ -179,16 +179,17 @@ typedef struct WindowStatePerAggData
 typedef struct
 {
 	WindowAggState *winstate;
-	int64		maxOffset;		/* max backward-reach offset across all nav
-								 * exprs */
-	bool		maxOverflow;	/* true if backward-reach overflow detected */
-	int64		minFirstOffset; /* min forward-from-match_start offset; may be
-								 * negative (PREV_FIRST: inner - outer < 0) */
-	bool		hasMax;			/* any backward-reach nav found */
-	bool		hasFirst;		/* any FIRST-based nav found */
-	bool		validate;		/* fail-closed on a null/negative offset?
-								 * false at init (display only), true at
-								 * execution */
+	int64		maxOffset;		/* 모든 nav 표현식에 걸친 최대 후방 도달
+								 * 오프셋 */
+	bool		maxOverflow;	/* 후방 도달 오버플로가 감지되면 true */
+	int64		minFirstOffset; /* match_start 로부터의 최소 전방 오프셋.
+								 * 음수일 수 있음(PREV_FIRST: inner - outer
+								 * < 0) */
+	bool		hasMax;			/* 후방 도달 nav가 하나라도 있으면 true */
+	bool		hasFirst;		/* FIRST 기반 nav가 하나라도 있으면 true */
+	bool		validate;		/* null/음수 오프셋에서 fail-closed할지
+								 * 여부? 초기화 시(표시 전용)에는 false, 실행
+								 * 시에는 true */
 } EvalDefineOffsetsContext;
 
 static void initialize_windowaggregate(WindowAggState *winstate,
@@ -259,7 +260,7 @@ static void advance_reduced_frame_nfa(WindowObject winobj,
 									  RPRNFAContext *targetCtx);
 static void update_reduced_frame(WindowObject winobj, int64 pos);
 
-/* Forward declarations - DEFINE row evaluation */
+/* 전방 선언 - DEFINE 행 평가 */
 static bool rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched);
 static void build_define_offsets(WindowAggState *winstate, List *defineClause);
 static void resolve_nav_offsets(WindowAggState *winstate);
@@ -859,9 +860,9 @@ eval_windowaggregates(WindowAggState *winstate)
 	 *	   transition function, or
 	 *	 - we have an EXCLUSION clause, or
 	 *	 - if the new frame doesn't overlap the old one
-	 *   - if RPR (Row Pattern Recognition) is enabled, because the reduced
-	 *     frame depends on pattern matching results which can differ entirely
-	 *     from row to row, making inverse transition optimization inapplicable
+	 *   - RPR(행 패턴 인식)이 활성화된 경우.  축소된 프레임은 패턴 매칭
+	 *     결과에 따라 달라지는데 이 결과는 행마다 완전히 달라질 수 있어
+	 *     역전이 최적화를 적용할 수 없기 때문이다
 	 *
 	 * Note that we don't strictly need to restart in the last case, but if
 	 * we're going to remove all rows from the aggregation anyway, a restart
@@ -1008,9 +1009,9 @@ eval_windowaggregates(WindowAggState *winstate)
 		ExecClearTuple(agg_row_slot);
 
 		/*
-		 * If RPR is defined, we do not use aggregatedupto_nonrestarted.  To
-		 * avoid assertion failure below, we reset aggregatedupto_nonrestarted
-		 * to frameheadpos.
+		 * RPR 이 정의되어 있으면 aggregatedupto_nonrestarted 를 사용하지
+		 * 않는다.  아래의 assertion 오류를 피하기 위해
+		 * aggregatedupto_nonrestarted 를 frameheadpos로 재설정한다.
 		 */
 		if (rpr_is_defined(winstate))
 			aggregatedupto_nonrestarted = winstate->frameheadpos;
@@ -1049,8 +1050,8 @@ eval_windowaggregates(WindowAggState *winstate)
 		if (rpr_is_defined(winstate))
 		{
 			/*
-			 * If currentpos is already decided but aggregatedupto is not yet
-			 * determined, we've passed the last reduced frame.
+			 * currentpos는 이미 결정되었는데 aggregatedupto가 아직 정해지지
+			 * 않았다면, 마지막 축소된 프레임을 이미 지나친 것이다.
 			 */
 			if (get_reduced_frame_status(winstate, winstate->currentpos)
 				!= RF_NOT_DETERMINED &&
@@ -1059,16 +1060,16 @@ eval_windowaggregates(WindowAggState *winstate)
 				break;
 
 			/*
-			 * Calculate the reduced frame for aggregatedupto.
+			 * aggregatedupto에 대한 축소된 프레임을 계산한다.
 			 */
 			ret = row_is_in_reduced_frame(winstate->agg_winobj,
 										  winstate->aggregatedupto);
-			if (ret == -1)		/* unmatched row */
+			if (ret == -1)		/* 매치되지 않은 행 */
 				break;
 
 			/*
-			 * Check if current row is inside a match but not the head
-			 * (skipped), and it's the base row for aggregation.
+			 * 현재 행이 매치 안에 있지만 head가 아니고(건너뛴 행이고), 집계의
+			 * 기준 행인지 확인한다.
 			 */
 			if (get_reduced_frame_status(winstate,
 										 winstate->aggregatedupto) == RF_SKIPPED &&
@@ -1285,34 +1286,34 @@ prepare_tuplestore(WindowAggState *winstate)
 		}
 	}
 
-	/* Create read/mark pointers for RPR navigation if needed */
+	/* 필요하면 RPR 내비게이션을 위한 read/mark 포인터를 생성한다 */
 	if (winstate->nav_winobj)
 	{
 		/*
-		 * Allocate mark and read pointers for RPR navigation.
+		 * RPR 내비게이션을 위한 mark와 read 포인터를 할당한다.
 		 *
-		 * When the trim offset is FIXED we advance the mark based on
-		 * (currentpos - navMaxOffset) and optionally
-		 * (nfaContext->matchStartRow + navFirstOffset), allowing
-		 * tuplestore_trim() to free rows that are no longer reachable.
-		 * resolve_nav_offsets() runs before the first begin_partition(), so
-		 * the kind here is FIXED or RETAIN_ALL even for a parameterized
-		 * offset; RETAIN_ALL disables trim.
+		 * 트림 오프셋이 FIXED 이면 (currentpos - navMaxOffset)을 기준으로,
+		 * 그리고 경우에 따라 (nfaContext->matchStartRow + navFirstOffset)도
+		 * 함께 고려해 mark를 전진시켜, tuplestore_trim()이 더 이상 도달할 수
+		 * 없는 행을 해제할 수 있게 한다.  resolve_nav_offsets()는 첫
+		 * begin_partition()보다 먼저 실행되므로, 매개변수화된 오프셋이라도
+		 * 여기서의 종류는 FIXED 또는 RETAIN_ALL 이다.  RETAIN_ALL 은 트림을
+		 * 비활성화한다.
 		 *
-		 * XXX one read pointer serves two fetches that sit far apart.
-		 * rpr_prepare_row() fetches the frontier row the NFA is advancing
-		 * over, and ExecRPRNavGetSlot() fetches near matchStartRow for the
-		 * FIRST family; both go through window_gettupleslot(), which seeks
-		 * relative to seekpos, so the two drag the one pointer across the
-		 * whole match on every row.  In memory that is a pointer move, but
-		 * once the tuplestore spills tuplestore_skiptuples() is
-		 * tuple-at-a-time tape I/O and the cost turns quasi-quadratic:
-		 * PATTERN (S A+) DEFINE A AS v >= FIRST(v) under work_mem 64kB takes
-		 * 0.84 s at 2,000 rows, 5.4 s at 4,000 and 24.3 s at 8,000, against
-		 * 2.6 ms for those same 8,000 rows in memory.  The answers are
-		 * identical either way.  Separating them needs a second WindowObject
-		 * carrying its own read pointer for match-start navigation, which
-		 * stays inside this file.
+		 * XXX 하나의 read 포인터가 서로 멀리 떨어진 두 fetch를 담당한다.
+		 * rpr_prepare_row()는 NFA 가 전진시키고 있는 frontier 행을 가져오고,
+		 * ExecRPRNavGetSlot()은 FIRST 계열을 위해 matchStartRow 근처를
+		 * 가져온다.  둘 다 window_gettupleslot()을 거치는데, 이 함수는
+		 * seekpos를 기준으로 탐색하므로 두 fetch가 매 행마다 하나의 포인터를
+		 * 매치 전체에 걸쳐 끌고 다니게 된다.  메모리 안에서는 이것이 단순한
+		 * 포인터 이동이지만, tuplestore가 한 번 스필되면
+		 * tuplestore_skiptuples()는 tuple 단위의 테이프 I/O가 되어 비용이 준2
+		 * 차적으로 커진다: work_mem 64kB에서 PATTERN (S A+) DEFINE A AS
+		 * v >= FIRST(v)는 2,000 행에서 0.84 초, 4,000 행에서 5.4 초, 8,000
+		 * 행에서 24.3 초가 걸리는데, 같은 8,000 행을 메모리 안에서 처리하면
+		 * 2.6 ms이다.  어느 쪽이든 결과는 동일하다. 이 둘을 분리하려면
+		 * match-start 내비게이션을 위한 자신만의 read 포인터를 가진 두 번째
+		 * WindowObject 가 필요한데, 이는 이 파일 안에서 해결할 수 있다.
 		 */
 		winstate->nav_winobj->markptr =
 			tuplestore_alloc_read_pointer(winstate->buffer, 0);
@@ -1432,7 +1433,7 @@ begin_partition(WindowAggState *winstate)
 		winstate->aggregatedupto = 0;
 	}
 
-	/* reset mark and seek positions for RPR navigation */
+	/* RPR 내비게이션을 위해 mark와 seek 위치를 재설정한다 */
 	if (winstate->nav_winobj)
 	{
 		winstate->nav_winobj->markpos = -1;
@@ -1608,10 +1609,10 @@ release_partition(WindowAggState *winstate)
 	winstate->partition_spooled = false;
 	winstate->next_partition = true;
 
-	/* Reset RPR match results */
+	/* RPR 매치 결과를 재설정한다 */
 	clear_reduced_frame(winstate);
 
-	/* Reset NFA state for new partition */
+	/* 새 파티션을 위해 NFA 상태를 재설정한다 */
 	winstate->nfaContext = NULL;
 	winstate->nfaContextTail = NULL;
 	winstate->nfaContextFree = NULL;
@@ -1620,7 +1621,7 @@ release_partition(WindowAggState *winstate)
 	winstate->nfaStatesActive = 0;
 	winstate->nfaContextsActive = 0;
 
-	/* Invalidate the nav slot position cache for the new partition. */
+	/* 새 파티션을 위해 nav 슬롯 위치 캐시를 무효화한다. */
 	winstate->nav_slot_pos = -1;
 }
 
@@ -2419,9 +2420,9 @@ calculate_frame_offsets(PlanState *pstate)
 						 errmsg("frame ending offset must not be negative")));
 
 			/*
-			 * Row pattern recognition forbids a zero-length frame end;
-			 * checked here so a non-constant offset (e.g. a bind parameter)
-			 * is caught, not just a literal 0.
+			 * 행 패턴 인식은 길이가 0 인 프레임 끝을 금지한다. 이 검사는
+			 * 여기서 이루어지므로 리터럴 0 뿐 아니라 (바인드 매개변수 같은)
+			 * 상수가 아닌 오프셋도 걸러낸다.
 			 */
 			if (winstate->rpPattern != NULL && offset == 0)
 				ereport(ERROR,
@@ -2464,11 +2465,10 @@ ExecWindowAgg(PlanState *pstate)
 		calculate_frame_offsets(pstate);
 
 	/*
-	 * Resolve navigation offsets the same way, during first call (or after a
-	 * rescan).  Every RPR window holding a navigation comes through here: the
-	 * pass at init resolved the constant offsets for EXPLAIN to display
-	 * without validating them, so this is where a null or negative offset is
-	 * rejected.
+	 * 첫 호출 시(또는 rescan 후) 같은 방식으로 내비게이션 오프셋을 확정한다.
+	 * 내비게이션을 가진 모든 RPR 윈도우는 이 지점을 거친다: 초기화 시점의
+	 * 처리는 EXPLAIN 표시를 위해 상수 오프셋을 검증 없이 확정했으므로,
+	 * null이나 음수 오프셋을 거부하는 곳은 바로 여기다.
 	 */
 	if (unlikely(winstate->navResolvePending))
 		resolve_nav_offsets(winstate);
@@ -2573,17 +2573,17 @@ ExecWindowAgg(PlanState *pstate)
 			if (rpr_is_defined(winstate))
 			{
 				/*
-				 * Under SKIP TO NEXT ROW, clear the recorded match so this
-				 * row is matched again from its own start.
+				 * SKIP TO NEXT ROW 에서는 기록된 매치를 지워, 이 행이 자신의
+				 * 시작점부터 다시 매치되도록 한다.
 				 */
 				if (winstate->rpSkipTo == ST_NEXT_ROW)
 					clear_reduced_frame(winstate);
 
 				/*
-				 * Drive the row pattern match every row, so it tracks the row
-				 * scan rather than frame access: a window function that skips
-				 * the frame (e.g. nth_value() with a NULL offset) must not
-				 * leave the match state behind currentpos.
+				 * 행 패턴 매치는 프레임 접근이 아니라 행 스캔을 따라가도록 매
+				 * 행마다 구동한다.  (NULL 오프셋을 준 nth_value()처럼)
+				 * 프레임을 건너뛰는 윈도우 함수라도 매치 상태를
+				 * currentpos보다 뒤에 남겨두면 안 되기 때문이다.
 				 */
 				Assert(winstate->nav_winobj != NULL);
 				ensure_reduced_frame(winstate->nav_winobj,
@@ -2771,22 +2771,22 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->frameOptions = frameOptions;
 
 	/*
-	 * Create expression contexts.  We need two, one for per-input-tuple
-	 * processing and one for per-output-tuple processing, plus an optional
-	 * third for row pattern recognition DEFINE evaluation (built just below
-	 * when a DEFINE clause is present).  We cheat a little by using
-	 * ExecAssignExprContext() to build them all.  Each call overwrites
-	 * ps_ExprContext, so the last call must establish the output context.
+	 * Create expression contexts.  입력 튜플별 처리용과 출력 튜플별 처리용 두
+	 * 개가 필요하고, 여기에 더해 행 패턴 인식 DEFINE 평가를 위한 선택적 세
+	 * 번째 컨텍스트가 (DEFINE 절이 있을 때 바로 아래에서) 만들어진다.  이들
+	 * 모두를 만드는 데 ExecAssignExprContext()를 약간 편법으로 사용하는데, 이
+	 * 함수는 호출할 때마다 ps_ExprContext 를 덮어쓰므로 마지막 호출이 출력
+	 * 컨텍스트를 설정하게 된다.
 	 */
 	ExecAssignExprContext(estate, &winstate->ss.ps);
 	tmpcontext = winstate->ss.ps.ps_ExprContext;
 	winstate->tmpcontext = tmpcontext;
 
 	/*
-	 * Row pattern recognition evaluates DEFINE clauses in a third context,
-	 * reset before each DEFINE evaluation pass.  It must be distinct from
-	 * tmpcontext and ps_ExprContext so its reset frees neither input nor
-	 * output tuple memory.
+	 * 행 패턴 인식은 DEFINE 절을 세 번째 컨텍스트에서 평가하며, 이 컨텍스트는
+	 * 각 DEFINE 평가 패스 전에 재설정된다.  tmpcontext, ps_ExprContext 와는
+	 * 구분되어야 하는데, 그래야 이 컨텍스트를 재설정해도 입력이나 출력 튜플
+	 * 메모리가 해제되지 않는다.
 	 */
 	if (node->defineClause != NIL)
 	{
@@ -3059,9 +3059,9 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->next_partition = true;
 
 	/*
-	 * RPR stuff, in struct declaration order except for the nav offsets,
-	 * which build_define_offsets() below accumulates into; the four
-	 * NFALengthStats members keep the zeroes palloc0 gave them.
+	 * RPR 관련 항목을, nav 오프셋을 제외하면 구조체 선언 순서대로 채운다.
+	 * nav 오프셋은 아래의 build_define_offsets()가 누적해 채운다.  네 개의
+	 * NFALengthStats 멤버는 palloc0이 준 0 값을 그대로 유지한다.
 	 */
 	if (node->rpPattern != NULL)
 	{
@@ -3081,30 +3081,30 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
 
 		/*
-		 * Must run this before the ExecInitQual() loop over defineClause:
-		 * while compiling each RPRNavExpr, ExecInitQual() reads
-		 * winstate->rprNavOffsets to link the RPRNavState to its entry and
-		 * seed the offset, and this call is what fills that list
+		 * defineClause 에 대한 ExecInitQual() 루프보다 먼저 이 함수를 실행해야
+		 * 한다.  각 RPRNavExpr 을 컴파일하는 동안 ExecInitQual()이
+		 * winstate->rprNavOffsets 를 읽어 RPRNavState 를 해당 항목과 연결하고
+		 * 오프셋을 채우는데, 이 호출이 바로 그 목록을 채우는 부분이기 때문이다
 		 */
 		build_define_offsets(winstate, node->defineClause);
 
 		/*
-		 * Compile DEFINE clause expressions.  PREV/NEXT navigation is handled
-		 * by EEOP_RPR_NAV_SET/RESTORE opcodes emitted during ExecInitQual, so
-		 * no varno rewriting is needed here.  Expressions are kept in DEFINE
-		 * order, so their list index equals the variable's varId.
+		 * DEFINE 절 표현식을 컴파일한다.  PREV/NEXT 내비게이션은 ExecInitQual
+		 * 도중 방출되는 EEOP_RPR_NAV_SET/RESTORE opcode가 처리하므로,
+		 * 여기서는 varno 재작성이 필요 없다.  표현식은 DEFINE 순서로
+		 * 유지되므로, 리스트 인덱스가 곧 그 변수의 varId 와 같다.
 		 */
 		foreach_node(TargetEntry, te, node->defineClause)
 		{
 			ExprState  *exprstate;
 
 			/*
-			 * That index is established in buildRPRPattern() and consumed
-			 * here, with nothing in between checking it.  Every step that
-			 * touches the list preserves its order today, but a reorder would
-			 * evaluate one variable's search condition for another and give a
-			 * wrong answer with nothing to show for it, so check the name the
-			 * pattern holds for this position against the entry's own.
+			 * 그 인덱스는 buildRPRPattern()에서 확립되고 여기서 소비되며, 그
+			 * 사이에는 이를 검사하는 곳이 없다.  오늘은 이 리스트를 다루는
+			 * 모든 단계가 순서를 보존하지만, 순서가 뒤바뀌면 한 변수의 검색
+			 * 조건을 다른 변수에 대해 평가하면서도 아무 표시 없이 잘못된 답을
+			 * 낼 것이다.  그래서 패턴이 이 위치에 대해 들고 있는 이름을 항목
+			 * 자신의 이름과 대조해 확인한다.
 			 */
 			Assert(foreach_current_index(te) < node->rpPattern->numVars);
 			Assert(strcmp(node->rpPattern->varNames[foreach_current_index(te)],
@@ -3116,7 +3116,7 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 				lappend(winstate->defineClauseExprs, exprstate);
 		}
 
-		/* Initialize NFA free lists for row pattern matching */
+		/* 행 패턴 매칭을 위한 NFA free list를 초기화한다 */
 		winstate->nfaContext = NULL;
 		winstate->nfaContextTail = NULL;
 		winstate->nfaContextFree = NULL;
@@ -3125,19 +3125,19 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 			sizeof(int32) * node->rpPattern->maxDepth;
 
 		/*
-		 * Allocate the per-row varMatched cache.  varNames are built in
-		 * DEFINE order, so varId equals the DEFINE list index and no mapping
-		 * is needed.
+		 * 행별 varMatched 캐시를 할당한다.  varNames 는 DEFINE 순서로
+		 * 만들어지므로 varId 가 곧 DEFINE 리스트 인덱스이며 별도의 매핑이
+		 * 필요 없다.
 		 *
-		 * The grammar makes DEFINE mandatory for a row pattern window, and
-		 * this branch runs only for one, so the list is never empty and
-		 * rpr_prepare_row() can reset the cache unconditionally.
+		 * 문법상 행 패턴 윈도우에는 DEFINE 이 반드시 있어야 하고, 이 분기는
+		 * 그런 경우에만 실행되므로 리스트가 비어 있는 일은 없으며
+		 * rpr_prepare_row()는 무조건 캐시를 재설정할 수 있다.
 		 */
 		Assert(winstate->defineClauseExprs != NIL);
 		winstate->nfaVarMatched = palloc0(sizeof(RPRVarMatch) *
 										  list_length(winstate->defineClauseExprs));
 
-		/* Copy match_start dependency bitmapset for per-context evaluation */
+		/* 컨텍스트별 평가를 위해 match_start 의존성 bitmapset을 복사한다 */
 		winstate->defineMatchStartDependent = bms_copy(node->defineMatchStartDependent);
 
 		nfaVisitedNWords =
@@ -3146,7 +3146,7 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		winstate->nfaVisitedEnds = palloc0(sizeof(bitmapword) *
 										   nfaVisitedNWords);
 
-		/* High-water mark sentinels: no bits set yet. */
+		/* 최고 수위 sentinel: 아직 설정된 비트가 없다. */
 		winstate->nfaVisitedMinWord = PG_INT16_MAX;
 		winstate->nfaVisitedMaxWord = -1;
 
@@ -3165,16 +3165,16 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 		winstate->nfaMatchesFailed = 0;
 
 		/*
-		 * Nav offsets are resolved (and validated) at execution, like frame
-		 * offsets: on the first scan and after each rescan, for every RPR
-		 * window.
+		 * nav 오프셋은 프레임 오프셋과 마찬가지로 실행 시점에
+		 * (그리고 검증되어) 확정된다: 모든 RPR 윈도우에 대해 첫 스캔과 매
+		 * rescan 이후에 확정한다.
 		 */
 		winstate->navResolvePending = (winstate->rprNavOffsets != NIL);
 
 		/*
-		 * Set up WindowObject for RPR navigation opcodes.  This is separate
-		 * from agg_winobj because it needs its own read pointer to avoid
-		 * interfering with aggregate processing.
+		 * RPR 내비게이션 opcode를 위한 WindowObject 를 준비한다.  집계 처리를
+		 * 방해하지 않도록 자신만의 read 포인터가 필요하므로 agg_winobj 와는
+		 * 별도로 둔다.
 		 */
 		nav_winobj = makeNode(WindowObjectData);
 		nav_winobj->winstate = winstate;
@@ -3199,8 +3199,8 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 /*
  * ExecRPRNavGetSlot
  *
- * Fetch tuple at given position for RPR navigation opcodes.
- * Returns nav_slot with the tuple loaded, or NULL if out of range.
+ * RPR 내비게이션 opcode를 위해 주어진 위치의 튜플을 가져온다. 튜플이 채워진
+ * nav_slot 을 반환하거나, 범위를 벗어나면 NULL 을 반환한다.
  */
 TupleTableSlot *
 ExecRPRNavGetSlot(WindowAggState *winstate, int64 pos)
@@ -3212,11 +3212,11 @@ ExecRPRNavGetSlot(WindowAggState *winstate, int64 pos)
 		return NULL;
 
 	/*
-	 * If nav_slot already holds this position, return it without re-fetching.
-	 * This saves a tuplestore fetch when several navigations in the same
-	 * expression target the same row.  Earlier pass-by-ref results do not
-	 * depend on it: EEOP_RPR_NAV_RESTORE copies them out of nav_slot's tuple
-	 * memory.
+	 * nav_slot 이 이미 이 위치를 담고 있다면 다시 가져오지 않고 그대로
+	 * 반환한다.  같은 표현식 안의 여러 내비게이션이 같은 행을 대상으로 할 때
+	 * tuplestore 조회를 절약해 준다.  앞서 나온 pass-by-ref 결과는 여기에
+	 * 의존하지 않는다: EEOP_RPR_NAV_RESTORE 가 nav_slot 의 튜플 메모리에서 그
+	 * 값을 복사해 내기 때문이다.
 	 */
 	if (winstate->nav_slot_pos == pos)
 		return slot;
@@ -3279,7 +3279,7 @@ ExecReScanWindowAgg(WindowAggState *node)
 
 	node->status = WINDOWAGG_RUN;
 	node->all_first = true;
-	/* offsets are re-resolved and re-validated at the next scan */
+	/* 오프셋은 다음 스캔에서 다시 확정되고 다시 검증된다 */
 	node->navResolvePending = (node->rprNavOffsets != NIL);
 
 	/* release tuplestore et al */
@@ -3821,8 +3821,8 @@ ignorenulls_getfuncarginframe(WindowObject winobj, int argno,
 				goto out_of_frame;
 
 			/*
-			 * RPR cares about frame head pos. Need to call
-			 * update_frameheadpos
+			 * RPR 은 프레임 head 위치에 신경 쓴다.  update_frameheadpos 를
+			 * 호출해야 한다.
 			 */
 			update_frameheadpos(winstate);
 
@@ -3843,20 +3843,19 @@ ignorenulls_getfuncarginframe(WindowObject winobj, int argno,
 	 */
 
 	/*
-	 * Check whether current row is in reduced frame.
+	 * 현재 행이 축소된 프레임 안에 있는지 확인한다.
 	 */
 	num_reduced_frame = row_is_in_reduced_frame(winobj, winstate->frameheadpos);
-	if (num_reduced_frame < 0)	/* unmatched or skipped row */
+	if (num_reduced_frame < 0)	/* 매치되지 않았거나 건너뛴 행 */
 		goto out_of_frame;
-	else if (num_reduced_frame > 0) /* the first row of the reduced frame */
+	else if (num_reduced_frame > 0) /* 축소된 프레임의 첫 행 */
 	{
 		/*
-		 * Early check if row could be out of reduced frame.  When RPR is
-		 * enabled, EXCLUDE clause cannot be specified and the frame is always
-		 * contiguous.  So we can safely perform the following checks. Note,
-		 * however, it is possible that a row is out of reduced frame if
-		 * there's a NULL in the middle. So we need to check it in the
-		 * following do loop.
+		 * 행이 축소된 프레임을 벗어났을 가능성을 미리 확인한다.  RPR 이
+		 * 활성화되어 있으면 EXCLUDE 절을 지정할 수 없고 프레임은 항상
+		 * 연속적이므로, 다음 검사를 안전하게 수행할 수 있다.  다만 중간에
+		 * NULL 이 있으면 행이 축소된 프레임을 벗어나 있을 수 있으므로, 이는
+		 * 아래의 do 루프에서 확인해야 한다.
 		 */
 		if (seektype == WINDOW_SEEK_HEAD && relpos >= num_reduced_frame)
 			goto out_of_frame;
@@ -3865,7 +3864,7 @@ ignorenulls_getfuncarginframe(WindowObject winobj, int argno,
 			if (notnull_relpos >= num_reduced_frame)
 				goto out_of_frame;
 
-			/* not out of reduced frame. Set abspos as a starting point */
+			/* 축소된 프레임을 벗어나지 않았다. abspos를 시작점으로 설정한다 */
 			abs_pos = winstate->frameheadpos + num_reduced_frame - 1;
 		}
 	}
@@ -3934,8 +3933,8 @@ advance:
 		if (rpr_is_defined(winstate))
 		{
 			/*
-			 * Check whether we are still in the reduced frame.  (also check
-			 * if we succeeded in getting the target row).
+			 * 여전히 축소된 프레임 안에 있는지 확인한다.  (대상 행을 가져오는
+			 * 데 성공했는지도 함께 확인한다.)
 			 */
 			num_reduced_frame--;
 			if (num_reduced_frame <= 0 && notnull_offset <= notnull_relpos)
@@ -4085,14 +4084,13 @@ put_notnull_info(WindowObject winobj, int64 pos, int argno, bool isnull)
 
 /*
  * eval_nav_offset
- *		Evaluate a pre-built row pattern navigation offset ExprState.
+ *		미리 만들어진 행 패턴 내비게이션 오프셋 ExprState 를 평가한다.
  *
- * The offset is a run-time constant (the parser rejects column references in a
- * navigation offset), so it is evaluated once per scan -- when any parameter
- * is bound.  Returns the offset as an int64; a NULL or negative result is an
- * error per the SQL standard (fail-closed, re-checked on every scan).  When
- * not validating, a NULL is reported as -1 so that it takes the same path a
- * negative offset takes.
+ * 오프셋은 run-time 상수이므로(파서가 내비게이션 오프셋 안의 열 참조를
+ * 거부한다) 스캔마다 한 번, 즉 어떤 매개변수든 바인딩될 때 평가된다.
+ * 오프셋을 int64로 반환한다.  NULL 이거나 음수인 결과는 SQL 표준에 따라
+ * 오류이다(fail-closed이며 스캔마다 다시 검사한다).  검증하지 않을 때는
+ * NULL 을 -1 로 보고하여 음수 오프셋과 같은 경로를 타게 한다.
  */
 static int64
 eval_nav_offset(WindowAggState *winstate, ExprState *estate, bool validate)
@@ -4110,7 +4108,7 @@ eval_nav_offset(WindowAggState *winstate, ExprState *estate, bool validate)
 			ereport(ERROR,
 					errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 					errmsg("row pattern navigation offset must not be null"));
-		return -1;				/* the caller drops it from the reach */
+		return -1;				/* 호출자가 도달 범위에서 이 값을 제외한다 */
 	}
 
 	offset = DatumGetInt64(val);
@@ -4125,13 +4123,13 @@ eval_nav_offset(WindowAggState *winstate, ExprState *estate, bool validate)
 
 /*
  * build_nav_offsets
- *		Create the per-navigation offset bookkeeping entry at executor init and
- *		compile its offset argument expression(s).
+ *		실행기 초기화 시점에 내비게이션별 오프셋 기록 항목을 만들고 그 오프셋
+ *		인자 표현식을 컴파일한다.
  *
- * The offsets are not evaluated here: a PARAM_EXEC offset (function inlining or
- * a LATERAL reference) has no value until the node is (re)scanned.  The
- * concrete value is resolved per scan by resolve_nav_offsets(), mirroring how
- * calculate_frame_offsets() handles the window frame bounds.
+ * 오프셋은 여기서 평가하지 않는다: PARAM_EXEC 오프셋은(함수 인라이닝이나
+ * LATERAL 참조로 인한 것으로) 노드가 (다시) 스캔될 때까지 값이 없다.  실제
+ * 값은 calculate_frame_offsets()가 윈도우 프레임 경계를 다루는 방식과
+ * 마찬가지로 resolve_nav_offsets()가 스캔마다 확정한다.
  */
 static void
 build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate)
@@ -4139,9 +4137,10 @@ build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate)
 	RPRNavOffsets *entry = palloc0_object(RPRNavOffsets);
 
 	/*
-	 * Parser guarantee (mirrors compute_matchStartDependent): nav's direct
-	 * children are never RPRNavExpr -- compound nesting is flattened in place
-	 * and any other nesting is rejected.  Outer-kind dispatch is sufficient.
+	 * 파서가 보장하는 바(compute_matchStartDependent 와 대응): nav의 직계
+	 * 자식은 결코 RPRNavExpr 이 아니다.  복합 중첩은 그 자리에서 평탄화되고,
+	 * 다른 어떤 중첩도 거부된다.  따라서 outer 종류에 따른 분기만으로
+	 * 충분하다.
 	 */
 	Assert(nav->arg == NULL || !IsA(nav->arg, RPRNavExpr));
 	Assert(nav->offset_arg == NULL || !IsA(nav->offset_arg, RPRNavExpr));
@@ -4157,9 +4156,10 @@ build_nav_offsets(RPRNavExpr *nav, WindowAggState *winstate)
 													(PlanState *) winstate);
 
 	/*
-	 * Own the execution state of the compiled navigation.  ExecInitExprRec()
-	 * runs after this and reaches the entry by nav->navno; the offsets stay
-	 * unset until resolve_nav_offsets() settles them for the scan.
+	 * 컴파일된 내비게이션의 실행 상태를 소유한다.  이후 ExecInitExprRec()가
+	 * 실행 되어 nav->navno로 이 항목에 접근하며, 오프셋은
+	 * resolve_nav_offsets()가 이번 스캔에 대해 확정하기 전까지는 설정되지
+	 * 않은 채로 남는다.
 	 */
 	entry->rprnavstate = makeNode(RPRNavState);
 	entry->rprnavstate->winstate = winstate;
@@ -4185,22 +4185,21 @@ nav_offsets_walker(Node *node, WindowAggState *winstate)
 
 /*
  * build_define_offsets
- *		At executor init, create one RPRNavOffsets entry per navigation in the
- *		DEFINE clause and compile its offset argument expressions.
+ *		실행기 초기화 시점에 DEFINE 절의 내비게이션마다 RPRNavOffsets 항목을
+ *		하나씩 만들고 그 오프셋 인자 표현식을 컴파일한다.
  *
- * Entries are appended in walk order, the order compute_define_metadata()
- * numbered them in, so entry i is the navigation with navno i.
+ * 항목들은 순회 순서, 즉 compute_define_metadata()가 번호를 매긴 순서대로
+ * 추가되므로, 항목 i는 navno가 i인 내비게이션이다.
  *
- * The concrete offset values -- and the tuplestore trim bounds derived from
- * them -- are resolved later, per scan, by resolve_nav_offsets().  Only an RPR
- * window reaches here.
+ * 실제 오프셋 값과 그로부터 얻는 tuplestore 트림 경계는 나중에 스캔마다
+ * resolve_nav_offsets()가 확정한다. 이 함수에는 RPR 윈도우만 도달한다.
  */
 static void
 build_define_offsets(WindowAggState *winstate, List *defineClause)
 {
 	EvalDefineOffsetsContext ctx;
 
-	/* DEFINE is mandatory, so an RPR window always has a clause */
+	/* DEFINE 은 필수이므로 RPR 윈도우에는 항상 이 절이 있다 */
 	Assert(defineClause != NIL);
 
 	foreach_node(TargetEntry, te, defineClause)
@@ -4209,11 +4208,11 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 	}
 
 	/*
-	 * Resolve the offsets that are already constant at plan time, so EXPLAIN
-	 * (which never executes, hence never reaches resolve_nav_offsets()) shows
-	 * the real trim bounds.  A parameterized offset (PARAM_EXTERN under a
-	 * generic plan, or a PARAM_EXEC) has no value yet and is left for
-	 * resolve_nav_offsets() to bound per scan.
+	 * 플랜 타임에 이미 상수인 오프셋을 확정해 두어, (결코 실행되지 않으므로
+	 * resolve_nav_offsets()에도 도달하지 않는) EXPLAIN 이 실제 트림 경계를
+	 * 표시할 수 있게 한다.  매개변수화된 오프셋(일반 플랜에서의 PARAM_EXTERN
+	 * 이나 PARAM_EXEC)은 아직 값이 없으므로 resolve_nav_offsets()가 스캔마다
+	 * 경계를 정하도록 남겨 둔다.
 	 */
 	ctx.winstate = winstate;
 	ctx.maxOffset = 0;
@@ -4221,7 +4220,8 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 	ctx.minFirstOffset = PG_INT64_MAX;
 	ctx.hasMax = false;
 	ctx.hasFirst = false;
-	ctx.validate = false;		/* init resolution is for EXPLAIN display only */
+	ctx.validate = false;		/* 초기화 시점의 확정은 EXPLAIN 표시
+								 * 전용이다 */
 
 	foreach_ptr(RPRNavOffsets, entry, winstate->rprNavOffsets)
 	{
@@ -4229,9 +4229,10 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 		bool		is_const;
 
 		/*
-		 * A foldable offset such as PREV(v, 1 + 1) counts as fixed only if
-		 * eval_const_expressions() reached inside the navigation and left a
-		 * Const here, which the expression tree mutator does for us.
+		 * PREV(v, 1 + 1)처럼 접을 수 있는 오프셋은,
+		 * eval_const_expressions()가 내비게이션 내부까지 도달해 여기에
+		 * Const를 남겨둔 경우에만 고정된 것으로 취급한다.  이는 표현식 트리
+		 * 뮤테이터가 대신 해 준다.
 		 */
 		is_const = (nav->offset_arg == NULL || IsA(nav->offset_arg, Const)) &&
 			(nav->compound_offset_arg == NULL ||
@@ -4239,17 +4240,17 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 
 		if (is_const)
 		{
-			/* constant offset: resolvable now, for EXPLAIN and the scan */
+			/* 상수 오프셋: EXPLAIN 과 스캔 모두에 대해 지금 확정할 수 있다 */
 			resolve_one_nav(entry, &ctx);
 		}
 		else
 		{
 			/*
-			 * A parameterized offset (a bind PARAM_EXTERN or, via
-			 * SRF/function inlining, a correlated PARAM_EXEC) has no
-			 * dependable value at init.  Like a window frame offset it is
-			 * resolved at execution by resolve_nav_offsets(), and EXPLAIN
-			 * shows "runtime".
+			 * 매개변수화된 오프셋(바인드된 PARAM_EXTERN, 또는 SRF/함수
+			 * 인라이닝을 통한 상관된 PARAM_EXEC)은 초기화 시점에는 믿을 수
+			 * 있는 값이 없다.  윈도우 프레임 오프셋과 마찬가지로 실행 시
+			 * resolve_nav_offsets()가 확정하며, EXPLAIN 은 "runtime"으로
+			 * 표시한다.
 			 */
 			if (nav->kind == RPR_NAV_PREV || nav->kind == RPR_NAV_LAST ||
 				nav->kind == RPR_NAV_PREV_LAST || nav->kind == RPR_NAV_NEXT_LAST)
@@ -4269,8 +4270,9 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 	if (ctx.maxOverflow)
 	{
 		/*
-		 * a const/bind overflow forces retain-all, unless a param already
-		 * made this dimension "runtime" (NEEDS_EVAL wins for display)
+		 * 상수나 바인드 값의 오버플로는, 매개변수가 이미 이 차원을
+		 * "runtime"으로 만들지 않은 한(표시상 NEEDS_EVAL 이 우선한다)
+		 * retain-all을 강제한다.
 		 */
 		if (winstate->navMaxOffsetKind != RPR_NAV_OFFSET_NEEDS_EVAL)
 			winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
@@ -4280,16 +4282,16 @@ build_define_offsets(WindowAggState *winstate, List *defineClause)
 
 	winstate->hasMaxNav = ctx.hasMax;
 
-	/* minFirstOffset is still PG_INT64_MAX when there is no FIRST */
+	/* minFirstOffset 는 FIRST 가 없으면 여전히 PG_INT64_MAX 이다 */
 	winstate->hasFirstNav = ctx.hasFirst;
 	winstate->navFirstOffset = ctx.minFirstOffset;
 }
 
 /*
  * resolve_one_nav
- *		Evaluate one navigation's offset(s) for the current scan, pin the
- *		resolved values into its RPRNavState, and accumulate the backward and
- *		forward reach used to size the tuplestore trim.
+ *		현재 스캔에 대해 한 내비게이션의 오프셋을 평가하고, 확정된 값을 그
+ *		RPRNavState 에 고정하며, tuplestore 트림 크기를 정하는 데 쓰이는
+ *		후방/전방 도달 거리를 누적한다.
  */
 static void
 resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
@@ -4298,7 +4300,7 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 	int64		inner;
 	int64		outer;
 
-	/* Inner offset */
+	/* 내부 오프셋 */
 	if (entry->offset_state != NULL)
 		inner = eval_nav_offset(context->winstate, entry->offset_state,
 								context->validate);
@@ -4307,7 +4309,7 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 	else
 		inner = 0;
 
-	/* Outer (compound) offset */
+	/* 외부(복합) 오프셋 */
 	if (entry->compound_offset_state != NULL)
 		outer = eval_nav_offset(context->winstate, entry->compound_offset_state,
 								context->validate);
@@ -4315,11 +4317,11 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 		outer = 1;
 
 	/*
-	 * An offset that is negative, or null and therefore reported as -1, is
-	 * rejected at execution, where eval_nav_offset() has already raised the
-	 * error before we get here, so this navigation can never run and needs no
-	 * rows retained.  Leave it out of both reaches, which also keeps the
-	 * arithmetic below on non-negative operands.
+	 * 음수이거나, null이어서 -1 로 보고되는 오프셋은 실행 시 거부된다.  그
+	 * 시점이면 이미 eval_nav_offset()이 여기 도달하기 전에 오류를 일으켰을
+	 * 것이므로, 이 내비게이션은 결코 실행될 수 없고 행을 유지할 필요도 없다.
+	 * 이런 값은 두 도달 거리 모두에서 제외하는데, 그러면 아래 계산이 음수
+	 * 아닌 피연산자만 다루게 되는 효과도 있다.
 	 */
 	if (inner < 0 || outer < 0)
 	{
@@ -4328,9 +4330,9 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 	}
 
 	/*
-	 * Pin the resolved values into the compiled navigation's RPRNavState, so
-	 * ExecEvalRPRNavSet() reads this scan's constant instead of re-evaluating
-	 * the offset per row.
+	 * 확정된 값을 컴파일된 내비게이션의 RPRNavState 에 고정하여,
+	 * ExecEvalRPRNavSet()이 행마다 오프셋을 다시 평가하는 대신 이번 스캔의
+	 * 상수를 읽도록 한다.
 	 */
 	entry->rprnavstate->offset.isnull = false;
 	entry->rprnavstate->offset.value = Int64GetDatum(inner);
@@ -4338,8 +4340,8 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 	entry->rprnavstate->compound_offset.value = Int64GetDatum(outer);
 
 	/*
-	 * Backward reach: PREV, LAST at any offset including the default 0, and
-	 * compound PREV_LAST/NEXT_LAST.
+	 * 후방 도달: 기본값 0 을 포함한 모든 오프셋에서의 PREV, LAST, 그리고 복합
+	 * PREV_LAST/NEXT_LAST.
 	 */
 	if (nav->kind == RPR_NAV_PREV ||
 		nav->kind == RPR_NAV_LAST ||
@@ -4367,7 +4369,7 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 		}
 	}
 
-	/* Forward reach from match_start: FIRST, compound PREV_FIRST/NEXT_FIRST */
+	/* match_start 로부터의 전방 도달: FIRST, 복합 PREV_FIRST/NEXT_FIRST */
 	if (nav->kind == RPR_NAV_FIRST ||
 		nav->kind == RPR_NAV_PREV_FIRST ||
 		nav->kind == RPR_NAV_NEXT_FIRST)
@@ -4379,10 +4381,12 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 		if (nav->kind == RPR_NAV_FIRST)
 			reach = inner;
 		else if (nav->kind == RPR_NAV_PREV_FIRST)
-			reach = inner - outer;	/* both >= 0, cannot underflow int64 */
+			reach = inner - outer;	/* 둘 다 >= 0 이므로 int64 언더플로가 될
+									 * 수 없다 */
 		else
 		{
-			/* NEXT_FIRST: inner + outer, always >= 0; clamp on overflow */
+			/* NEXT_FIRST: inner + outer는 항상 >= 0 이다. 오버플로
+			 * 시 clamp한다 */
 			if (pg_add_s64_overflow(inner, outer, &reach))
 				reach = PG_INT64_MAX;
 		}
@@ -4393,22 +4397,22 @@ resolve_one_nav(RPRNavOffsets *entry, EvalDefineOffsetsContext *context)
 
 /*
  * resolve_nav_offsets
- *		Resolve every navigation offset for the current scan and store the
- *		tuplestore trim bounds in the WindowAggState.
+ *		현재 스캔에 대해 모든 내비게이션 오프셋을 확정하고 tuplestore 트림
+ *		경계를 WindowAggState 에 저장한다.
  *
- * Called from ExecWindowAgg on the first call and after every rescan -- the
- * same place calculate_frame_offsets() resolves the window frame bounds.  By
- * then every parameter (PARAM_EXTERN and PARAM_EXEC alike) is bound, and the
- * offset is a run-time constant, so a single evaluation per scan is correct.
- * This keeps the trim finite for a parameterized offset (no retain-all) and
- * revalidates it (fail-closed) on each scan.
+ * ExecWindowAgg 에서 첫 호출 시와 매 rescan 이후에 호출되는데, 이는
+ * calculate_frame_offsets()가 윈도우 프레임 경계를 확정하는 곳과 같은
+ * 지점이다.  그 시점이면 모든 매개변수(PARAM_EXTERN 과 PARAM_EXEC 모두)가
+ * 바인딩되어 있고 오프셋은 run-time 상수이므로, 스캔마다 한 번씩만 평가하면
+ * 충분하다.  이렇게 하면 매개변수화된 오프셋에 대해서도 트림이 유한하게
+ * 유지되고(retain-all 없이), 매 스캔마다 (fail-closed로) 다시 검증된다.
  */
 static void
 resolve_nav_offsets(WindowAggState *winstate)
 {
 	EvalDefineOffsetsContext ctx;
 
-	/* Servicing the request now; clear the per-scan pending flag */
+	/* 지금 요청을 처리하므로 스캔별 대기 플래그를 지운다 */
 	winstate->navResolvePending = false;
 
 	winstate->navMaxOffset = 0;
@@ -4418,7 +4422,7 @@ resolve_nav_offsets(WindowAggState *winstate)
 	winstate->navFirstOffset = 0;
 	winstate->navFirstOffsetKind = RPR_NAV_OFFSET_FIXED;
 
-	/* The request is pending only for a window that holds a navigation */
+	/* 이 요청은 내비게이션을 가진 윈도우에 대해서만 보류된다 */
 	Assert(winstate->rprNavOffsets != NIL);
 
 	ctx.winstate = winstate;
@@ -4427,7 +4431,7 @@ resolve_nav_offsets(WindowAggState *winstate)
 	ctx.minFirstOffset = PG_INT64_MAX;
 	ctx.hasMax = false;
 	ctx.hasFirst = false;
-	ctx.validate = true;		/* execution: fail-closed on null/negative */
+	ctx.validate = true;		/* 실행: null/음수에 대해 fail-closed */
 
 	foreach_ptr(RPRNavOffsets, entry, winstate->rprNavOffsets)
 	{
@@ -4435,9 +4439,9 @@ resolve_nav_offsets(WindowAggState *winstate)
 	}
 
 	/*
-	 * Backward (PREV/LAST) reach.  On int64 overflow the lookback cannot be
-	 * bounded, so mark the dimension RETAIN_ALL; advance_nav_mark() reads it
-	 * to disable tuplestore trim.
+	 * 후방(PREV/LAST) 도달.  int64 오버플로가 나면 lookback의 한계를 정할 수
+	 * 없으므로 이 차원을 RETAIN_ALL 로 표시한다.  advance_nav_mark()가 이를
+	 * 읽어 tuplestore 트림을 비활성화한다.
 	 */
 	if (ctx.maxOverflow)
 		winstate->navMaxOffsetKind = RPR_NAV_OFFSET_RETAIN_ALL;
@@ -4446,14 +4450,14 @@ resolve_nav_offsets(WindowAggState *winstate)
 
 	winstate->hasMaxNav = ctx.hasMax;
 
-	/* Forward (FIRST) reach; never needs a retain-all sentinel */
+	/* 전방(FIRST) 도달. retain-all sentinel이 필요 없다 */
 	winstate->hasFirstNav = ctx.hasFirst;
 	winstate->navFirstOffset = ctx.minFirstOffset;
 }
 
 /*
  * rpr_is_defined
- * Return true if row pattern recognition is defined.
+ * 행 패턴 인식이 정의되어 있으면 true를 반환한다.
  */
 static bool
 rpr_is_defined(WindowAggState *winstate)
@@ -4464,19 +4468,17 @@ rpr_is_defined(WindowAggState *winstate)
 /*
  * -----------------
  * row_is_in_reduced_frame
- * Determine whether a row is in the current row's reduced window frame
- * according to row pattern matching
+ * 현재 행의 축소된 윈도우 프레임 안에 행 패턴 매칭에 따라 어떤 행이 있는지를
+ * 판단한다
  *
- * If pos is not yet determined, the match is first driven forward by
- * ensure_reduced_frame().
+ * pos가 아직 결정되지 않았다면, ensure_reduced_frame()이 먼저 매치를 앞으로
+ * 구동한다.
  *
- * Returns:
- * = 0, RPR is not defined.
- * >0, if the row is the first in the reduced frame. Return the number of rows
- * in the reduced frame.
- * -1, if the row is unmatched or starts an empty match
- * -2, if the row is inside the current match but is not its first row (an
- * interior row of the match)
+ * 반환값:
+ * = 0, RPR 이 정의되어 있지 않다.  >0, 행이 축소된 프레임의 첫 행이면. 축소된
+ * 프레임에 있는 행 수를 반환한다.
+ * -1, 행이 매치되지 않았거나 빈 매치를 시작하는 경우
+ * -2, 행이 현재 매치 안에 있지만 그 첫 행이 아닌 경우(매치의 내부 행)
  * -----------------
  */
 static int64
@@ -4489,8 +4491,8 @@ row_is_in_reduced_frame(WindowObject winobj, int64 pos)
 	if (!rpr_is_defined(winstate))
 	{
 		/*
-		 * RPR is not defined. Assume that we are always in the reduced window
-		 * frame.
+		 * RPR 이 정의되어 있지 않다.  항상 축소된 윈도우 프레임 안에 있다고
+		 * 가정한다.
 		 */
 		rtn = 0;
 		return rtn;
@@ -4526,11 +4528,11 @@ row_is_in_reduced_frame(WindowObject winobj, int64 pos)
 
 /*
  * ensure_reduced_frame
- *		Drive the row pattern match forward so pos is resolved.
+ *		pos가 확정되도록 행 패턴 매치를 앞으로 구동한다.
  *
- * Idempotent: a pos already determined is left untouched, so callers may
- * invoke this repeatedly for the same row (once per row to track the row
- * scan, and again when a window function accesses the frame).
+ * 멱등적이다: 이미 결정된 pos는 그대로 둔다.  그래서 호출자는 같은 행에 대해
+ * 이 함수를 반복 호출할 수 있다(행 스캔을 따라가기 위해 행마다 한 번, 그리고
+ * 윈도우 함수가 프레임에 접근할 때 다시 한 번).
  */
 static void
 ensure_reduced_frame(WindowObject winobj, int64 pos)
@@ -4546,33 +4548,33 @@ ensure_reduced_frame(WindowObject winobj, int64 pos)
 
 /*
  * clear_reduced_frame
- * Clear reduced frame status
+ * 축소된 프레임 상태를 지운다.
  */
 static void
 clear_reduced_frame(WindowAggState *winstate)
 {
-	winstate->rpr_match_start = -1; /* start < 0: no result determined yet */
+	winstate->rpr_match_start = -1; /* start < 0: 아직 결정된 결과가 없음 */
 	winstate->rpr_match_length = -1;
 }
 
 /*
  * get_reduced_frame_status
- *		Look up a position against the current match.
+ *		위치를 현재 매치와 대조해 조회한다.
  *
- * Returns one of the RF_* constants:
- *   RF_NOT_DETERMINED  pos has not been processed yet
- *   RF_FRAME_HEAD      pos is the start of the current match
- *   RF_SKIPPED         pos is inside the current match but not the start
- *   RF_UNMATCHED       pos is processed but not part of any match
- *   RF_EMPTY_MATCH     pos is the start of an empty (zero-length) match
+ * 다음 RF_* 상수 중 하나를 반환한다:
+ *   RF_NOT_DETERMINED  pos가 아직 처리되지 않음
+ *   RF_FRAME_HEAD      pos가 현재 매치의 시작
+ *   RF_SKIPPED         pos가 현재 매치 안에 있지만 시작은 아님
+ *   RF_UNMATCHED       pos가 처리되었지만 어떤 매치에도 속하지 않음
+ *   RF_EMPTY_MATCH     pos가 빈(길이 0 인) 매치의 시작
  *
- * The result slot encodes four states across two fields, with no separate
- * "valid"/"matched" flags:
+ * 결과 슬롯은 두 필드에 걸쳐 네 가지 상태를 인코딩하며, 별도의
+ * "valid"/"matched" 플래그는 없다:
  *
- *   start < 0                 not determined (cleared slot)
- *   start >= 0, length == -1  unmatched (covers only the start row)
- *   start >= 0, length == 0   empty match (zero-length match at start)
- *   start >= 0, length >= 1   real match spanning [start, start + length)
+ *   start < 0                 결정되지 않음 (지워진 슬롯)
+ *   start >= 0, length == -1  매치되지 않음 (시작 행만 포함)
+ *   start >= 0, length == 0   빈 매치 (시작 위치의 길이 0 매치)
+ *   start >= 0, length >= 1  [start, start + length) 구간의 실제 매치
  */
 static int
 get_reduced_frame_status(WindowAggState *winstate, int64 pos)
@@ -4583,13 +4585,13 @@ get_reduced_frame_status(WindowAggState *winstate, int64 pos)
 	Assert(pos >= 0);
 	Assert(start < 0 || length >= -1);
 
-	/* cleared slot: no result recorded yet */
+	/* 지워진 슬롯: 아직 기록된 결과가 없음 */
 	if (start < 0)
 		return RF_NOT_DETERMINED;
 
 	/*
-	 * The record's own row: the length gives the verdict directly, and no
-	 * other row can produce any of these three.
+	 * 레코드 자신의 행: length가 곧바로 결론을 알려주며, 다른 어떤 행도 이 세
+	 * 가지 중 어느 것도 만들어낼 수 없다.
 	 */
 	if (pos == start)
 	{
@@ -4601,39 +4603,40 @@ get_reduced_frame_status(WindowAggState *winstate, int64 pos)
 	}
 
 	/*
-	 * Any other row is covered only by a real match, over [start, start +
-	 * length).  The sentinels need no special casing: -1 and 0 leave that
-	 * range empty, so every pos != start falls out here.
+	 * 그 외의 모든 행은 오직 [start, start + length) 구간의 실제 매치로만
+	 * 덮인다.  sentinel 값은 별도로 다룰 필요가 없다: -1 과 0 은 그 구간을
+	 * 비워 두므로, start가 아닌 모든 pos는 자연히 여기로 떨어진다.
 	 */
 	if (pos < start || pos >= start + length)
 		return RF_NOT_DETERMINED;
 
-	/* inside a real match, after its head */
+	/* 실제 매치 안, head 다음 위치 */
 	return RF_SKIPPED;
 }
 
 /*
  * advance_nav_mark
- *		Advance the RPR navigation mark, derived from the NFA frontier
- *		(currentPos) but held back by the navigation's backward reach, so
- *		tuplestore_trim() can free rows no longer reachable by navigation.
+ *		RPR 내비게이션 mark를 전진시킨다. 이 mark는 NFA 의
+ *		frontier(currentPos)에서 유도하되 내비게이션의 후방 도달 거리만큼
+ *		뒤에서 따라가므로, tuplestore_trim()이 내비게이션으로 더 이상 도달할
+ *		수 없는 행을 해제할 수 있다.
  *
- * The nav read pointer is independent of the aggregate and per-function read
- * pointers, so moving its mark does not affect their fetches; it only bounds
- * the DEFINE clause's own PREV/LAST/FIRST lookups.  Backward reach (PREV/LAST)
- * is measured from the frontier.  FIRST reaches back from the head context's
- * matchStartRow instead, so it is bounded separately; without FIRST the mark
- * can follow the frontier freely.
+ * nav read 포인터는 집계용 및 함수별 read 포인터와 독립적이므로, 이 mark를
+ * 움직여도 그것들의 fetch에는 영향이 없다.  오직 DEFINE 절 자신의
+ * PREV/LAST/FIRST 조회만을 제한한다.  후방 도달(PREV/LAST)은 frontier로부터
+ * 측정한다.  반면 FIRST 는 head 컨텍스트의 matchStartRow 로부터 거꾸로
+ * 도달하므로 별도로 제한하며, FIRST 가 없으면 mark는 frontier를 자유롭게
+ * 따라갈 수 있다.
  */
 static void
 advance_nav_mark(WindowAggState *winstate, int64 currentPos)
 {
 	int64		navmarkpos;
 
-	/* Every RPR window has its navigation read pointer */
+	/* 모든 RPR 윈도우는 내비게이션용 read 포인터를 가진다 */
 	Assert(winstate->nav_winobj != NULL);
 
-	/* RETAIN_ALL (offset overflow) disables trim for the backward dimension */
+	/* RETAIN_ALL(오프셋 오버플로)은 후방 차원에 대한 트림을 비활성화한다 */
 	if (winstate->navMaxOffsetKind == RPR_NAV_OFFSET_RETAIN_ALL)
 		return;
 
@@ -4647,8 +4650,9 @@ advance_nav_mark(WindowAggState *winstate, int64 currentPos)
 		int64		firstreach;
 
 		/*
-		 * Head context has the smallest matchStartRow (contexts appended in
-		 * nondecreasing order), so bounding by it covers every FIRST reach.
+		 * head 컨텍스트는 (컨텍스트가 오름차순으로 추가되므로)
+		 * matchStartRow 가 가장 작다.  따라서 head를 기준으로 경계를 잡으면
+		 * 모든 FIRST 도달을 포괄한다.
 		 */
 		if (!pg_add_s64_overflow(winstate->nfaContext->matchStartRow,
 								 winstate->navFirstOffset,
@@ -4662,11 +4666,11 @@ advance_nav_mark(WindowAggState *winstate, int64 currentPos)
 
 /*
  * advance_reduced_frame_nfa
- *		Drive the NFA forward until targetCtx completes or the partition ends.
+ *		targetCtx 가 완료되거나 파티션이 끝날 때까지 NFA 를 전진시킨다.
  *
- * This is the match driver, extracted from update_reduced_frame(), which calls
- * it to advance the match and then records the resolved result.  Row
- * evaluations are shared across all active contexts.
+ * 이 함수는 매치 드라이버로, update_reduced_frame()에서 분리되어 나온 것이다.
+ * update_reduced_frame()은 이 함수를 호출해 매치를 전진시킨 다음 확정된
+ * 결과를 기록한다.  행 평가는 모든 활성 컨텍스트가 공유한다.
  */
 static void
 advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx)
@@ -4677,92 +4681,95 @@ advance_reduced_frame_nfa(WindowObject winobj, RPRNFAContext *targetCtx)
 	int64		saved_currentpos = winstate->currentpos;
 
 	/*
-	 * Determine where to start processing. Usually nfaLastProcessedRow+1 >=
-	 * matchStartRow since contexts are created at currentPos+1 during
-	 * processing.  However, a context update_reduced_frame() creates on
-	 * demand, for a pos past nfaLastProcessedRow, can start beyond it.
+	 * 처리를 시작할 위치를 정한다.  보통은 컨텍스트가 처리 중 currentPos+1
+	 * 위치에서 만들어지므로 nfaLastProcessedRow+1 >= matchStartRow 이다.
+	 * 그러나 update_reduced_frame()이 nfaLastProcessedRow 보다 뒤의 pos에
+	 * 대해 필요에 따라 만드는 컨텍스트는 그보다 더 뒤에서 시작할 수 있다.
 	 */
 	startPos = Max(targetCtx->matchStartRow,
 				   winstate->nfaLastProcessedRow + 1);
 
 	/*
-	 * Process rows until target context completes or we hit boundaries. Each
-	 * row evaluation is shared across all active contexts.
+	 * 대상 컨텍스트가 완료되거나 경계에 부딪힐 때까지 행을 처리한다.  각 행
+	 * 평가는 모든 활성 컨텍스트가 공유한다.
 	 *
-	 * winstate->currentpos is set to the scan position for the whole row and
-	 * left in place across ExecRPRProcessRow, because DEFINE predicates are
-	 * evaluated lazily during matching (nfa_eval_var_match) and their
-	 * EEOP_RPR_NAV_SET opcodes read currentpos.  It is restored after the
-	 * loop.
+	 * winstate->currentpos는 행 전체에 대해 스캔 위치로 설정되고
+	 * ExecRPRProcessRow 동안 그대로 유지되는데, DEFINE 술어가 매칭
+	 * 중(nfa_eval_var_match) 지연 평가되며 그 EEOP_RPR_NAV_SET opcode가
+	 * currentpos를 읽기 때문이다. 이 값은 루프가 끝난 뒤 복원된다.
 	 */
 	for (currentPos = startPos; targetCtx->states != NULL; currentPos++)
 	{
 		/*
-		 * Evaluate variables for this row - done only once, shared by all
-		 * contexts.
+		 * 이 행에 대한 변수를 평가한다.  한 번만 수행하며 모든 컨텍스트가
+		 * 공유한다.
 		 *
-		 * Set nav_match_start to the head context's matchStartRow for
-		 * FIRST/LAST navigation.  Match_start-dependent variables (FIRST,
-		 * LAST-with-offset) are re-evaluated per-context in ExecRPRProcessRow
-		 * when matchStartRow differs.
+		 * FIRST/LAST 내비게이션을 위해 nav_match_start 를 head 컨텍스트의
+		 * matchStartRow 로 설정한다.  Match_start 에 의존하는 변수(FIRST,
+		 * 오프셋이 있는 LAST)는 matchStartRow 가 다를 때
+		 * ExecRPRProcessRow 에서 컨텍스트별로 다시 평가된다.
 		 */
 		winstate->currentpos = currentPos;
 		winstate->nav_match_start = targetCtx->matchStartRow;
 
-		/* No more rows in partition? Finalize all contexts */
+		/* 파티션에 더 이상 행이 없는가? 모든 컨텍스트를 마무리한다 */
 		if (!rpr_prepare_row(winobj, currentPos, winstate->nfaVarMatched))
 		{
 			ExecRPRFinalizeAllContexts(winstate, currentPos - 1);
-			/* Clean up dead contexts from finalization */
+			/* 마무리로 죽은 컨텍스트를 정리한다 */
 			ExecRPRCleanupDeadContexts(winstate, targetCtx);
 			break;
 		}
 
-		/* Update last processed row */
+		/* 마지막으로 처리한 행을 갱신한다 */
 		winstate->nfaLastProcessedRow = currentPos;
 
 		/*--------------------------
-		 * Process all contexts for this row:
-		 *   1. Match all (convergence)
-		 *   2. Absorb redundant
-		 *   3. Advance all (divergence)
+		 * 이 행에 대해 모든 컨텍스트를 처리한다:
+		 *   1. 전부 매치 (수렴)
+		 *   2. 중복 흡수
+		 *   3. 전부 확장 (발산)
 		 */
 		ExecRPRProcessRow(winstate, currentPos);
 
 		/*
-		 * Create a new context for the next potential start position. This
-		 * enables overlapping match detection for SKIP TO NEXT ROW.
+		 * 다음에 시작할 수 있는 위치를 위해 새 컨텍스트를 만든다.  이는 SKIP
+		 * TO NEXT ROW 를 위한 겹치는 매치 감지를 가능하게 한다.
 		 */
 		ExecRPRStartContext(winstate, currentPos + 1);
 
 		/*
-		 * Clean up dead contexts (failed with no active states and no match).
-		 * This removes contexts that failed during processing and counts them
-		 * appropriately as pruned or mismatched.
+		 * (활성 상태도 매치도 없이 실패한) 죽은 컨텍스트를 정리한다.  처리 중
+		 * 실패한 컨텍스트를 제거하며, 이를 프루닝됨 또는 불일치로 적절히
+		 * 집계한다.
 		 */
 		ExecRPRCleanupDeadContexts(winstate, targetCtx);
 
-		/* Advance the nav mark to the frontier so trim can free old rows. */
+		/*
+		 * 트림이 오래된 행을 해제할 수 있도록 nav mark를 frontier까지
+		 * 전진시킨다.
+		 */
 		advance_nav_mark(winstate, currentPos);
 	}
 
-	/* Restore the output row position borrowed for the NFA scan. */
+	/*
+	 * NFA 스캔을 위해 빌려 온 출력 행 위치를 복원한다.
+	 */
 	winstate->currentpos = saved_currentpos;
 }
 
 /*
  * update_reduced_frame
- *		Update reduced frame info using multi-context NFA pattern matching.
+ *		다중 컨텍스트 NFA 패턴 매칭을 사용해 축소된 프레임 정보를 갱신한다.
  *
- * Maintains multiple NFA contexts simultaneously, one for each potential
- * match start position. This allows sharing row evaluations across contexts,
- * avoiding redundant DEFINE clause evaluations when rewinding for SKIP TO
- * NEXT ROW mode.
+ * 가능한 매치 시작 위치마다 하나씩, 여러 NFA 컨텍스트를 동시에 유지한다.
+ * 이를 통해 컨텍스트 사이에 행 평가를 공유할 수 있어 SKIP TO NEXT ROW
+ * 모드에서 되감을 때 중복된 DEFINE 절 평가를 피한다.
  *
- * Key optimizations:
- * - Row evaluations (expensive DEFINE clauses) happen only once per row
- * - All active contexts share the same evaluation results
- * - Contexts persist across calls, enabling O(n) DEFINE evaluations
+ * 핵심 최적화:
+ * - 행 평가(비용이 큰 DEFINE 절)는 행마다 한 번만 일어난다
+ * - 모든 활성 컨텍스트가 같은 평가 결과를 공유한다
+ * - 컨텍스트는 호출 사이에도 유지되어 O(n) DEFINE 평가를 가능하게 한다
  */
 static void
 update_reduced_frame(WindowObject winobj, int64 pos)
@@ -4776,19 +4783,19 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 	if (winstate->nfaContext != NULL)
 	{
 		/*
-		 * Case 1: pos is before any existing context's start position. This
-		 * means the position was already processed and determined unmatched.
-		 * Head is the oldest context (lowest matchStartRow) since contexts
-		 * are added at tail with increasing positions.
+		 * 경우 1: pos가 기존 컨텍스트의 시작 위치보다 앞이다.  이는 이 위치가
+		 * 이미 처리되어 매치되지 않은 것으로 결정되었음을 뜻한다.  컨텍스트는
+		 * 뒤쪽에 증가하는 위치로 추가되므로, head가 가장
+		 * 오래된(matchStartRow 가 가장 작은) 컨텍스트이다.
 		 */
 		if (winstate->nfaContext->matchStartRow > pos)
 			return;
 
 		/*
-		 * Case 2: the head context starts exactly at pos, it holds this row's
-		 * pending result: either still in flight, or already completed by an
-		 * earlier call's driver loop.  Later contexts can't apply: the list
-		 * ascends by matchStartRow.
+		 * 경우 2: head 컨텍스트가 정확히 pos에서 시작한다. 이 컨텍스트는 이
+		 * 행의 보류 중인 결과를 담고 있는데, 아직 진행 중이거나 이전 호출의
+		 * 드라이버 루프에서 이미 완료된 것이다.  이후의 컨텍스트는 해당될 수
+		 * 없다: 리스트는 matchStartRow 오름차순이기 때문이다.
 		 */
 		if (winstate->nfaContext->matchStartRow == pos)
 			targetCtx = winstate->nfaContext;
@@ -4797,36 +4804,36 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 	if (targetCtx == NULL)
 	{
 		/*
-		 * No context exists. If pos is already processed, it means this row
-		 * was already determined to be unmatched or skipped - no need to
-		 * reprocess.
+		 * 컨텍스트가 존재하지 않는다.  pos가 이미 처리되었다면, 이 행은 이미
+		 * 매치되지 않았거나 건너뛴 것으로 결정된 것이므로 다시 처리할 필요가
+		 * 없다.
 		 */
 		if (pos <= winstate->nfaLastProcessedRow)
 			return;
 
-		/* Not yet processed - create new context and start fresh */
+		/* 아직 처리되지 않았다. 새 컨텍스트를 만들어 새로 시작한다 */
 		targetCtx = ExecRPRStartContext(winstate, pos);
 	}
 
 	/*
-	 * Either branch above settles targetCtx on pos, which the driver relies
-	 * on to resume from and which the result recorded at the top is keyed by.
+	 * 위의 두 분기 중 어느 쪽이든 targetCtx 를 pos로 확정하며, 드라이버는
+	 * 이를 근거로 재개하고 맨 위에서 기록한 결과도 이를 키로 삼는다.
 	 */
 	Assert(pos == targetCtx->matchStartRow);
 
 	/*
-	 * Drive the NFA forward, unless this context already finished in an
-	 * earlier call.  That happens in any skip mode: the driver runs rows on
-	 * behalf of an older context, and an overlapping context can complete
-	 * before the call for its own start row arrives.  The result it recorded
-	 * is registered below.
+	 * 이 컨텍스트가 이전 호출에서 이미 완료된 경우가 아니라면 NFA 를 앞으로
+	 * 구동한다.  이는 어떤 skip 모드에서든 일어날 수 있는데, 드라이버가 더
+	 * 오래된 컨텍스트를 대신해 행을 실행하는 동안 겹치는 컨텍스트가 자신의
+	 * 시작 행에 대한 호출이 오기도 전에 완료될 수 있기 때문이다.  그때 기록된
+	 * 결과는 아래에서 등록한다.
 	 */
 	if (targetCtx->states != NULL)
 		advance_reduced_frame_nfa(winobj, targetCtx);
 
 	if (targetCtx->matchedState == NULL)
 	{
-		/* No match */
+		/* 매치 없음 */
 		winstate->rpr_match_length = -1;
 		ExecRPRRecordContextFailure(winstate,
 									targetCtx->lastProcessedRow - targetCtx->matchStartRow + 1);
@@ -4834,9 +4841,9 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 	else
 	{
 		/*
-		 * Match: an empty one ends at matchStartRow - 1, so the row count
-		 * comes out 0 with no case of its own.  Nothing ends earlier than
-		 * that -- FIN either consumes rows or is reached before the first.
+		 * 매치됨: 빈 매치는 matchStartRow - 1 에서 끝나므로 행 수는 별도의
+		 * 경우 없이 0 으로 나온다.  그보다 더 일찍 끝나는 경우는 없다.
+		 * FIN 은 행을 소비하거나, 아니면 첫 행 이전에 도달하기 때문이다.
 		 */
 		Assert(targetCtx->matchEndRow >= targetCtx->matchStartRow - 1);
 
@@ -4847,8 +4854,8 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 	}
 
 	/*
-	 * The result for pos is recorded; matched or not, this context is
-	 * consumed, so release it.
+	 * pos에 대한 결과를 기록했다.  매치 여부와 관계없이 이 컨텍스트는 다 쓴
+	 * 것이므로 해제한다.
 	 */
 	ExecRPRFreeContext(winstate, targetCtx);
 }
@@ -4856,20 +4863,20 @@ update_reduced_frame(WindowObject winobj, int64 pos)
 /*
  * rpr_prepare_row
  *
- * Prepare the DEFINE evaluation context for the current row and reset the
- * per-row tri-state cache to RPR_VAR_UNEVALUATED.
- * Returns true if the row exists, false if out of partition.
+ * 현재 행에 대한 DEFINE 평가 컨텍스트를 준비하고 행별 3 치 캐시를
+ * RPR_VAR_UNEVALUATED 로 재설정한다.  행이 존재하면 true, 파티션을 벗어났으면
+ * false를 반환한다.
  *
- * DEFINE predicates are NOT evaluated here.  Each variable is evaluated lazily
- * the first time the NFA consumes it (nfa_eval_var_match), so a variable that
- * no active state tests at this row is never evaluated.  The caller
- * (advance_reduced_frame_nfa) sets winstate->currentpos to pos for the whole
- * row, so the deferred evaluation's EEOP_RPR_NAV_SET opcodes calculate target
- * positions (currentpos +/- offset) correctly.
+ * DEFINE 술어는 여기서 평가하지 않는다.  각 변수는 NFA 가 그것을 처음 소비할
+ * 때(nfa_eval_var_match) 지연 평가되므로, 이 행에서 어떤 활성 상태도 검사하지
+ * 않는 변수는 결코 평가되지 않는다.  호출자(advance_reduced_frame_nfa)는 행
+ * 전체에 대해 winstate->currentpos를 pos로 설정하므로, 지연 평가의
+ * EEOP_RPR_NAV_SET opcode가 대상 위치(currentpos +/- 오프셋)를 올바르게
+ * 계산한다.
  *
- * Uses 1-slot model: only ecxt_outertuple is set to the current row.
- * PREV/NEXT/FIRST/LAST navigation is handled by EEOP_RPR_NAV_SET/RESTORE
- * opcodes during expression evaluation, which temporarily swap the slot.
+ * 1-slot 모델을 사용한다: ecxt_outertuple 만 현재 행으로 설정된다.
+ * PREV/NEXT/FIRST/LAST 내비게이션은 표현식 평가 중 슬롯을 일시적으로 바꾸는
+ * EEOP_RPR_NAV_SET/RESTORE opcode가 처리한다.
  */
 static bool
 rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched)
@@ -4878,40 +4885,40 @@ rpr_prepare_row(WindowObject winobj, int64 pos, RPRVarMatch *varMatched)
 	ExprContext *econtext = winstate->rprContext;
 	TupleTableSlot *slot;
 
-	/* Fetch current row into temp_slot_1 */
+	/* 현재 행을 temp_slot_1 로 가져온다 */
 	slot = winstate->temp_slot_1;
 	if (!window_gettupleslot(winobj, pos, slot))
-		return false;			/* No row exists */
+		return false;			/* 행이 존재하지 않음 */
 
-	/* Set up 1-slot context: only ecxt_outertuple */
+	/* 1-slot 컨텍스트를 준비한다: ecxt_outertuple 만 설정 */
 	econtext->ecxt_outertuple = slot;
 
-	/* Invalidate nav_slot cache so PREV/NEXT re-fetch for new row */
+	/* PREV/NEXT 가 새 행에 대해 다시 가져오도록 nav_slot 캐시를 무효화한다 */
 	winstate->nav_slot_pos = -1;
 
 	/*
-	 * Reset the per-row cache to "unevaluated"; each variable's DEFINE is
-	 * evaluated lazily at first consumption in nfa_eval_var_match.
+	 * 행별 캐시를 "unevaluated"로 재설정한다.  각 변수의 DEFINE 은
+	 * nfa_eval_var_match 에서 처음 소비될 때 지연 평가된다.
 	 */
 	memset(varMatched, 0,
 		   sizeof(RPRVarMatch) * list_length(winstate->defineClauseExprs));
 
-	return true;				/* Row exists */
+	return true;				/* 행이 존재함 */
 }
 
 /*
  * WinGetSlotInFrame
- * slot: TupleTableSlot to store the result
- * relpos: signed rowcount offset from the seek position
- * seektype: WINDOW_SEEK_HEAD or WINDOW_SEEK_TAIL
- * set_mark: If the row is found/in frame and set_mark is true, the mark is
- *		moved to the row as a side-effect.
- * isnull: output argument, receives isnull status of result
- * isout: output argument, set to indicate whether target row position
- *		is out of frame (can pass NULL if caller doesn't care about this)
+ * slot: 결과를 담을 TupleTableSlot
+ * relpos: seek 위치로부터의 부호 있는 행 수 오프셋
+ * seektype: WINDOW_SEEK_HEAD 또는 WINDOW_SEEK_TAIL
+ * set_mark: 행을 찾았거나(또는 프레임 안에 있고) set_mark 가 true이면, 그 부수
+ *		효과로 mark가 그 행으로 옮겨진다.
+ * isnull: 출력 인자.  결과의 isnull 상태를 받는다
+ * isout: 출력 인자.  대상 행 위치가 프레임을 벗어났는지를 나타내도록 설정된다
+ *		(호출자가 신경 쓰지 않으면 NULL 을 넘겨도 된다)
  *
- * Returns 0 if we successfully got the slot, or nonzero if out of frame.
- * (isout is also set in the latter case.)
+ * 슬롯을 성공적으로 가져왔으면 0 을, 프레임을 벗어났으면 0 이 아닌 값을
+ * 반환한다.  (후자의 경우 isout도 함께 설정된다.)
  */
 static int
 WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
@@ -4930,10 +4937,10 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 	{
 		case WINDOW_SEEK_CURRENT:
 			elog(ERROR, "WINDOW_SEEK_CURRENT is not supported for WinGetFuncArgInFrame");
-			abs_pos = mark_pos = 0; /* keep compiler quiet */
+			abs_pos = mark_pos = 0; /* 컴파일러 경고를 막기 위함 */
 			break;
 		case WINDOW_SEEK_HEAD:
-			/* rejecting relpos < 0 is easy and simplifies code below */
+			/* relpos < 0 을 거부하면 간단하고 아래 코드가 단순해진다 */
 			if (relpos < 0)
 				goto out_of_frame;
 			update_frameheadpos(winstate);
@@ -4941,21 +4948,21 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 			mark_pos = abs_pos;
 
 			/*
-			 * Account for exclusion option if one is active, but advance only
-			 * abs_pos not mark_pos.  This prevents changes of the current
-			 * row's peer group from resulting in trying to fetch a row before
-			 * some previous mark position.
+			 * 제외 옵션이 활성화되어 있다면 이를 반영하되, mark_pos 가 아니라
+			 * abs_pos 만 전진시킨다.  이렇게 하면 현재 행의 peer 그룹이
+			 * 바뀌어 이전 mark 위치보다 앞의 행을 가져오려는 시도로 이어지는
+			 * 것을 막는다.
 			 *
-			 * Note that in some corner cases such as current row being
-			 * outside frame, these calculations are theoretically too simple,
-			 * but it doesn't matter because we'll end up deciding the row is
-			 * out of frame.  We do not attempt to avoid fetching rows past
-			 * end of frame; that would happen in some cases anyway.
+			 * 현재 행이 프레임 밖에 있는 것과 같은 일부 극단적인 경우에는 이
+			 * 계산이 이론적으로는 지나치게 단순하지만, 어차피 그 행을 프레임
+			 * 밖이라고 결론짓게 되므로 문제가 되지 않는다.  프레임 끝을 지난
+			 * 행을 가져오는 것을 피하려 하지 않는데, 어차피 일부 경우에는
+			 * 그런 일이 일어나기 때문이다.
 			 */
 			switch (winstate->frameOptions & FRAMEOPTION_EXCLUSION)
 			{
 				case 0:
-					/* no adjustment needed */
+					/* 조정이 필요 없음 */
 					break;
 				case FRAMEOPTION_EXCLUDE_CURRENT_ROW:
 					if (abs_pos >= winstate->currentpos &&
@@ -5001,13 +5008,13 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 					goto out_of_frame;
 			break;
 		case WINDOW_SEEK_TAIL:
-			/* rejecting relpos > 0 is easy and simplifies code below */
+			/* relpos > 0 을 거부하면 간단하고 아래 코드가 단순해진다 */
 			if (relpos > 0)
 				goto out_of_frame;
 
 			/*
-			 * RPR cares about frame head pos. Need to call
-			 * update_frameheadpos
+			 * RPR 은 프레임 head 위치에 신경 쓴다.  update_frameheadpos 를
+			 * 호출해야 한다.
 			 */
 			update_frameheadpos(winstate);
 
@@ -5015,18 +5022,18 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 			abs_pos = winstate->frametailpos - 1 + relpos;
 
 			/*
-			 * Account for exclusion option if one is active.  If there is no
-			 * exclusion, we can safely set the mark at the accessed row.  But
-			 * if there is, we can only mark the frame start, because we can't
-			 * be sure how far back in the frame the exclusion might cause us
-			 * to fetch in future.  Furthermore, we have to actually check
-			 * against frameheadpos here, since it's unsafe to try to fetch a
-			 * row before frame start if the mark might be there already.
+			 * 제외 옵션이 활성화되어 있다면 이를 반영한다.  제외가 없다면
+			 * 접근한 행에 안전하게 mark를 설정할 수 있다.  하지만 있다면
+			 * 프레임 시작 지점에만 mark를 둘 수 있는데, 제외로 인해 나중에
+			 * 프레임 안쪽으로 얼마나 더 되돌아가 가져와야 할지 알 수 없기
+			 * 때문이다.  더구나 mark가 이미 거기 있을 수 있으므로 프레임 시작
+			 * 이전의 행을 가져오려 하는 것은 안전하지 않아, 여기서는 실제로
+			 * frameheadpos와 대조해 확인해야 한다.
 			 */
 			switch (winstate->frameOptions & FRAMEOPTION_EXCLUSION)
 			{
 				case 0:
-					/* no adjustment needed */
+					/* 조정이 필요 없음 */
 					mark_pos = abs_pos;
 					break;
 				case FRAMEOPTION_EXCLUDE_CURRENT_ROW:
@@ -5074,13 +5081,16 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 				default:
 					elog(ERROR, "unrecognized frame option state: 0x%x",
 						 winstate->frameOptions);
-					mark_pos = 0;	/* keep compiler quiet */
+					mark_pos = 0;	/* 컴파일러 경고를 막기 위함 */
 					break;
 			}
 
 			num_reduced_frame = row_is_in_reduced_frame(winobj,
 														winstate->frameheadpos);
-			/* zero means a non-RPR window, which has no reduced frame */
+			/*
+			 * 0 은 RPR 이 아닌 윈도우를 뜻하며, 이런 윈도우에는 축소된
+			 * 프레임이 없다
+			 */
 			if (num_reduced_frame < 0)
 				goto out_of_frame;
 			else if (num_reduced_frame > 0)
@@ -5093,14 +5103,14 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 			break;
 		default:
 			elog(ERROR, "unrecognized window seek type: %d", seektype);
-			abs_pos = mark_pos = 0; /* keep compiler quiet */
+			abs_pos = mark_pos = 0; /* 컴파일러 경고를 막기 위함 */
 			break;
 	}
 
 	if (!window_gettupleslot(winobj, abs_pos, slot))
 		goto out_of_frame;
 
-	/* The code above does not detect all out-of-frame cases, so check */
+	/* 위 코드가 프레임 밖의 모든 경우를 감지하지는 못하므로 확인한다 */
 	if (row_is_in_frame(winobj, abs_pos, slot, false) <= 0)
 		goto out_of_frame;
 
@@ -5109,10 +5119,10 @@ WinGetSlotInFrame(WindowObject winobj, TupleTableSlot *slot,
 	if (set_mark)
 	{
 		/*
-		 * If RPR is enabled and seek type is WINDOW_SEEK_TAIL, we set the
-		 * mark position unconditionally to frameheadpos. In this case the
-		 * frame always starts at CURRENT_ROW and never goes back, thus
-		 * setting the mark at the position is safe.
+		 * RPR 이 활성화되어 있고 seek 종류가 WINDOW_SEEK_TAIL 이면, mark
+		 * 위치를 무조건 frameheadpos로 설정한다. 이 경우 프레임은 항상
+		 * CURRENT_ROW 에서 시작하고 결코 뒤로 가지 않으므로, 이 위치에 mark를
+		 * 설정해도 안전하다.
 		 */
 		if (winstate->rpPattern != NULL && seektype == WINDOW_SEEK_TAIL)
 			mark_pos = winstate->frameheadpos;

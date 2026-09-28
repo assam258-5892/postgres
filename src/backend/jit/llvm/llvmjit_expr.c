@@ -128,7 +128,7 @@ llvm_compile_expr(ExprState *state)
 	LLVMValueRef v_aggvalues;
 	LLVMValueRef v_aggnulls;
 
-	/* RPR navigation: when true, EEOP_OUTER_VAR reloads from econtext */
+	/* RPR 내비게이션: true이면 EEOP_OUTER_VAR 가 econtext에서 다시 불러온다 */
 	bool		has_rpr_nav;
 
 	instr_time	starttime;
@@ -301,17 +301,18 @@ llvm_compile_expr(ExprState *state)
 								   "v.econtext.aggnulls");
 
 	/*
-	 * RPR navigation opcodes (PREV/NEXT/FIRST/LAST) swap ecxt_outertuple to a
-	 * different row mid-expression.  The JIT code loads v_outervalues and
-	 * v_outernulls once in the entry block and reuses them for all
-	 * EEOP_OUTER_VAR steps.  After a slot swap, these cached pointers become
-	 * stale because the new slot has its own tts_values/tts_isnull arrays.
+	 * RPR 내비게이션 opcode(PREV/NEXT/FIRST/LAST)는 표현식 도중에
+	 * ecxt_outertuple 을 다른 행으로 바꾼다.  JIT 코드는 entry 블록에서
+	 * v_outervalues 와 v_outernulls 를 한 번만 불러와 모든 EEOP_OUTER_VAR
+	 * 단계에서 재사용한다.  슬롯을 교체하면 새 슬롯이 자신의
+	 * tts_values/tts_isnull 배열을 가지므로, 이 캐시된 포인터는 낡은
+	 * 값이 된다.
 	 *
-	 * When RPR navigation opcodes are present, EEOP_OUTER_VAR reloads the
-	 * slot pointer from econtext->ecxt_outertuple on every access instead of
-	 * using the cached entry-block values.  This avoids the SSA/PHI
-	 * complexity while keeping the rest of the expression JIT-compiled.
-	 * Expressions without RPR navigation use the cached values as before.
+	 * RPR 내비게이션 opcode가 있으면 EEOP_OUTER_VAR 는 캐시된 entry 블록 값을
+	 * 쓰는 대신 접근할 때마다 econtext->ecxt_outertuple 에서 슬롯 포인터를
+	 * 다시 불러온다.  이렇게 하면 SSA/PHI 의 복잡성을 피하면서도 표현식의
+	 * 나머지 부분은 그대로 JIT 컴파일할 수 있다.  RPR 내비게이션이 없는
+	 * 표현식은 이전처럼 캐시된 값을 사용한다.
 	 */
 	has_rpr_nav = false;
 	if (parent && IsA(parent, WindowAggState) &&
@@ -494,12 +495,12 @@ llvm_compile_expr(ExprState *state)
 					{
 						if (has_rpr_nav)
 						{
-							/*
-							 * RPR navigation swaps ecxt_outertuple
-							 * mid-expression.  Reload slot pointer from
-							 * econtext on every access so we read from the
-							 * current (possibly swapped) slot.
-							 */
+					/*
+					 * RPR 내비게이션은 표현식 도중에 ecxt_outertuple 을
+					 * 교체한다.  매번 접근할 때마다 econtext에서 슬롯
+					 * 포인터를 다시 불러와, 현재(교체됐을 수도 있는) 슬롯을
+					 * 읽도록 한다.
+					 */
 							LLVMValueRef v_tmpslot;
 
 							v_tmpslot = l_load_struct_gep(b,

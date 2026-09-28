@@ -1511,9 +1511,9 @@ replace_rte_variables_mutator(Node *node,
 	else if (IsA(node, RPRNavExpr))
 	{
 		/*
-		 * The argument of a row pattern navigation operation is evaluated at
-		 * the row the navigation lands on, so flag it for the callback.  The
-		 * offsets beside it are ordinary expressions.
+		 * 행 패턴 내비게이션 연산의 인자는 내비게이션이 도달하는 행에서
+		 * 평가되므로, 콜백을 위해 이를 표시해 둔다.  그 옆의 오프셋들은
+		 * 평범한 표현식이다.
 		 */
 		RPRNavExpr *nav = (RPRNavExpr *) node;
 		RPRNavExpr *newnode = makeNode(RPRNavExpr);
