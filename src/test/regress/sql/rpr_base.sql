@@ -4205,6 +4205,17 @@ WINDOW w AS (
     DEFINE A AS nosuch.val > 0
 );
 
+-- A three-part name is schema-qualified even when its first part spells a
+-- pattern variable, and is rejected as any other qualified name
+SELECT COUNT(*) OVER w
+FROM rpr_err
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (public+)
+    DEFINE public AS public.rpr_err.val > 0
+);
+
 -- Unqualified composite field access in DEFINE works: no qualifier means no
 -- pattern/range-var navigation, so the pre-check skips and normal resolution
 -- handles "(items).amount" via A_Indirection on the current row.

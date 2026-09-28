@@ -627,6 +627,10 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	 * table column would otherwise own.  That is what asking for
 	 * use_variable means, and the DEFINE rules do not override it.
 	 *
+	 * Only a two-part name has that shape.  A longer name whose first part
+	 * happens to spell a pattern variable is schema- or catalog-qualified,
+	 * and goes the way of the other qualified forms.
+	 *
 	 * The other qualified forms DEFINE disallows are diagnosed after the
 	 * reference resolves, below.  Classifying them here on the qualifier
 	 * alone would report a misspelled column as a problem with the qualifier
@@ -642,16 +646,19 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 	if (pstate->p_rpr_define &&
 		list_length(cref->fields) != 1)
 	{
-		char	   *qualifier = strVal(linitial(cref->fields));
-
-		foreach_node(String, pv, pstate->p_rpr_pattern_vars)
+		if (list_length(cref->fields) == 2)
 		{
-			if (strcmp(strVal(pv), qualifier) == 0)
-				ereport(ERROR,
-						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
-							   NameListToString(cref->fields)),
-						parser_errposition(pstate, cref->location));
+			char	   *qualifier = strVal(linitial(cref->fields));
+
+			foreach_node(String, pv, pstate->p_rpr_pattern_vars)
+			{
+				if (strcmp(strVal(pv), qualifier) == 0)
+					ereport(ERROR,
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("pattern variable qualified expression \"%s\" is not supported in DEFINE clause",
+								   NameListToString(cref->fields)),
+							parser_errposition(pstate, cref->location));
+			}
 		}
 
 		/*
