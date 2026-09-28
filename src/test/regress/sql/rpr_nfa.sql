@@ -160,7 +160,13 @@ WINDOW w AS (
 -- Absorption Optimization
 -- ============================================================
 
+-- Every test in this section uses SKIP PAST LAST ROW with an unbounded
+-- frame, the only setting in which buildRPRPattern() enables absorption,
+-- so absorbable shapes are really absorbed and the non-absorbable ones are
+-- excluded by their structure rather than by the SKIP mode.
+
 -- Absorbable pattern (A+)
+-- The contexts started at rows 2-4 are absorbed into row 1's; one match 1-4.
 WITH test_absorbable AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -177,13 +183,15 @@ FROM test_absorbable
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+)
     DEFINE
         A AS 'A' = ANY(flags)
 );
 
 -- Mixed absorbable/non-absorbable ((A+) | B)
+-- Only the A+ branch is absorbable: rows 2-3 are absorbed into the 1-3
+-- match, and the context of row 4 still matches through the B branch.
 WITH test_mixed_absorption AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -200,7 +208,7 @@ FROM test_mixed_absorption
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A+) | B)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -208,6 +216,8 @@ WINDOW w AS (
 );
 
 -- State coverage (same elemIdx, different count)
+-- A{2,} is absorbable: row 2's A state (count 1) is covered by row 1's
+-- (count 2), even below the minimum, and likewise for row 3.
 WITH test_state_coverage AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -224,7 +234,7 @@ FROM test_state_coverage
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A{2,} B)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -232,8 +242,9 @@ WINDOW w AS (
 );
 
 -- Reluctant pattern (A+?) - not absorbable
--- Compare with greedy A+ above: reluctant excluded from absorption.
--- Each context produces minimum match independently.
+-- Compare with greedy A+ above: the settings allow absorption, but a
+-- reluctant quantifier is never absorbable, and each context stops at its
+-- one-row minimum, so rows 1-4 each start their own match.
 WITH test_reluctant_absorption AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -250,13 +261,15 @@ FROM test_reluctant_absorption
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+?)
     DEFINE
         A AS 'A' = ANY(flags)
 );
 
 -- Absorption with fixed suffix: A+ B
+-- Rows 2-3 are absorbed while row 1 is still in A+; B then ends the 1-4
+-- match, and row 4's context, starting inside it, is skipped.
 WITH test_absorb_suffix AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -271,7 +284,7 @@ FROM test_absorb_suffix
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+ B)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -279,6 +292,8 @@ WINDOW w AS (
 );
 
 -- Per-branch absorption with ALT: B+ C | B+ D
+-- Row 1's B+ states in both branches cover those of rows 2-3, which are
+-- absorbed; the D branch ends the 1-4 match.
 WITH test_absorb_alt AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -293,7 +308,7 @@ FROM test_absorb_alt
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (B+ C | B+ D)
     DEFINE
         B AS 'B' = ANY(flags),
@@ -302,6 +317,8 @@ WINDOW w AS (
 );
 
 -- Non-absorbable: A B+ (unbounded not in first position)
+-- Nothing is absorbed although the settings allow it; the contexts of rows
+-- 2-4 are instead skipped as the 1-4 match grows over them.
 WITH test_no_absorb AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -316,7 +333,7 @@ FROM test_no_absorb
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A B+)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -324,6 +341,8 @@ WINDOW w AS (
 );
 
 -- GROUP merge enables absorption: (A B) (A B)+ optimized to (A B){2,}
+-- The contexts of rows 3 and 5 reach the group END one iteration behind
+-- row 1's and are absorbed there; the match is 1-6.
 WITH test_absorb_group AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -340,7 +359,7 @@ FROM test_absorb_group
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A B) (A B)+)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -349,9 +368,9 @@ WINDOW w AS (
 
 -- Two consecutive unbounded groups: (A B)+ (C D)+
 -- The leading group (A B)+ is absorbable (unbounded multi-element); (C D)+ is
--- a distinct sibling group that does not merge with it.  When the leading group
--- exits into the sibling, its body leaf-VAR count must be cleared so it does
--- not leak into the sibling's shared depth slot.
+-- a distinct sibling group that does not merge with it.  When the leading
+-- group exits into the sibling, its body leaf-VAR count must be cleared so it
+-- does not leak into the sibling's shared depth slot.
 WITH test_absorb_two_groups AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -546,6 +565,8 @@ WINDOW w AS (
 );
 
 -- Multiple unbounded: A+ B+ (first element unbounded enables absorption)
+-- Row 2 is absorbed while row 1 is in A+; once in B+ nothing is
+-- absorbable, and rows 3-4 are skipped by the 1-4 match instead.
 WITH test_multi_unbounded AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -560,7 +581,7 @@ FROM test_multi_unbounded
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+ B+)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -672,7 +693,8 @@ WINDOW w AS (
 
 -- Reluctant context lifecycle (A+? B with SKIP TO NEXT ROW)
 -- A+? exits early but if B not available, falls back to loop.
--- Contexts not absorbed (reluctant), so multiple survive.
+-- SKIP TO NEXT ROW disables absorption (and A+? is not absorbable in any
+-- case), so the overlapping contexts of rows 1 and 2 both survive.
 WITH test_reluctant_context AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -889,13 +911,14 @@ WINDOW w AS (
 
 -- Reluctant outer quantifier over a nullable reluctant body: SQL/RPR
 -- semantics call for the shortest (empty) match.  In the count<min case
--- the engine must prefer the fast-forward (exit) path for reluctant
--- groups and suppress longer matches once exit reaches FIN, mirroring the
--- sibling min<=count<max branch.  The 2-level greedy/reluctant matrix plus a
--- min>=2 boundary and single-quantifier controls localize the behaviour: the
--- inner quantifier decides whether a row is consumed, so every column whose
--- body is reluctant stays at zero, and the two with a greedy body differ by
--- their outer quantifier -- gg takes the longest match, rg one row.
+-- the engine must prefer the fast-forward (exit) path when the body
+-- prefers the empty match, and suppress longer matches once exit reaches
+-- FIN, mirroring the sibling min<=count<max branch.  The 2-level
+-- greedy/reluctant matrix plus a min>=2 boundary and single-quantifier
+-- controls localize the behaviour: the inner quantifier decides whether a
+-- row is consumed, so every column whose body is reluctant stays at zero,
+-- and the two with a greedy body differ by their outer quantifier -- gg
+-- takes the longest match, rg one row.
 WITH t(id, isa) AS (VALUES (1, true), (2, true), (3, true), (4, false))
 SELECT id,
        count(*) OVER gg  AS gg,     -- (A?)+      greedy / greedy
@@ -912,8 +935,49 @@ WINDOW gg  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATT
        rr  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A??)+?)    DEFINE A AS isa),
        rr2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A??){2,}?) DEFINE A AS isa),
        ca  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A??)        DEFINE A AS isa),
-       cs  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?)        DEFINE A AS isa)
-ORDER BY id;
+       cs  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*?)        DEFINE A AS isa);
+
+-- The same greedy/reluctant contrast with a MULTI-ELEMENT body.  The columns
+-- above all have a single-variable body, so the empty-preferred bit reaching
+-- the group's END always came from one child; here it has to survive the
+-- AND-reduction fillRPRPattern() performs over a sequence's children.  A
+-- greedy body takes the longest match, a reluctant one prefers the empty
+-- derivation, and the min>=2 pair shows the outer bound does not change that.
+WITH t(id, isa, isb) AS
+  (VALUES (1,true,false),(2,false,true),(3,true,false),(4,false,true),(5,false,false))
+SELECT id,
+       count(*) OVER gg  AS gg,     -- (A? B?)+      greedy body
+       count(*) OVER gr  AS gr,     -- (A?? B??)+    reluctant body
+       count(*) OVER gg2 AS gg2,    -- (A? B?){2,}   greedy body, min>=2
+       count(*) OVER gr2 AS gr2     -- (A?? B??){2,} reluctant body, min>=2
+FROM t
+WINDOW gg  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A? B?)+)      DEFINE A AS isa, B AS isb),
+       gr  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A?? B??)+)    DEFINE A AS isa, B AS isb),
+       gg2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A? B?){2,})   DEFINE A AS isa, B AS isb),
+       gr2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A?? B??){2,}) DEFINE A AS isa, B AS isb);
+
+-- Branch position inside a quantified alternation.  fillRPRPatternAlt() ORs
+-- nullability across every branch but takes empty-preferred from the FIRST
+-- branch alone, so the two reductions are asymmetric.  Every empty-preferred
+-- branch elsewhere in this file leads its alternation, which only exercises
+-- the direction that propagates the bit; these columns exercise the direction
+-- that must suppress it.  With the empty-preferred branch second the group is
+-- nullable but not empty-preferred, so the loop-back is explored first and the
+-- match runs long; swapping the branches makes the empty derivation win.  The
+-- min>=2 forms are the ones that can tell the two apart -- at min 1 the exit
+-- is reachable either way.
+WITH t(id, isa, isb) AS
+  (VALUES (1,true,false),(2,true,false),(3,true,false),(4,false,false))
+SELECT id,
+       count(*) OVER nf1 AS nf1,    -- (A | B??){2,}  empty-preferred branch second
+       count(*) OVER nf2 AS nf2,    -- (A | B*?){2,}  likewise, with a star
+       count(*) OVER fst AS fst,    -- (B?? | A){2,}  empty-preferred branch first
+       count(*) OVER nfp AS nfp     -- (A | B??)+     same as nf1 at min 1
+FROM t
+WINDOW nf1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A | B??){2,}) DEFINE A AS isa, B AS isb),
+       nf2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A | B*?){2,}) DEFINE A AS isa, B AS isb),
+       fst AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((B?? | A){2,}) DEFINE A AS isa, B AS isb),
+       nfp AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A | B??)+)    DEFINE A AS isa, B AS isb);
 
 -- Doubly-nested reluctant nullable group: (((A??){2,}?){2,}?).  Reluctant
 -- quantifiers disable optimizer flattening, so both levels survive and the
@@ -927,8 +991,7 @@ WINDOW w AS (
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (((A??){2,}?){2,}?)
     DEFINE A AS isa
-)
-ORDER BY id;
+);
 
 -- Non-leading reluctant optional GROUP with a follower: (B (A X)?? C)
 -- Like the VAR case above but a multi-element group; it goes through the
@@ -1333,7 +1396,7 @@ WINDOW w AS (
         J AS 'J' = ANY(flags)
 );
 
--- Reduced frame map reallocation (> 1024 rows)
+-- Long partition (> 1024 rows), a match at every other row
 WITH test_map_realloc AS (
     SELECT id, CASE WHEN id % 2 = 1 THEN ARRAY['A'] ELSE ARRAY['B'] END AS flags
     FROM generate_series(1, 1100) AS id
@@ -1358,6 +1421,25 @@ FROM (
 -- ============================================================
 -- Statistics and Diagnostics
 -- ============================================================
+
+-- Run a query under EXPLAIN ANALYZE and keep only the Pattern line and the
+-- NFA counters, which are platform-independent; the rest of the plan
+-- (sort and storage memory) is not.  Plan output is covered in rpr_explain.
+CREATE FUNCTION rpr_nfa_counters(query text) RETURNS SETOF text
+LANGUAGE plpgsql AS $$
+DECLARE
+    ln text;
+BEGIN
+    FOR ln IN EXECUTE
+        'EXPLAIN (ANALYZE, BUFFERS OFF, COSTS OFF, TIMING OFF, SUMMARY OFF) '
+        || query
+    LOOP
+        IF ln ~ '^\s*(Pattern|NFA)' THEN
+            RETURN NEXT ltrim(ln);
+        END IF;
+    END LOOP;
+END;
+$$;
 
 -- Matched contexts
 WITH test_matched AS (
@@ -1429,9 +1511,11 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- Reluctant not absorbed (A+? with SKIP TO NEXT ROW)
--- Compare with greedy A+ below: reluctant is not absorbable,
--- so all contexts survive independently.
+-- Reluctant A+? is never absorbable.  The rows and pattern are those of
+-- test_reluctant_absorption, whose results show four one-row matches;
+-- here the Pattern line has no absorption marker and no context is
+-- absorbed or skipped.
+SELECT rpr_nfa_counters($$
 WITH test_reluctant_stats AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -1448,13 +1532,42 @@ FROM test_reluctant_stats
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN (A+?)
     DEFINE
         A AS 'A' = ANY(flags)
-);
+)$$);
 
--- Absorbed contexts
+-- Absorbed contexts: greedy A+ over the same rows (as test_absorbable).
+-- The Pattern line marks A+ absorbable, and the contexts of rows 2-4 are
+-- absorbed into row 1's, which matches 1-4.
+SELECT rpr_nfa_counters($$
+WITH test_absorbed AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A']),
+        (3, ARRAY['A']),
+        (4, ARRAY['A']),
+        (5, ARRAY['_'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_absorbed
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A+)
+    DEFINE
+        A AS 'A' = ANY(flags)
+)$$);
+
+-- The same query with SKIP TO NEXT ROW: absorption is disabled, so the
+-- pattern carries no marker, nothing is absorbed, and each of rows 1-4
+-- gets its own match.
+SELECT rpr_nfa_counters($$
 WITH test_absorbed AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -1475,15 +1588,66 @@ WINDOW w AS (
     PATTERN (A+)
     DEFINE
         A AS 'A' = ANY(flags)
-);
+)$$);
 
--- Skipped contexts (SKIP TO NEXT ROW)
+-- Skipped contexts: A B C is not absorbable, so the contexts started at
+-- rows 2 and 3 are still live when row 1's match ends at row 3.
+-- SKIP PAST LAST ROW frees both as skipped (lengths 2 and 1); row 4 has no
+-- match.
 WITH test_skipped AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
-        (2, ARRAY['A']),
-        (3, ARRAY['A']),
-        (4, ARRAY['B'])  -- Completes match starting at row 1
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['A', 'B', 'C']),  -- Completes match starting at row 1
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_skipped
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A B C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+SELECT rpr_nfa_counters($$
+WITH test_skipped AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['A', 'B', 'C']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_skipped
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (A B C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+)$$);
+
+-- The same rows with SKIP TO NEXT ROW: nothing is skipped, and row 2's
+-- context goes on to its own overlapping match 2-4.
+WITH test_skipped AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['A', 'B', 'C']),
+        (4, ARRAY['C'])
     ) AS t(id, flags)
 )
 SELECT id, flags,
@@ -1494,11 +1658,37 @@ WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     AFTER MATCH SKIP TO NEXT ROW
-    PATTERN (A+ B)
+    PATTERN (A B C)
     DEFINE
         A AS 'A' = ANY(flags),
-        B AS 'B' = ANY(flags)
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
 );
+SELECT rpr_nfa_counters($$
+WITH test_skipped AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['A', 'B']),
+        (3, ARRAY['A', 'B', 'C']),
+        (4, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_skipped
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (A B C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+)$$);
+
+DROP FUNCTION rpr_nfa_counters(text);
 
 -- ============================================================
 -- Quantifier Runtime Behavior
@@ -1944,7 +2134,7 @@ WINDOW w AS (
 );
 
 -- Reluctant nullable: A*? (prefers 0 matches)
--- A*? always takes skip path (0 iterations preferred)
+-- A*? tries the skip path first; no row is B here, so nothing matches
 WITH test_reluctant_nullable AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -2903,8 +3093,8 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- Nested END->END between min/max
--- Inner group (A B){1,3} exits between min/max -> outer END count++
+-- ((A B){1,3})+: flattened to (A B)+ by the optimizer, so only one
+-- group level runs; kept as a result check for the nested spelling
 WITH test_end_nested_mid AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -2932,8 +3122,9 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- Nested reluctant group ((A B)+?) with following element C
--- Inner group exits after minimum 1 iteration
+-- Reluctant group (A B)+? with following element C
+-- The group tries to exit after each iteration: from row 1 row 3 is not C,
+-- so it takes a second iteration (1-5); from row 3 one suffices (3-5)
 WITH test_nested_reluctant AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -2980,13 +3171,10 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- Nested END->END fast-forward
--- When an inner group has a nullable body and count < min, the
--- fast-forward path exits through the outer END, incrementing
--- the outer group's count.
--- Pattern: ((A?){2,3}){2,3} -- nested groups, neither collapses
--- because the optimizer cannot safely multiply non-exact quantifiers.
--- Data has no A rows, forcing all-empty iterations via fast-forward.
+-- Nested nullable groups: ((A?){2,3}){2,3}
+-- The child's min is 0 at both levels, so the optimizer multiplies them
+-- and this runs as A{0,9}: no group END or fast-forward path remains.
+-- Data has no A rows, so every row matches empty.
 WITH test_nested_ff AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -3145,7 +3333,8 @@ WINDOW w AS (
 -- Empty iteration followed by a consuming one, below min
 -- A? is tried before B, so on row 1 the first two iterations go empty and the
 -- third takes B, matching rows 1-2.  The longer A B C match ranks lower: it
--- abandons A? in the first iteration (7.2.4 -- length breaks prefix ties only).
+-- abandons A? in the first iteration
+-- (7.2.4 -- length breaks prefix ties only).
 WITH test_empty_then_consume AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -3503,7 +3692,8 @@ WINDOW w AS (
 -- INITIAL Mode (Runtime)
 -- ============================================================
 
--- Explicit INITIAL (after AFTER MATCH SKIP, per the grammar); same as the default
+-- Explicit INITIAL (after AFTER MATCH SKIP, per the grammar);
+-- same as the default
 WITH test_initial_mode AS (
     SELECT * FROM (VALUES
         (1, ARRAY['_']),  -- Unmatched
@@ -3787,7 +3977,8 @@ WINDOW w AS (
 
 -- Partition end with absorbable pattern
 -- SKIP PAST LAST ROW + unbounded frame + all rows match A
--- Triggers absorb in !rowExists path at partition boundary.
+-- Newer contexts are absorbed row by row; the !rpr_prepare_row() path at
+-- partition end only finalizes the remaining contexts.
 WITH test_absorb_partition_end AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -3845,6 +4036,9 @@ WINDOW w AS (
 -- ============================================================
 
 -- Partial absorbable pattern ((A+) B)
+-- Each A row's advance adds a non-absorbable B state beside A+; it dies on
+-- the next A row before the absorb phase, so the contexts of rows 2-3 are
+-- still absorbed.  Row 4's context is skipped by the 1-4 match.
 WITH test_partial_absorbable AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -3861,7 +4055,7 @@ FROM test_partial_absorbable
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A+) B)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -3869,6 +4063,9 @@ WINDOW w AS (
 );
 
 -- Dynamic flag update ((A+) | B)
+-- A new context starts with states in both branches; once its B state dies
+-- it becomes absorbable, so rows 2-3 are absorbed into the 1-3 match.
+-- Rows 4 and 6 then match through B, and row 5 alone through A+.
 WITH test_dynamic_flags AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -3886,7 +4083,7 @@ FROM test_dynamic_flags
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A+) | B)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -3895,7 +4092,7 @@ WINDOW w AS (
 
 -- Non-absorbable context during absorption
 -- Pattern (A B)+ C: A,B in absorbable group, C is not.
--- When END exits to C, the cloned context becomes non-absorbable.
+-- When END exits to C, the cloned state becomes non-absorbable.
 WITH test_non_absorbable AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -3982,7 +4179,8 @@ WINDOW w AS (
 
 -- Absorb skips completed context (older->states==NULL)
 -- Pattern A+ | B+ with SKIP PAST LAST ROW.
--- Row 1: A only -> Ctx1 takes A branch. Row 2: B only -> Ctx1 A fails (completed).
+-- Row 1: A only -> Ctx1 takes A branch.
+-- Row 2: B only -> Ctx1 A fails (completed).
 -- Ctx2 takes B branch. Absorption: Ctx1 states==NULL -> skip.
 WITH test_older_completed AS (
     SELECT * FROM (VALUES
@@ -4009,7 +4207,8 @@ WINDOW w AS (
 -- Absorb skips a context with no absorbable state
 -- Pattern A+ | B C with SKIP PAST LAST ROW (only A+ branch absorbable).
 -- Row 1: B only -> Ctx1 takes B branch (non-absorbable), advances to C.
--- Row 2: C,A -> Ctx1 C matches (no absorbable state). Ctx2 takes A (absorbable).
+-- Row 2: C,A -> Ctx1 C matches (no absorbable state).
+-- Ctx2 takes A (absorbable).
 -- Absorption: Ctx1 has no absorbable state -> skip.
 WITH test_older_non_absorbable AS (
     SELECT * FROM (VALUES
@@ -4035,7 +4234,8 @@ WINDOW w AS (
 );
 
 -- Reluctant branch in ALT not absorbable: (A+?) | B
--- A+? is reluctant so not absorbable. Compare with greedy (A+) | B above.
+-- A+? is reluctant so not absorbable, even with SKIP PAST LAST ROW.
+-- Compare with greedy (A+) | B above: rows 1-4 each match one row here.
 WITH test_reluctant_alt_absorption AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -4052,7 +4252,7 @@ FROM test_reluctant_alt_absorption
 WINDOW w AS (
     ORDER BY id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    AFTER MATCH SKIP TO NEXT ROW
+    AFTER MATCH SKIP PAST LAST ROW
     PATTERN ((A+?) | B)
     DEFINE
         A AS 'A' = ANY(flags),
@@ -4063,13 +4263,14 @@ WINDOW w AS (
 -- Zero-Consumption Cycle Detection
 -- ============================================================
 
--- Cycle prevention at count > 0: (A*)* inner skip cycles at count=3
+-- (A*)*: flattened to A* by the optimizer, so no group END and no cycle
+-- guard is involved; kept as a result check for the nested spelling
 WITH test_cycle_nonzero AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
         (2, ARRAY['A']),
         (3, ARRAY['A']),
-        (4, ARRAY['B'])  -- Inner A* matches 0, cycles at count=3
+        (4, ARRAY['B'])  -- A* stops here
     ) AS t(id, flags)
 )
 SELECT id, flags,
@@ -4453,7 +4654,7 @@ WINDOW w AS (
 );
 
 -- (A B C | A B): the first alternative is the longer one and it fits, so
--- length and written order agree.  Compare with the reverse below.
+-- length and written order agree.
 WITH test_alt_shared_prefix_long_first AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A']),
@@ -4775,15 +4976,18 @@ WINDOW w AS (
 );
 
 -- ------------------------------------------------------------
--- 7.2.6 Anchors (not yet implemented - syntax error expected)
+-- 7.2.6 Anchors: not permitted in the WINDOW clause
+-- Per 6.13, "the anchors (^ and $) are not permitted with row pattern
+-- matching in windows".  R020 conformance: these must stay rejected;
+-- this is not a gap to be filled later.
 -- ------------------------------------------------------------
 
--- ^ anchor: not yet supported
+-- ^ anchor: rejected
 SELECT count(*) OVER w FROM (SELECT 1 AS v) t
 WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (^ A) DEFINE A AS TRUE);
 
--- $ anchor: not yet supported
+-- $ anchor: rejected
 SELECT count(*) OVER w FROM (SELECT 1 AS v) t
 WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A $) DEFINE A AS TRUE);
@@ -4792,13 +4996,15 @@ WINDOW w AS (ORDER BY v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
 -- 7.2.8 Infinite repetitions of empty matches
 -- (Perl lower-bound stopping rule)
 -- ------------------------------------------------------------
--- Standard examples from 7.2.8:
---   (A?){0,3}: allowed strings include STR00=(), STR01=(A), STR02=(empty),
---              STR03=(AA), STR04=(A,empty), STR07=(AAA), STR08=(AA,empty)
---   (A?){1,3}: same as {0,3} but STR00 excluded (min=1 not met)
---   (A?){2,3}: STR03-06 (len 2) and STR07,08,11,12 (len 3) are valid
---              STR06=(STRE,STRE) IS valid because non-final STRE at
---              position 1 fills the lower bound
+-- The standard works this rule out by listing the iteration traces of
+-- the quantifier.  Below, A is an iteration that matched a row and ()
+-- one that matched nothing.  An empty iteration is allowed only as the
+-- last one, or at a position below the lower bound.
+--   (A?){0,3}: (), (A), (()), (A A), (A ()), (A A A), (A A ())
+--   (A?){1,3}: the same, less () -- it does not meet the lower bound
+--   (A?){2,3}: (A A), (A ()), (() A), (() ()), (A A A), (A A ()),
+--              (() A A), (() A ()) -- a non-final empty iteration at
+--              position 1 fills the lower bound of 2
 
 -- (A??)*B: Standard 7.2.8 introductory example
 -- "matched against a sequence of rows for which the only feasible
@@ -4871,8 +5077,9 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
--- (A?){2,3}: min=2, nullable inner.  Per ISO/IEC 19075-5 7.2.8 STR06 = (STRE STRE)
--- is valid: two empty iterations satisfy min=2.
+-- (A?){2,3}: min=2, nullable inner.  Two empty iterations -- ( () () ) --
+-- are valid here: the first is below the lower bound, so it does not
+-- stop the loop.
 WITH test_728_min2 AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),
@@ -4915,10 +5122,10 @@ WINDOW w AS (
         A AS 'A' = ANY(flags)
 );
 
--- (A? | B){3}: an empty iteration below min fills the lower bound (STR06),
--- and it must outrank the later branch.  Row 2 is B only, so A? derives empty
--- there; repeating that derivation fills the remaining iterations and the
--- match ends at row 1.  Taking branch B instead would consume rows 2-3.
+-- (A? | B){3}: an empty iteration below min fills the lower bound, and it
+-- must outrank the later branch.  Row 2 is B only, so A? derives empty there;
+-- repeating that derivation fills the remaining iterations and the match ends
+-- at row 1.  Taking branch B instead would consume rows 2-3.
 WITH test_728_empty_fills_min AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A', 'B']),
@@ -4940,8 +5147,8 @@ WINDOW w AS (
         B AS 'B' = ANY(flags)
 );
 
--- The same pattern unrolled.  Consecutive identical alternations are merged
--- into the rolled form above, so the two must agree.
+-- The same pattern unrolled.  Distinct variable names keep the alternations
+-- from being merged into the rolled form above, yet the two must agree.
 WITH test_728_empty_fills_min_unrolled AS (
     SELECT * FROM (VALUES
         (1, ARRAY['A', 'B']),
@@ -5093,8 +5300,7 @@ WINDOW g  AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
               DEFINE A AS 'A' = ANY(flags)),
        rr AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
               AFTER MATCH SKIP PAST LAST ROW PATTERN (((A??){2}?))
-              DEFINE A AS 'A' = ANY(flags))
-ORDER BY id;
+              DEFINE A AS 'A' = ANY(flags));
 -- (A* | B)*: A* is the preferred alternative and matches empty at row 3,
 -- which ends the loop by the lower-bound stopping rule.  B is never tried,
 -- so the match stops short of the B rows even though taking them would be
@@ -5329,9 +5535,10 @@ WINDOW w AS (
         C AS 'C' = ANY(flags)
 );
 
--- (A? | B){3} C over the same rows: with an exact bound the two empty
--- iterations sit below min, so the loop must continue; the third takes B
--- and the match is rows 1-2.  Contrast with the {2,3} case above.
+-- (A? | B){3} C over the rows of test_728_stop_binds_at_min: with an exact
+-- bound the two empty iterations sit below min, so the loop must continue;
+-- the third takes B and the match is rows 1-2.  Contrast with the {2,3}
+-- case in that test.
 WITH test_728_exact_below_min AS (
     SELECT * FROM (VALUES
         (1, ARRAY['B']),

@@ -15,7 +15,7 @@
 --    A1. Frame optimization bypass
 --    A2. Run condition pushdown bypass
 --    A3. Window dedup prevention (RPR vs non-RPR)
---    A4. Window dedup prevention (same PATTERN, different DEFINE)
+--    A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
 --    A5. Unused output removal around an RPR window
 --    A6. Inverse transition bypass
 --    A7. Cost estimation RPR awareness
@@ -62,7 +62,8 @@ INSERT INTO rpr_integ VALUES
 -- PRECEDING, breaking RPR's required ROWS BETWEEN CURRENT ROW AND
 -- UNBOUNDED FOLLOWING.
 
--- Non-RPR baseline: the planner rewrites the frame to ROWS UNBOUNDED PRECEDING.
+-- Non-RPR baseline: the planner rewrites
+-- the frame to ROWS UNBOUNDED PRECEDING.
 EXPLAIN (COSTS OFF)
 SELECT row_number() OVER w FROM rpr_integ
 WINDOW w AS (ORDER BY id
@@ -126,8 +127,7 @@ SELECT * FROM (
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val > PREV(val))
-) t WHERE cnt > 0
-ORDER BY id;
+) t WHERE cnt > 0;
 
 -- ============================================================
 -- A3. Window dedup prevention (RPR vs non-RPR)
@@ -135,11 +135,11 @@ ORDER BY id;
 -- Verify that PostgreSQL does not merge an RPR window with a non-RPR
 -- window even when both share the same ORDER BY and frame
 -- specification.  RPR pattern matching produces results that are
--- semantically different from a plain frame-based aggregate, so the
--- two windows must remain as separate WindowAgg nodes.  Inline window
--- specs are used throughout this section because only inline windows
--- are subject to the dedup path; distinct named windows are always
--- kept separate regardless of equivalence.
+-- semantically different from a plain frame-based aggregate, so the two
+-- windows must remain as separate WindowAgg nodes.  Inline window specs
+-- are used for the parser-level tests because only inline windows are
+-- subject to the parser's dedup path; the planner's frame optimization
+-- can also merge named windows (covered at the end).
 
 -- Non-RPR baseline: two inline windows with identical spec are
 -- deduped by the parser into a single WindowAgg node, confirming
@@ -174,8 +174,7 @@ SELECT
         DEFINE B AS val > PREV(val)) AS rpr_cnt,
     count(*) OVER (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS normal_cnt
-FROM rpr_integ
-ORDER BY id;
+FROM rpr_integ;
 
 -- Result level: if the two windows had been merged, fv_normal and fv_rpr
 -- would agree on every row.  They do not, so the windows stayed separate.
@@ -194,8 +193,8 @@ WINDOW w1 AS (
 );
 
 -- The two windows above start from the same frame.  These two do not:
--- they converge only after frame optimization rewrites the non-RPR one,
--- and the RPR window is preserved, so they still must not be merged.
+-- they would converge only if frame optimization rewrote both, and the
+-- RPR window is skipped by it, so they still must not be merged.
 -- The view is deliberately left undropped: it is the only one in the
 -- tree that serializes an RPR window and a non-RPR window together, so
 -- pg_upgrade/pg_dump needs it to exercise that round trip.
@@ -216,14 +215,17 @@ WINDOW
 EXPLAIN (COSTS OFF) SELECT * FROM rpr_ev_opt_mixed;
 
 -- ============================================================
--- A4. Window dedup prevention (same PATTERN, different DEFINE)
+-- A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
 -- ============================================================
--- Verify that inline-window dedup does not merge two RPR windows
--- that share the same PATTERN structure but have different DEFINE
--- conditions.  Even though the ORDER BY, frame, and PATTERN coincide,
--- the differing DEFINE expressions classify rows differently and
--- must therefore yield two separate WindowAgg nodes.  Inline specs
--- are used here because dedup only applies to inline windows.
+-- Verify that inline-window dedup does not merge two RPR windows that
+-- share the same PATTERN structure but differ in one other part of the
+-- row pattern common syntax.  Even though the ORDER BY, frame, and
+-- PATTERN coincide, a differing DEFINE classifies rows differently and
+-- a differing AFTER MATCH SKIP resumes the scan differently, so either
+-- must yield two separate WindowAgg nodes.  transformWindowFuncCall()
+-- compares the whole RPCommonSyntax node, which carries rpDefs and
+-- rpSkipTo alongside rpPattern; the cases below cover one field each.
+-- Inline specs are used here because dedup only applies to inline windows.
 
 -- Baseline: two inline RPR windows that are structurally identical
 -- (same PARTITION BY, ORDER BY, frame, PATTERN, and DEFINE) are deduped by the
@@ -267,8 +269,41 @@ SELECT
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val < PREV(val)) AS cnt_down
-FROM rpr_integ
-ORDER BY id;
+FROM rpr_integ;
+
+-- Two inline RPR windows alike in every way but the AFTER MATCH SKIP
+-- mode must also remain separate.  SKIP PAST LAST ROW resumes after the
+-- match, SKIP TO NEXT ROW resumes one row in, so the later rows of a
+-- match can start a match of their own.
+EXPLAIN (COSTS OFF)
+SELECT
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP PAST LAST ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_past,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP TO NEXT ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_next
+FROM rpr_integ;
+
+-- Verify the two windows disagree on the rows that a skipped-past match
+-- covered, confirming the skip modes were not collapsed by dedup.
+SELECT
+    id, val,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP PAST LAST ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_past,
+    count(*) OVER (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        AFTER MATCH SKIP TO NEXT ROW
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val)) AS cnt_next
+FROM rpr_integ;
 
 -- ============================================================
 -- A5. Unused output removal around an RPR window
@@ -335,8 +370,11 @@ SELECT count(*), sum(c) FROM (
 ) t;
 
 -- "val" is a non-resjunk subquery output that the outer query never reads, so
--- remove_unused_subquery_outputs() would replace it with NULL and DEFINE would
--- then compare NULLs.  The guard in allpaths.c keeps it.
+-- remove_unused_subquery_outputs() replaces it with NULL; "NULL::integer" on
+-- the WindowAgg Output line shows that.  DEFINE does not read that output
+-- entry but rpr_integ.val below it, which build_base_rel_tlists() and
+-- make_window_input_target() carry into the WindowAgg's input, as the Sort
+-- and Seq Scan Output lines show.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT count(*) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ
@@ -375,9 +413,9 @@ WINDOW w AS (ORDER BY id
     PATTERN (A B+)
     DEFINE B AS val > PREV(val));
 
--- The same retention has to survive join removal: nulling "uv" would leave
--- rpr_integ_u referenced by nothing, the LEFT JOIN would be dropped, and the
--- DEFINE Var would then point at a relation no longer in the plan.
+-- The DEFINE column also has to survive join removal: build_base_rel_tlists()
+-- marks u.uval, which DEFINE reads, needed at relation 0, so the LEFT JOIN is
+-- kept and the DEFINE Var still points at a relation in the plan.
 CREATE TABLE rpr_integ_u (id INT PRIMARY KEY, uval INT);
 INSERT INTO rpr_integ_u SELECT i, i * 10 FROM generate_series(1, 5) i;
 
@@ -401,8 +439,9 @@ SELECT id, c FROM (
 ) s ORDER BY id;
 
 -- A flattened subquery output that an outer join makes nullable reaches the
--- DEFINE clause as a PlaceHolderVar rather than a Var.  The parser's targetlist
--- entry is rewritten the same way, so the expression still reaches the
+-- DEFINE clause as a PlaceHolderVar rather than a Var.
+-- build_base_rel_tlists() marks it needed and
+-- make_window_input_target() asks for it, so it reaches the
 -- WindowAgg's input: the trailing "(COALESCE(rpr_integ_u.uval, 0))" is the
 -- assertion.  coalesce() is deliberate and must not be simplified away: a
 -- strict expression such as "uval + 1" goes to NULL on its own when the join
@@ -428,10 +467,10 @@ WINDOW w AS (ORDER BY t.id
     DEFINE B AS uv1 > PREV(uv1));
 
 -- The same shape with the window dead: nothing reads count(*) OVER w, so its
--- entry goes, w goes with it, and "uv" is no longer held by a DEFINE clause
--- that will run.  That was rpr_integ_u's last reference, so join removal takes
--- the LEFT JOIN too and the scan is left alone.  Retaining "uv" here on the
--- strength of a window that will not run would keep the join alive for nothing.
+-- entry goes and w goes with it.  grouping_planner() empties w's DEFINE
+-- clause when the subquery is planned, so nothing marks u.uval needed, and
+-- "uv" is unread as well.  That leaves rpr_integ_u unreferenced, so join
+-- removal takes the LEFT JOIN too and the scan is left alone.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT id FROM (
     SELECT t.id AS id, u.uval AS uv, count(*) OVER w AS c
@@ -479,9 +518,11 @@ SELECT id, c1 FROM (
 
 DROP TABLE rpr_integ_u;
 
--- w2 is declared and no window function references it, so select_active_windows()
--- drops it when the subquery is planned.  Its DEFINE must not keep "val" alive
--- for a window that never runs: the subquery output for val becomes a null Const.
+-- w2 is declared and no window function references it, so
+-- select_active_windows() drops it when the subquery is planned and
+-- grouping_planner() empties its DEFINE clause.  The unread output for val
+-- becomes a null Const, and with nothing left asking for rpr_integ.val the
+-- Sort and Seq Scan below the WindowAgg do not carry it either.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT c FROM (
     SELECT count(*) OVER w1 AS c, val
@@ -493,12 +534,12 @@ SELECT c FROM (
                DEFINE B AS val > PREV(val))
 ) t;
 
--- Here w2 does have a window function, but the outer query does not read it, so
--- this call replaces that entry with a null Const and w2 goes inactive as well.
--- Which windows are active therefore has to be read after that substitution:
--- read before it, w2 still looks active and "val" is retained for a window that
--- will not run.  Both null Consts on the WindowAgg's Output line are the
--- assertion.
+-- Here w2 does have a window function, but the outer query does not read
+-- it, so remove_unused_subquery_outputs() replaces that entry with a null
+-- Const, and w2 goes inactive when the subquery is planned.  Its DEFINE
+-- clause is emptied as above, so rpr_integ.val is not carried below the
+-- WindowAgg.  Both null Consts on the WindowAgg's Output line, and "val"
+-- missing from the Sort and Seq Scan, are the assertion.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT c FROM (
     SELECT count(*) OVER w1 AS c, count(*) OVER w2 AS unread, val
@@ -511,11 +552,9 @@ SELECT c FROM (
 ) t;
 
 -- The same shape with the window function one level down, inside an
--- expression.  The live set is read off the entries that survive, so a
--- window function nested in one of them is seen and one in an entry about to
--- be replaced is not; reading it from the entries' top-level nodes instead
--- would report w2 live here and hold "val" for a window that goes inactive
--- anyway.  This plan matching the one above is the assertion.
+-- expression.  The whole entry is replaced with a null Const, taking the
+-- nested window function with it, so w2 goes inactive just as above.  This
+-- plan matching the one above is the assertion.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT c FROM (
     SELECT count(*) OVER w1 AS c, (count(*) OVER w2) + 1 AS unread, val
@@ -542,7 +581,8 @@ INSERT INTO rpr_integ_two SELECT i, i * 10, i * 100 FROM generate_series(1, 5) i
 
 -- Whether a window is active is decided per window clause, not for row pattern
 -- recognition as a whole: w3's function goes, and the column only w3's DEFINE
--- names goes with it, while w2 keeps its own.
+-- names goes with it, while the column w2's DEFINE reads is still carried to
+-- the WindowAgg's input.  Both unread outputs, v1 and v2, become null Consts.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT c2 FROM (
     SELECT count(*) OVER w2 AS c2, count(*) OVER w3 AS c3, v1, v2
@@ -559,9 +599,9 @@ SELECT c2 FROM (
 
 -- A window function entry can be kept for a reason other than the upper query
 -- reading it -- here the subquery's own ORDER BY -- and then its window stays
--- active and its DEFINE column is retained.  The pass that settles the window
--- function entries therefore has to apply every condition the loop after it
--- applies, not just the one about the upper query.
+-- active and keeps its DEFINE clause, so the column that clause reads is
+-- still carried to the WindowAgg's input while the unread output v1 becomes a
+-- null Const.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT c FROM (
     SELECT count(*) OVER w1 AS c, count(*) OVER w2 AS ord, v1
@@ -589,10 +629,10 @@ SELECT sum(c) FROM (
 -- subquery substitutes that subquery's output expressions into defineClause,
 -- and one of them can be a whole-row Var (attribute number 0).  The window
 -- input target takes it like any other DEFINE column, so the pattern match
--- sees the full row regardless of what
--- the subquery projects.  The unused scalar output "val" is therefore free to
--- be replaced with NULL (nothing reads it), while c is kept because sum(c)
--- reads it; the match result is unchanged.
+-- sees the full row regardless of what the subquery projects.  The unused
+-- scalar output "val" is therefore free to be replaced with NULL
+-- (nothing reads it), while c is kept because sum(c) reads it; the match
+-- result is unchanged.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c
@@ -612,33 +652,34 @@ SELECT sum(c) FROM (
         DEFINE B AS r IS NOT NULL)
 ) t;
 
--- The walk that decides which windows are still live runs on a targetlist
--- subquery_planner() has not preprocessed yet, so a SubLink is still a SubLink
--- there.  OFFSET 0 keeps the subquery unflattened, which is what puts
--- remove_unused_subquery_outputs() on the path at all.
-SELECT count(*) FROM (
-    SELECT id, (SELECT 1) AS s, count(*) OVER w AS c
-    FROM rpr_integ
-    WINDOW w AS (ORDER BY id
-        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-        PATTERN (A B+)
-        DEFINE B AS val > PREV(val))
-    OFFSET 0
-) t;
-
 -- A window function may also sit in a sub-select's test expression, where it
--- belongs to this query level rather than the sub-select's.  The walk reads it
--- there; a window function written inside the sub-select itself would count
--- against that query's own window clauses and must not be read here.
+-- belongs to this query level rather than the sub-select's.  The outer query
+-- filters on m, so the entry is kept, and the window function in its test
+-- expression keeps w active: the DEFINE clause stays, and rpr_integ.val is
+-- carried to the WindowAgg's input while the unread output val becomes a null
+-- Const.  Were w taken for inactive, its DEFINE clause would be emptied, B
+-- would match every row, and no row would start a match of length 2; here
+-- rows 1 and 3 do.
+EXPLAIN (VERBOSE, COSTS OFF)
 SELECT count(*) FROM (
-    SELECT id, (count(*) OVER w) IN (SELECT 1) AS m
+    SELECT id, val, (count(*) OVER w) IN (SELECT 2) AS m
     FROM rpr_integ
     WINDOW w AS (ORDER BY id
         ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         PATTERN (A B+)
         DEFINE B AS val > PREV(val))
     OFFSET 0
-) t;
+) t WHERE m;
+
+SELECT count(*) FROM (
+    SELECT id, val, (count(*) OVER w) IN (SELECT 2) AS m
+    FROM rpr_integ
+    WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS val > PREV(val))
+    OFFSET 0
+) t WHERE m;
 
 -- ============================================================
 -- A6. Inverse transition bypass
@@ -714,7 +755,7 @@ DROP FUNCTION rpr_logging_minvfunc(text, anyelement);
 -- cost_windowagg() must account for DEFINE expression evaluation cost.
 -- Verify RPR WindowAgg cost > non-RPR WindowAgg cost.
 
-CREATE FUNCTION get_windowagg_cost(query text) RETURNS numeric AS $$
+CREATE FUNCTION rpr_get_windowagg_cost(query text) RETURNS numeric AS $$
 DECLARE
     plan json;
     cost numeric;
@@ -725,17 +766,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT get_windowagg_cost(
+SELECT rpr_get_windowagg_cost(
     'SELECT count(*) OVER w FROM rpr_integ
      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
                   PATTERN (A B+ C+) DEFINE B AS val > PREV(val), C AS val < PREV(val))')
     >
-    get_windowagg_cost(
+    rpr_get_windowagg_cost(
     'SELECT count(*) OVER w FROM rpr_integ
      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)')
     AS rpr_cost_is_higher;
 
-DROP FUNCTION get_windowagg_cost(text);
+DROP FUNCTION rpr_get_windowagg_cost(text);
 
 -- ============================================================
 -- A8. Subquery flattening prevention
@@ -762,13 +803,12 @@ WHERE cnt > 0;
 -- ============================================================
 -- Verify that DEFINE expressions are not propagated into the
 -- targetlist of any upper WindowAgg node.  Only the column references
--- consumed by DEFINE should be passed up; the full DEFINE expression
--- is meaningful only inside the RPR WindowAgg that owns it.
--- EXPLAIN VERBOSE is therefore expected to show a clean targetlist on
--- the outer WindowAgg, with no DEFINE-derived expression leaking in.
--- Note: columns referenced by DEFINE (e.g., "val") may appear as
--- resjunk entries in upper WindowAgg targetlists -- but that is harmless.
--- The claim here is limited to the full DEFINE boolean expression.
+-- consumed by DEFINE are added to the window input target; the full
+-- DEFINE expression is meaningful only inside the RPR WindowAgg that
+-- owns it.  EXPLAIN VERBOSE is therefore expected to show a clean
+-- targetlist on the outer WindowAgg, with no DEFINE-derived expression
+-- leaking in.  The column DEFINE reads ("val") shows up only at and
+-- below the RPR WindowAgg, not on the outer one.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT
     count(*) OVER w_rpr AS rpr_cnt,
@@ -1044,8 +1084,8 @@ SET plan_cache_mode = force_generic_plan;
 EXPLAIN (COSTS OFF) EXECUTE rpr_prev(1);
 EXECUTE rpr_prev(1);
 
--- Negative runtime nav offset under the generic plan: init clamps it to 0 for
--- trim sizing, but the per-row navigation rejects the negative offset.
+-- Negative runtime nav offset under the generic plan: init defers it to
+-- execution ("runtime"), and the per-scan offset resolution rejects it.
 EXECUTE rpr_prev(-1);
 
 RESET plan_cache_mode;
@@ -1147,15 +1187,29 @@ ORDER BY o.id, r.id;
 
 -- A lateral outer reference can share varno and varattno with a DEFINE-only
 -- column: here o.b and y are both attribute 2 at their own query levels.
--- Only varlevelsup separates them, so the window input target has to take y
--- even though a Var with the same varno and varattno is present.
+-- The outer query leaves lat unread, so remove_unused_subquery_outputs()
+-- replaces it with a NULL, as it does in the control, while y, which the
+-- DEFINE clause reads from rpr_lat_i, is still carried to the WindowAgg's
+-- input.
 CREATE TABLE rpr_lat_o (a int, b int);
 CREATE TABLE rpr_lat_i (x int, y int);
 INSERT INTO rpr_lat_o VALUES (1, 10);
 INSERT INTO rpr_lat_i VALUES (1, 5), (2, 6);
 
 -- The overlapping shape: the outer reference is o.b, attribute 2.
-SELECT *
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT o.a, s.c
+FROM rpr_lat_o o,
+LATERAL (
+    SELECT o.b AS lat, count(*) OVER w AS c
+    FROM rpr_lat_i
+    WINDOW w AS (ORDER BY x
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS y > 0)
+) s;
+
+SELECT o.a, s.c
 FROM rpr_lat_o o,
 LATERAL (
     SELECT o.b AS lat, count(*) OVER w AS c
@@ -1167,8 +1221,20 @@ LATERAL (
 ) s;
 
 -- Control: the outer reference is o.a, attribute 1, which cannot be mistaken
--- for y.  The counts must match the query above.
-SELECT *
+-- for y.  The plan and the counts must match the query above.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT o.a, s.c
+FROM rpr_lat_o o,
+LATERAL (
+    SELECT o.a AS lat, count(*) OVER w AS c
+    FROM rpr_lat_i
+    WINDOW w AS (ORDER BY x
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS y > 0)
+) s;
+
+SELECT o.a, s.c
 FROM rpr_lat_o o,
 LATERAL (
     SELECT o.a AS lat, count(*) OVER w AS c
@@ -1253,8 +1319,8 @@ DROP INDEX rpr_integ_id_idx;
 -- B9. RPR + Volatile function in DEFINE
 -- ============================================================
 -- Volatile functions in DEFINE are rejected in the planner.  Under
--- RPR's NFA engine the same row's DEFINE predicate may be evaluated
--- multiple times (backtracking, PREV/NEXT navigation), so a volatile
+-- RPR's NFA engine the number of times a row's DEFINE predicate is
+-- evaluated is not something a query can rely on, so a volatile
 -- result would make pattern matching non-deterministic.  STABLE and
 -- IMMUTABLE callees are accepted.
 
@@ -1333,7 +1399,8 @@ CREATE TABLE rpr_over2 (c int);
 INSERT INTO rpr_over1 VALUES (1),(2),(3);
 INSERT INTO rpr_over2 VALUES (1),(2),(3);
 
--- Plan: only the DEFINE column survives in the subquery output.
+-- Plan: oc becomes a null Const and rpr_over2's scan contributes no column;
+-- rpr_over1.a, which DEFINE reads, reaches the WindowAgg's input.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT cnt FROM (
   SELECT a AS oa, c AS oc, count(*) OVER w AS cnt
@@ -1343,13 +1410,13 @@ SELECT cnt FROM (
 ) s;
 DROP TABLE rpr_over1, rpr_over2;
 
--- A DEFINE clause can hold a Var, or a PlaceHolderVar, of an outer query
--- level by the time this pruning runs, although none may be written in one:
--- inlining a SQL function substitutes the call's actual arguments into the
--- body and raises the level of what it plants there, and subquery pull-up may
--- wrap that in a PlaceHolderVar.  Reading the clause has to pass those by.
--- Each query below prunes an output, and is followed by the same query
--- reading that output, which prunes nothing and so never meets them.
+-- A DEFINE clause can come to hold a Var, or a PlaceHolderVar, of an outer
+-- query level, although none may be written in one: inlining a SQL function
+-- substitutes the call's actual arguments into the body and raises the level
+-- of what it plants there, and subquery pull-up may wrap that in a
+-- PlaceHolderVar.  Each query below leaves the function's output x unread,
+-- so its entry is replaced with a NULL, and is followed by the same query
+-- reading x, which prunes nothing; the counts must agree.
 CREATE TABLE rpr_up (p int, x int);
 INSERT INTO rpr_up SELECT g, 100 + g FROM generate_series(1, 6) g;
 CREATE TABLE rpr_drv (k int);
@@ -1367,8 +1434,9 @@ GROUP BY d.k ORDER BY 1;
 SELECT d.k, max(g.cnt), max(g.x) FROM rpr_drv d, LATERAL rpr_up_f(d.k) g
 GROUP BY d.k ORDER BY 1;
 
--- the same, in a clause that does read it: the column has to be held for the
--- window even though nothing above the subquery reads it.
+-- the same, in a clause that does read it: the output entry x still goes to
+-- NULL, while the DEFINE clause reads rpr_up.x, which is carried to the
+-- WindowAgg's input.
 CREATE FUNCTION rpr_up_h(th int) RETURNS TABLE (cnt bigint, x int)
 LANGUAGE sql STABLE AS $$
   SELECT count(*) OVER w, x FROM rpr_up
@@ -1403,10 +1471,11 @@ DROP TABLE rpr_up, rpr_drv;
 -- B12. RPR + Correlated navigation offsets
 -- ============================================================
 -- A row pattern navigation offset that resolves to a correlated PARAM_EXEC
--- (here through SRF inlining of rpr_srf_prev(g.n)) must be re-resolved on every
--- rescan, not frozen at executor init.  The inlined WindowAgg is the inner
--- side of a nestloop and is rescanned once per outer row, so each row sees its
--- own PREV(v, n) offset; a frozen offset would report the same value for all.
+-- (here through SRF inlining of rpr_srf_prev(g.n)) must be re-resolved on
+-- every rescan, not frozen at executor init.  The inlined WindowAgg is the
+-- inner side of a nestloop and is rescanned once per outer row, so each row
+-- sees its own PREV(v, n) offset; a frozen offset would report
+-- the same value for all.
 CREATE TABLE rpr_srf (v int);
 INSERT INTO rpr_srf SELECT generate_series(1, 10);
 CREATE FUNCTION rpr_srf_prev(k int) RETURNS SETOF bigint AS $$
@@ -1420,7 +1489,7 @@ $$ LANGUAGE sql STABLE;
 EXPLAIN (COSTS OFF)
 SELECT g.n, max(s) FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
 GROUP BY g.n ORDER BY g.n;
--- Each outer row yields its own offset (9, 8, 7), not one frozen value.
+-- Each outer row uses its own offset (counts 9, 8, 7), not one frozen value.
 SELECT g.n, max(s) AS m FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
 GROUP BY g.n ORDER BY g.n;
 
@@ -1445,9 +1514,9 @@ SELECT g.n, max(s) AS m FROM (VALUES (0), (1), (2)) g(n), LATERAL rpr_srf_first(
 GROUP BY g.n ORDER BY g.n;
 DROP FUNCTION rpr_srf_first(int);
 
--- A compound navigation's OUTER offset must be re-resolved per scan
--- as well.  The last offset overflows int64, so that scan's navigation
--- has no target row at all.
+-- A compound navigation's OUTER offset must be re-resolved per scan as well.
+-- 1 + k overflows int64 at the last offset, so that scan's navigation has no
+-- target row at all.
 CREATE FUNCTION rpr_srf_cmp(k int8) RETURNS SETOF bigint AS $$
   SELECT count(*) OVER w
   FROM rpr_srf
@@ -1493,10 +1562,11 @@ DROP TABLE rpr_hcache_thr, rpr_hcache_stock;
 -- ============================================================
 -- B14. RPR + Multiple window definitions
 -- ============================================================
--- A DEFINE-only column and a later window's sort key both become junk
--- targetlist entries.  Each draws its resno from p_next_resno, which is what
--- keeps the two distinct: a targetlist that gives one resno to two entries is
--- not a valid Query, and the parser is the only place that can prevent it.
+-- A DEFINE-only column (val) of one window and the sort key (grp) of another
+-- window are both absent from the select list.  The sort key reaches the plan
+-- as a junk targetlist entry; the DEFINE column never enters the targetlist
+-- and is added to the WindowAgg's input by make_window_input_target().  Each
+-- window must still read its own column.
 SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
 FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)
 WINDOW w1 AS (ORDER BY id
@@ -1516,8 +1586,7 @@ WINDOW w1 AS (ORDER BY id
     w2 AS (ORDER BY grp)
 ORDER BY id;
 
--- Control: the opposite declaration order draws the sort key first, so the two
--- never compete for a resno.  It must return the same rows as the first query
+-- The opposite declaration order must return the same rows as the first query
 -- above.
 SELECT id, count(*) OVER w1 AS c1, count(*) OVER w2 AS c2
 FROM (VALUES (1,1,10),(2,1,20)) t(id, grp, val)

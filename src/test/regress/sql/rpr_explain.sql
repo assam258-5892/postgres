@@ -39,7 +39,8 @@
 --   Nav Mark Lookback/Lookahead (tuplestore trim)
 -- ============================================================
 
--- Filter function to normalize platform-dependent memory values (not NFA statistics).
+-- Filter function to normalize platform-dependent memory values
+-- (not NFA statistics).
 -- NFA statistics should not change between platforms; if they do, it could
 -- indicate issues such as uninitialized memory access.
 -- Works for text, JSON, and XML formats.
@@ -206,7 +207,7 @@ WINDOW w AS (
 );');
 
 -- Sequential alternations at the same depth
--- Verifies that "((B | C) (D | E))" correctly outputs as "(b | c) (d | e)"
+-- Verifies that "((B | C) (D | E))*" correctly outputs as "((b | c) (d | e))*"
 CREATE VIEW rpr_ev_basic_deparse_seqalt AS
 SELECT count(*) OVER w
 FROM generate_series(1, 30) AS s(v)
@@ -532,7 +533,7 @@ WINDOW w AS (
 );');
 
 -- Early termination: first ALT branch (A) reaches FIN immediately,
--- pruning second branch (A B+) before it can accumulate B repetitions.
+-- pruning second branch (A B) before it can consume B.
 CREATE VIEW rpr_ev_state_alt_prune AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -650,7 +651,8 @@ WINDOW w AS (
 );');
 
 -- Bare unbounded quantifier: A+ absorbs redundant contexts
--- min=1 commits no match until the run ends, so newer contexts absorb in-progress
+-- min=1 commits no match until the run ends,
+-- so newer contexts absorb in-progress
 CREATE VIEW rpr_ev_ctx_absorb_plus AS
 SELECT count(*) OVER w
 FROM generate_series(1, 10) AS s(v)
@@ -673,7 +675,8 @@ WINDOW w AS (
 );');
 
 -- Bare min=0 quantifier: A* is skipped, not absorbed
--- min=0 commits an empty match at creation, so SKIP (not absorption) removes them
+-- min=0 commits an empty match at creation,
+-- so SKIP (not absorption) removes them
 CREATE VIEW rpr_ev_ctx_absorb_star AS
 SELECT count(*) OVER w
 FROM generate_series(1, 10) AS s(v)
@@ -901,8 +904,8 @@ WINDOW w AS (
 
 -- Absorption preserved when DEFINE uses only LAST without offset
 -- LAST(v) is match_start-independent (always currentpos), so absorption
--- remains active.  Compare: absorbed count should be >0, like the
--- PREV-only case above.
+-- remains active.  Compare: absorbed count should be >0, like
+-- rpr_ev_ctx_absorb_unbounded above.
 CREATE VIEW rpr_ev_ctx_absorb_last AS
 SELECT count(*) OVER w
 FROM generate_series(1, 50) AS s(v)
@@ -1072,8 +1075,8 @@ WINDOW w AS (
 );');
 
 -- Alternation, both branches absorbable: A+ C | B+
--- A+ C never completes (C absent) so its A+ run absorbs redundant contexts; the
--- finalized B+ matches on the other branch survive (2 matched, not 0)
+-- A+ C never completes (C absent) so its A+ run absorbs redundant contexts;
+-- the finalized B+ matches on the other branch survive (2 matched, not 0)
 CREATE VIEW rpr_ev_ctx_absorb_alt_both AS
 WITH d(id, flags) AS (
     VALUES (1, ARRAY['A', 'B']), (2, ARRAY['A', 'B']), (3, ARRAY['A', 'B']),
@@ -1364,7 +1367,8 @@ WINDOW w AS (
 )');
 
 -- JSON format with skipped context statistics
--- Alternation pattern with SKIP PAST LAST ROW causes many contexts to be skipped
+-- Alternation pattern with SKIP PAST LAST ROW
+-- causes many contexts to be skipped
 CREATE VIEW rpr_ev_json_skip AS
 SELECT count(*) OVER w
 FROM generate_series(1, 100) AS s(v)
@@ -1605,7 +1609,8 @@ WINDOW w AS (
     DEFINE A AS FALSE
 );');
 
--- (A?){2,3}: min=2 (ISO/IEC 19075-5 7.2.8 STR06 = STRE STRE) -> 3 length-0 matches
+-- (A?){2,3}: min=2 and A never matches, so two empty iterations fill
+-- the lower bound -> 3 length-0 matches
 CREATE VIEW rpr_ev_edge_empty_match_min2 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 3) AS s(v)
@@ -2399,7 +2404,8 @@ WINDOW w AS (
 );');
 
 -- Nested ALT at start of branch inside outer ALT
--- Pattern: (A ((B | C) D | E)) - preceding VAR + inner ALT as first branch element
+-- Pattern: (A ((B | C) D | E)) - preceding VAR + inner ALT
+-- as first branch element
 CREATE VIEW rpr_ev_alt_nested_start AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2823,8 +2829,10 @@ WINDOW w AS (
            D AS v % 6 = 3, E AS v % 6 = 4, F AS v % 6 = 5
 );');
 
--- Same interaction stacked four deep, to exercise the induction one step further
--- Pattern: ((((A | B) C | D) E | F) G | H) - four nested inherited-limit boundaries
+-- Same interaction stacked four deep,
+-- to exercise the induction one step further
+-- Pattern: ((((A | B) C | D) E | F) G | H) - four nested
+-- inherited-limit boundaries
 CREATE VIEW rpr_ev_alt_stack4 AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -2847,7 +2855,7 @@ WINDOW w AS (
 );');
 
 -- Three-deep stack whose innermost branch is a quantified group: the group's
--- skip-target jump must not be mistaken for a branch separator at any depth
+-- BEGIN-to-END jump must not be mistaken for a branch separator at any depth
 -- Pattern: (((A | B)+ C | D) E | F) - inherited limit plus loneAlt at the base
 CREATE VIEW rpr_ev_alt_stack3_grp AS
 SELECT count(*) OVER w
@@ -2943,7 +2951,8 @@ WINDOW w AS (
 
 -- A nested alternation that is sibling-bounded by a trailing sequence element
 -- at the outer level (the ALT is not the branch tail; G follows it in-branch)
--- Pattern: ((A (B (C | D) | E) | F) G | H) - ALT bounded by a following element
+-- Pattern: ((A (B (C | D) | E) | F) G | H) - ALT bounded
+-- by a following element
 CREATE VIEW rpr_ev_alt_mid_seqtail AS
 SELECT count(*) OVER w
 FROM generate_series(1, 20) AS s(v)
@@ -3437,9 +3446,11 @@ WINDOW w AS (
 
 -- ============================================================
 -- Nav Mark Lookback/Lookahead Tests
--- Verifies planner-computed navigation offsets for tuplestore trim.
--- Lookback: how far back from currentpos (PREV, LAST, compound PREV_LAST/NEXT_LAST).
--- Lookahead: how far forward from match_start (FIRST, compound PREV_FIRST/NEXT_FIRST).
+-- Verifies navigation offsets for tuplestore trim, resolved at executor init.
+-- Lookback: how far back from currentpos
+-- (PREV, LAST, compound PREV_LAST/NEXT_LAST).
+-- Lookahead: how far forward from match_start
+-- (FIRST, compound PREV_FIRST/NEXT_FIRST).
 -- ============================================================
 
 -- Prepare statement for host variable offset test below
@@ -3582,7 +3593,8 @@ WINDOW w AS (
     DEFINE A AS LAST(v) > PREV(v)
 );
 
--- Compound PREV(FIRST(val, 1), 2): lookback from match_start, firstOffset = 1-2 = -1
+-- Compound PREV(FIRST(val, 1), 2): lookback from match_start,
+-- firstOffset = 1-2 = -1
 EXPLAIN (COSTS OFF) SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
 WINDOW w AS (
@@ -3773,8 +3785,8 @@ WINDOW w AS (
 );
 
 -- Compound PREV(LAST(val, $1), $2): parameter lookback overflow -> retain all
--- EXPLAIN shows "runtime" (plan-level); EXPLAIN ANALYZE shows "retain all"
--- (executor-resolved).
+-- EXPLAIN shows "runtime" (unresolved at init); EXPLAIN ANALYZE shows
+-- "retain all" (resolved per scan).
 PREPARE test_overflow_lookback(int8, int8) AS
 SELECT count(*) OVER w
 FROM generate_series(1,10) s(v)
@@ -3825,7 +3837,8 @@ DEALLOCATE p_first_runtime;
 
 -- PREV(v) + PREV(v, $1): the implicit lookback of 1 has to count even when the
 -- explicit offset resolves to 0, or PREV(v) would fail with "cannot fetch row
--- before mark".  A generic plan settles the reach per scan instead of at init.
+-- before WindowObject's mark position".  A generic plan settles the reach per
+-- scan instead of at init.
 SET plan_cache_mode = force_generic_plan;
 PREPARE test_prev_implicit_offset(int8) AS
 SELECT count(*) OVER w
@@ -3949,8 +3962,9 @@ DEALLOCATE test_runtime_null_offset;
 
 -- A correlated PARAM_EXEC nav offset (reaching the offset via SRF inlining) is
 -- resolved per scan by resolve_nav_offsets(); after execution EXPLAIN ANALYZE
--- must display the concrete resolved bound (a number), not "runtime" -- that is,
--- navMaxOffsetKind resolves to FIXED.  Plain EXPLAIN of the same query shows
+-- must display the concrete resolved bound (a number), not "runtime" --
+-- that is, navMaxOffsetKind resolves to FIXED.
+-- Plain EXPLAIN of the same query shows
 -- "runtime"; only ANALYZE exercises the per-scan clear.
 CREATE TABLE rpr_exp_srf (v int);
 INSERT INTO rpr_exp_srf SELECT generate_series(1, 10);
