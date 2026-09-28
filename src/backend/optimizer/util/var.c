@@ -68,6 +68,7 @@ typedef struct
 	int			sublevels_up;
 	bool		possible_sublink;	/* could aliases include a SubLink? */
 	bool		inserted_sublink;	/* have we inserted a SubLink? */
+	bool		in_rpr_nav_arg; /* 행 패턴 내비게이션 인자 아래에 있는가? */
 } flatten_join_alias_vars_context;
 
 static bool pull_varnos_walker(Node *node,
@@ -796,6 +797,7 @@ flatten_join_alias_vars(PlannerInfo *root, Query *query, Node *node)
 	context.possible_sublink = query->hasSubLinks;
 	/* if hasSubLinks is already true, no need to work hard */
 	context.inserted_sublink = query->hasSubLinks;
+	context.in_rpr_nav_arg = false;
 
 	return flatten_join_alias_vars_mutator(node, &context);
 }
@@ -834,6 +836,7 @@ flatten_join_alias_for_parser(Query *query, Node *node, int sublevels_up)
 	context.possible_sublink = query->hasSubLinks;
 	/* if hasSubLinks is already true, no need to work hard */
 	context.inserted_sublink = query->hasSubLinks;
+	context.in_rpr_nav_arg = false;
 
 	return flatten_join_alias_vars_mutator(node, &context);
 }
@@ -927,8 +930,55 @@ flatten_join_alias_vars_mutator(Node *node,
 		if (context->possible_sublink && !context->inserted_sublink)
 			context->inserted_sublink = checkExprHasSubLink(newvar);
 
+		/*
+		 * 내비게이션 인자 아래에서는, 내비게이션이 실행되기 전에 상수
+		 * 폴딩으로 사라지지 못하도록 Var/PHV가 아닌 치환을 PlaceHolderVar 로
+		 * 래핑한다.  pullup_replace_vars_callback()과 달리, 이는 Var 위의
+		 * strict 표현식도 래핑한다.
+		 */
+		if (context->in_rpr_nav_arg && context->root != NULL &&
+			!(IsA(newvar, Var) && ((Var *) newvar)->varlevelsup == var->varlevelsup) &&
+			!(IsA(newvar, PlaceHolderVar) && ((PlaceHolderVar *) newvar)->phlevelsup == var->varlevelsup))
+		{
+			Relids		phrels = pull_varnos(context->root, newvar);
+
+			if (bms_is_empty(phrels))
+			{
+				phrels = get_relids_for_join(context->query, var->varno);
+				phrels = bms_del_member(phrels, var->varno);
+			}
+			newvar = (Node *) make_placeholder_expr(context->root,
+													(Expr *) newvar,
+													phrels);
+		}
+
 		/* Lastly, add any varnullingrels to the replacement expression */
 		return add_nullingrels_if_needed(context->root, newvar, var);
+	}
+	if (IsA(node, RPRNavExpr))
+	{
+		/*
+		 * 오프셋이 아니라 인자만 내비게이션 인자로 표시한다
+		 * (replace_rte_variables_mutator()의 처리를 그대로 따른다).
+		 */
+		RPRNavExpr *nav = (RPRNavExpr *) node;
+		RPRNavExpr *newnode = makeNode(RPRNavExpr);
+		bool		save_in_rpr_nav_arg = context->in_rpr_nav_arg;
+
+		memcpy(newnode, nav, sizeof(RPRNavExpr));
+
+		context->in_rpr_nav_arg = true;
+		newnode->arg = (Expr *)
+			flatten_join_alias_vars_mutator((Node *) nav->arg, context);
+		context->in_rpr_nav_arg = save_in_rpr_nav_arg;
+
+		newnode->offset_arg = (Expr *)
+			flatten_join_alias_vars_mutator((Node *) nav->offset_arg, context);
+		newnode->compound_offset_arg = (Expr *)
+			flatten_join_alias_vars_mutator((Node *) nav->compound_offset_arg,
+											context);
+
+		return (Node *) newnode;
 	}
 	if (IsA(node, PlaceHolderVar))
 	{

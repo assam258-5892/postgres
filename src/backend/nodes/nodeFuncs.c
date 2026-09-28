@@ -69,6 +69,9 @@ exprType(const Node *expr)
 		case T_MergeSupportFunc:
 			type = ((const MergeSupportFunc *) expr)->msftype;
 			break;
+		case T_RPRNavExpr:
+			type = ((const RPRNavExpr *) expr)->resulttype;
+			break;
 		case T_SubscriptingRef:
 			type = ((const SubscriptingRef *) expr)->refrestype;
 			break;
@@ -386,6 +389,9 @@ exprTypmod(const Node *expr)
 			return ((const ArrayCoerceExpr *) expr)->resulttypmod;
 		case T_CollateExpr:
 			return exprTypmod((Node *) ((const CollateExpr *) expr)->arg);
+		case T_RPRNavExpr:
+			/* 결과는 인자 표현식과 같은 type/typmod를 가진다 */
+			return exprTypmod((Node *) ((const RPRNavExpr *) expr)->arg);
 		case T_CaseExpr:
 			{
 				/*
@@ -848,6 +854,9 @@ exprCollation(const Node *expr)
 		case T_MergeSupportFunc:
 			coll = ((const MergeSupportFunc *) expr)->msfcollid;
 			break;
+		case T_RPRNavExpr:
+			coll = ((const RPRNavExpr *) expr)->resultcollid;
+			break;
 		case T_SubscriptingRef:
 			coll = ((const SubscriptingRef *) expr)->refcollid;
 			break;
@@ -1154,6 +1163,9 @@ exprSetCollation(Node *expr, Oid collation)
 		case T_MergeSupportFunc:
 			((MergeSupportFunc *) expr)->msfcollid = collation;
 			break;
+		case T_RPRNavExpr:
+			((RPRNavExpr *) expr)->resultcollid = collation;
+			break;
 		case T_SubscriptingRef:
 			((SubscriptingRef *) expr)->refcollid = collation;
 			break;
@@ -1428,6 +1440,12 @@ exprLocation(const Node *expr)
 			break;
 		case T_MergeSupportFunc:
 			loc = ((const MergeSupportFunc *) expr)->location;
+			break;
+		case T_RPRNavExpr:
+			loc = ((const RPRNavExpr *) expr)->location;
+			break;
+		case T_RPRPatternNode:
+			loc = ((const RPRPatternNode *) expr)->location;
 			break;
 		case T_SubscriptingRef:
 			/* just use container argument's location */
@@ -2189,6 +2207,18 @@ expression_tree_walker_impl(Node *node,
 					return true;
 			}
 			break;
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *expr = (RPRNavExpr *) node;
+
+				if (WALK(expr->arg))
+					return true;
+				if (WALK(expr->offset_arg))
+					return true;
+				if (WALK(expr->compound_offset_arg))
+					return true;
+			}
+			break;
 		case T_SubscriptingRef:
 			{
 				SubscriptingRef *sbsref = (SubscriptingRef *) node;
@@ -2421,6 +2451,8 @@ expression_tree_walker_impl(Node *node,
 				if (WALK(wc->startOffset))
 					return true;
 				if (WALK(wc->endOffset))
+					return true;
+				if (WALK(wc->defineClause))
 					return true;
 			}
 			break;
@@ -2763,6 +2795,14 @@ query_tree_walker_impl(Query *query,
 		/*
 		 * But we need to walk the expressions under WindowClause nodes even
 		 * if we're not interested in SortGroupClause nodes.
+		 *
+		 * defineClause(행 패턴 인식)는 partitionClause 와 orderClause 처럼
+		 * 타깃 리스트를 가리키는 참조가 아니라, 윈도우 절 자신이 소유하는
+		 * 표현식 트리라는 점에 유의하라.  따라서 Query 전체를 다루는 모든
+		 * 워커와 rewriter는 그 Var에 도달하며, 이를 살아 있는 것으로 다룰 수
+		 * 있어야 한다.  어떤 윈도우 절이 실행되지 않을 것이라고 결정하는
+		 * 쪽이, 이후의 스캔이 그것을 건너뛰기를 기대하는 대신, 그 시점에
+		 * defineClause 를 비울 책임을 진다.
 		 */
 		ListCell   *lc;
 
@@ -2773,6 +2813,8 @@ query_tree_walker_impl(Query *query,
 			if (WALK(wc->startOffset))
 				return true;
 			if (WALK(wc->endOffset))
+				return true;
+			if (WALK(wc->defineClause))
 				return true;
 		}
 	}
@@ -3085,6 +3127,18 @@ expression_tree_mutator_impl(Node *node,
 
 				FLATCOPY(newnode, wfuncrc, WindowFuncRunCondition);
 				MUTATE(newnode->arg, wfuncrc->arg, Expr *);
+				return (Node *) newnode;
+			}
+			break;
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *nav = (RPRNavExpr *) node;
+				RPRNavExpr *newnode;
+
+				FLATCOPY(newnode, nav, RPRNavExpr);
+				MUTATE(newnode->arg, nav->arg, Expr *);
+				MUTATE(newnode->offset_arg, nav->offset_arg, Expr *);
+				MUTATE(newnode->compound_offset_arg, nav->compound_offset_arg, Expr *);
 				return (Node *) newnode;
 			}
 			break;
@@ -3510,6 +3564,7 @@ expression_tree_mutator_impl(Node *node,
 				MUTATE(newnode->orderClause, wc->orderClause, List *);
 				MUTATE(newnode->startOffset, wc->startOffset, Node *);
 				MUTATE(newnode->endOffset, wc->endOffset, Node *);
+				MUTATE(newnode->defineClause, wc->defineClause, List *);
 				return (Node *) newnode;
 			}
 			break;
@@ -3842,6 +3897,7 @@ query_tree_mutator_impl(Query *query,
 			FLATCOPY(newnode, wc, WindowClause);
 			MUTATE(newnode->startOffset, wc->startOffset, Node *);
 			MUTATE(newnode->endOffset, wc->endOffset, Node *);
+			MUTATE(newnode->defineClause, wc->defineClause, List *);
 
 			resultlist = lappend(resultlist, (Node *) newnode);
 		}
@@ -4494,6 +4550,8 @@ raw_expression_tree_walker_impl(Node *node,
 					return true;
 				if (WALK(wd->endOffset))
 					return true;
+				if (WALK(wd->rpCommonSyntax))
+					return true;
 			}
 			break;
 		case T_RangeSubselect:
@@ -4712,6 +4770,24 @@ raw_expression_tree_walker_impl(Node *node,
 				if (WALK(jaqc->output))
 					return true;
 				if (WALK(jaqc->query))
+					return true;
+			}
+			break;
+		case T_RPCommonSyntax:
+			{
+				RPCommonSyntax *rc = (RPCommonSyntax *) node;
+
+				if (WALK(rc->rpPattern))
+					return true;
+				if (WALK(rc->rpDefs))
+					return true;
+			}
+			break;
+		case T_RPRPatternNode:
+			{
+				RPRPatternNode *rp = (RPRPatternNode *) node;
+
+				if (WALK(rp->children))
 					return true;
 			}
 			break;

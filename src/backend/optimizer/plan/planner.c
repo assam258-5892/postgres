@@ -246,6 +246,7 @@ static void optimize_window_clauses(PlannerInfo *root,
 									WindowFuncLists *wflists);
 static List *select_active_windows(PlannerInfo *root, WindowFuncLists *wflists);
 static void name_active_windows(List *activeWindows);
+static bool add_define_inputs_walker(Node *node, PathTarget *input_target);
 static PathTarget *make_window_input_target(PlannerInfo *root,
 											PathTarget *final_target,
 											List *activeWindows);
@@ -1044,6 +1045,28 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 												EXPRKIND_LIMIT);
 		wc->endOffset = preprocess_expression(root, wc->endOffset,
 											  EXPRKIND_LIMIT);
+		foreach_node(TargetEntry, tle, wc->defineClause)
+		{
+			List	   *qual;
+
+			qual = (List *) preprocess_expression(root,
+												  (Node *) tle->expr,
+												  EXPRKIND_QUAL);
+
+			tle->expr = make_ands_explicit(qual);
+		}
+
+		/*
+		 * RPR DEFINE 절에서 휘발성 표현식을 거부한다.  파싱 중에 표현식의
+		 * 휘발성을 검사하지 않는다는 관례를 따르기 위해, 이 검사는 파싱 분석
+		 * 중이 아니라 여기서 수행한다.  따라서 플래너가 이 지점에 도달하기
+		 * 전에 버리는 서브쿼리는 검사되지 않는데, 이는 휘발성 함수가 폴딩되어
+		 * 사라지는 것을 허용하는 규칙과 같다.
+		 */
+		if (contain_volatile_functions((Node *) wc->defineClause))
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("DEFINE clause cannot contain volatile functions"));
 	}
 
 	parse->limitOffset = preprocess_expression(root, parse->limitOffset,
@@ -1219,6 +1242,24 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 			flatten_group_exprs(root, root->parse, (Node *) parse->targetList);
 		parse->havingQual =
 			flatten_group_exprs(root, root->parse, parse->havingQual);
+
+		/*
+		 * 행 패턴 DEFINE 절도 자신만의 표현식 트리를 가지므로,
+		 * parseCheckAggregates() 함수가 여기에도 GROUP Var를 넣어 두었다.
+		 * 그룹화 집합이 붙인 varnullingrels가 치환된 결과까지 살아남도록
+		 * 이곳에서도 root와 함께 이를 펼쳐야 한다 -- setrefs.c가 DEFINE
+		 * 사본을 타깃 리스트 사본과 대조하면서 둘이 일치하기를 요구하기
+		 * 때문이다.
+		 */
+		foreach(l, parse->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, l);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(root, root->parse,
+										(Node *) wc->defineClause);
+		}
 	}
 
 	/* Constant-folding might have removed all set-returning functions */
@@ -1908,6 +1949,37 @@ grouping_planner(PlannerInfo *root, double tuple_fraction,
 			}
 			else
 				parse->hasWindowFuncs = false;
+		}
+
+		/*
+		 * 실행되지 않을 모든 윈도우 절의 DEFINE 절을 비운다.  어떤 윈도우
+		 * 절이 실행되지 않는지 결정하는 쪽이 이 작업까지 책임진다:
+		 * build_base_rel_tlists()가 DEFINE 절이 읽는 대상을 relation 0 에서
+		 * 필요한 것으로 표시하고, 실행되는 어떤 것도 필요로 하지 않는 열이
+		 * 외부 조인이 제거되는 것을 막기 때문이다.  Query 전체를 다루는
+		 * rewriter도 죽은 윈도우의 Var와 살아 있는 윈도우의 Var를 구분할 수
+		 * 없다: 조인 제거는 해당 relation이 더 이상 필요 없어지면
+		 * ChangeVarNodes(..., INVALID_VAR, ...)로 파스 트리 전체에서 relid를
+		 * 지우는데, 이는 그 relation의 평범한 Var가 어디에도 남아 있지 않아야
+		 * 한다는 요구를 전제한다. 이 처리는 서브쿼리에 대해서도 실행되는데,
+		 * 서브쿼리가 계획될 때, 즉 그 자신의 query_planner()가 어떤 조인이든
+		 * 제거하기 전에 실행된다.
+		 *
+		 * defineClause 하나만 비우고 윈도우 절 자체는 지우지 않는다: winref는
+		 * windowClause 안에서 1부터 시작하는 인덱스이므로, 목록은 길이와
+		 * 순서를 유지해야 한다.  rpPattern 필드도 그대로 남는다. 이 필드는
+		 * Var를 갖지 않고, 정의가 없는 패턴 변수는 TRUE를 뜻하며, 그 절을 행
+		 * 패턴 윈도우로 표시하는 것이 바로 이 필드다.
+		 *
+		 * 이는 윈도우 함수 이름이 전혀 없는 윈도우 절과, 위에서 윈도우 함수가
+		 * 모두 접혀 사라져 activeWindows 목록이 비어 있는 채로 남는 질의에도
+		 * 똑같이 적용된다.
+		 */
+		foreach_node(WindowClause, wc, parse->windowClause)
+		{
+			if (wc->defineClause != NIL &&
+				!list_member_ptr(activeWindows, wc))
+				wc->defineClause = NIL;
 		}
 
 		/*
@@ -6126,6 +6198,14 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 		if (wflists->windowFuncs[wc->winref] == NIL)
 			continue;
 
+		/*
+		 * support 함수가 행 패턴 인식(RPR) 윈도우의 프레임을 RPR과 호환되지
+		 * 않는 것으로 바꾸지 못하게 한다.  RPR 윈도우는 ROWS BETWEEN CURRENT
+		 * ROW AND ...를 요구한다.
+		 */
+		if (wc->rpPattern != NULL)
+			continue;
+
 		foreach(lc2, wflists->windowFuncs[wc->winref])
 		{
 			SupportRequestOptimizeWindowClause req;
@@ -6203,13 +6283,19 @@ optimize_window_clauses(PlannerInfo *root, WindowFuncLists *wflists)
 
 				/*
 				 * Perform the same duplicate check that is done in
-				 * transformWindowFuncCall.
+				 * transformWindowFuncCall.  wc는 여기서 결코 RPR 절이
+				 * 아니지만(그런 경우는 위에서 이미 건너뛰었다), support
+				 * 함수는 RPR 절이 사용하는 프레임 옵션을 wc에 건네줄 수
+				 * 있으므로 RPR 필드도 비교해야 한다.
 				 */
 				if (equal(wc->partitionClause, existing_wc->partitionClause) &&
 					equal(wc->orderClause, existing_wc->orderClause) &&
 					wc->frameOptions == existing_wc->frameOptions &&
 					equal(wc->startOffset, existing_wc->startOffset) &&
-					equal(wc->endOffset, existing_wc->endOffset))
+					equal(wc->endOffset, existing_wc->endOffset) &&
+					wc->rpSkipTo == existing_wc->rpSkipTo &&
+					equal(wc->defineClause, existing_wc->defineClause) &&
+					equal(wc->rpPattern, existing_wc->rpPattern))
 				{
 					ListCell   *lc4;
 
@@ -6419,6 +6505,56 @@ common_prefix_cmp(const void *a, const void *b)
 }
 
 /*
+ * add_define_inputs_walker
+ *	  DEFINE 절이 읽는 것 중 WindowAgg 자신의 입력 타깃이 아직 제공하지 않는
+ *	  것을 그 타깃에 추가한다.
+ *
+ * 이는 몇 함수 앞에 나오는 HAVING 처리의 윈도우 쪽 대응물이다:
+ * build_base_rel_tlists()가 필요한 열을 표시해서 조인 트리 꼭대기까지 이르게
+ * 하는데, 상위 플래너가 attr_needed 필드를 전파하는 대신 명시적 타깃을 통해
+ * 투영하므로, 노드 자신의 입력 타깃도 그 열들을 다시 요청해야 한다.
+ * make_group_input_target()도 havingQual 필드에 대해 같은 일을 한다.
+ *
+ * 이 순회는 타깃이 이미 통째로 계산하는 표현식을 만나면 멈추는데, setrefs.c가
+ * 그 DEFINE 사본을 해당 열과 대조해 맞춰 보기 때문이다.  멈추는 것은 단순히
+ * 작업을 아끼는 것 이상으로 중요하다: GROUP BY 아래에서는 그룹화 표현식 밑의
+ * Var들을 단독으로 쓸 수 없으므로, 그 안으로 내려가면 그룹화 단계에 만들어 낼
+ * 수 없는 열을 요청하게 된다.  이는 HAVING에는 필요 없는 유일한 규칙으로,
+ * Agg의 입력 타깃이 그룹화 단계 위가 아니라 아래에 놓이기 때문이다.
+ */
+static bool
+add_define_inputs_walker(Node *node, PathTarget *input_target)
+{
+	if (node == NULL)
+		return false;
+
+	/*
+	 * XXX 이 list_member() 매치는 input_target 안에 이미 있는 것과 의미상
+	 * 같은 DEFINE 표현식을 놓쳐 WindowAgg 아래에 중복 열을 만들어 낼 수 있다.
+	 * 풀업된 서브쿼리를 통해 드러난 조인 별칭 표현식에서 이런 경우가
+	 * 나타난다: 타깃 리스트를 위해 한 번, 이 DEFINE 절을 위해 한 번, 각각
+	 * 평탄화하면서 그 외에는 동일한 사본 둘레에 매번 새로 독립적으로 번호가
+	 * 매겨진 PlaceHolderVar 하나를 씌우고(make_placeholder_expr()는 이미
+	 * 동등한 것이 있는지 확인하지 않는다), PlaceHolderVar 자신의 equal()은
+	 * 감싼 표현식이 아니라 그 번호를 비교하므로 둘은 결코 일치하지 않는다.
+	 * 낭비이긴 해도 잘못된 것으로 알려지지는 않았다.  이는 DEFINE 절만의
+	 * 문제도 아니다 -- make_group_input_target()도 RPR과 무관하게 GROUP
+	 * BY/HAVING에 대해 같은 종류의 중복을 만들어 낼 수 있다.
+	 */
+	if (list_member(input_target->exprs, node))
+		return false;
+
+	if (IsA(node, Var) || IsA(node, PlaceHolderVar))
+	{
+		add_new_column_to_pathtarget(input_target, (Expr *) node);
+		return false;
+	}
+
+	return expression_tree_walker(node, add_define_inputs_walker,
+								  input_target);
+}
+
+/*
  * make_window_input_target
  *	  Generate appropriate PathTarget for initial input to WindowAgg nodes.
  *
@@ -6550,6 +6686,22 @@ make_window_input_target(PlannerInfo *root,
 									   PVC_RECURSE_WINDOWFUNCS |
 									   PVC_INCLUDE_PLACEHOLDERS);
 	add_new_columns_to_pathtarget(input_target, flattenable_vars);
+
+	/*
+	 * 행 패턴 DEFINE 절은 WindowAgg 자신이 평가하므로, 그것이 읽는 모든 것이
+	 * 이 타깃까지도 도달해야 한다.  위쪽 어디에도 이를 여기에 넣을 이유가
+	 * 없다: DEFINE은 질의의 최종 타깃 리스트에 속하지 않고, 윈도우 자신의
+	 * PARTITION BY/ORDER BY 항목은 통째로 추가되므로 그 안의 Var를 따로 쓸 수
+	 * 있게 만들어 주지 않는다.  절이 실행될 모양을 갖춘 지금, 빠진 것을
+	 * 추가한다.
+	 */
+	foreach(lc, activeWindows)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			add_define_inputs_walker((Node *) wc->defineClause, input_target);
+	}
 
 	/* clean up cruft */
 	list_free(flattenable_vars);

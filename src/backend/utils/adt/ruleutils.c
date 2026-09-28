@@ -122,6 +122,7 @@ typedef struct
 	bool		varprefix;		/* true to print prefixes on Vars */
 	bool		colNamesVisible;	/* do we care about output column names? */
 	bool		inGroupBy;		/* deparsing GROUP BY clause? */
+	bool		inRPRDefine;	/* RPR DEFINE 절을 디파스 중인가? */
 	bool		varInOrderBy;	/* deparsing simple Var in ORDER BY? */
 	Bitmapset  *appendparents;	/* if not null, map child Vars of these relids
 								 * back to the parent rel */
@@ -147,7 +148,9 @@ typedef struct
  * In some cases we need to make names of merged JOIN USING columns unique
  * across the whole query, not only per-RTE.  If so, unique_using is true
  * and using_names is a list of C strings representing names already assigned
- * to USING columns.
+ * to USING columns.  using_names 는 또한 행 패턴 DEFINE 절이 읽는 이름도
+ * 담는데, 이들은 한정자 없이 출력되므로 unique_using 값과 무관하게 질의 레벨
+ * 전체에서 고유해야 한다; mark_define_columns() 를 참고한다.
  *
  * When deparsing plan trees, there is always just a single item in the
  * deparse_namespace list (since a plan tree never contains Vars with
@@ -171,7 +174,7 @@ typedef struct
 	char	   *ret_new_alias;	/* alias for NEW in RETURNING list */
 	/* Workspace for column alias assignment: */
 	bool		unique_using;	/* Are we making USING names globally unique */
-	List	   *using_names;	/* List of assigned names for USING columns */
+	List	   *using_names;	/* 질의 레벨 전체에서 예약된 이름들 */
 	/* Remaining fields are used only when deparsing a Plan tree: */
 	Plan	   *plan;			/* immediate parent of current expression */
 	List	   *ancestors;		/* ancestors of plan */
@@ -321,6 +324,17 @@ typedef struct
 	int			counter;		/* Largest addition used so far for name */
 } NameHashEntry;
 
+/*
+ * collapse_define_join_vars() 를 위한, 자신만의 표현식을 가진 질의의 병합된
+ * 조인 컬럼들
+ */
+typedef struct
+{
+	List	   *exprs;			/* 병합 표현식, nulling 마크는 지워짐 */
+	List	   *vars;			/* 각 병합된 컬럼을 가리키는 Var */
+	Bitmapset  *relids;			/* nulling 마크를 지우기 위한 모든 rtindex */
+} collapse_define_context;
+
 /* Callback signature for resolve_special_varno() */
 typedef void (*rsv_callback) (Node *node, deparse_context *context,
 							  void *callback_arg);
@@ -381,6 +395,16 @@ static void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
+static bool colname_is_fixed(RangeTblEntry *rte);
+static void mark_define_columns(deparse_namespace *dpns, Query *query);
+static void mark_define_column(deparse_namespace *dpns, Var *var);
+static char *preset_input_colname(deparse_namespace *dpns, int varno,
+								  AttrNumber attno);
+static void reserve_colname(deparse_namespace *dpns, char *colname);
+static List *function_rte_late_colnames(RangeTblEntry *rte);
+static void collapse_define_join_vars(Query *query);
+static Node *collapse_define_join_vars_mutator(Node *node,
+											   collapse_define_context *context);
 static void set_relation_column_names(deparse_namespace *dpns,
 									  RangeTblEntry *rte,
 									  deparse_columns *colinfo);
@@ -439,6 +463,10 @@ static void get_rule_groupingset(GroupingSet *gset, List *targetlist,
 								 bool omit_parens, deparse_context *context);
 static void get_rule_orderby(List *orderList, List *targetList,
 							 bool force_colno, deparse_context *context);
+static void append_pattern_quantifier(StringInfo buf, RPRPatternNode *node);
+static void get_rule_pattern_node(RPRPatternNode *node, deparse_context *context);
+static void get_rule_pattern(RPRPatternNode *rpPattern, deparse_context *context);
+static void get_rule_define(List *defineClause, deparse_context *context);
 static void get_rule_windowclause(Query *query, deparse_context *context);
 static void get_rule_windowspec(WindowClause *wc, List *targetList,
 								deparse_context *context);
@@ -533,7 +561,7 @@ static char *generate_qualified_relation_name(Oid relid);
 static char *generate_function_name(Oid funcid, int nargs,
 									List *argnames, Oid *argtypes,
 									bool has_variadic, bool *use_variadic_p,
-									bool inGroupBy);
+									bool inGroupBy, bool inRPRDefine);
 static char *generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 static void add_cast_to(StringInfo buf, Oid typid);
 static char *generate_qualified_type_name(Oid typid);
@@ -1119,6 +1147,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 		context.indentLevel = PRETTYINDENT_STD;
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
+		context.inRPRDefine = false;
 		context.varInOrderBy = false;
 		context.appendparents = NULL;
 
@@ -1130,7 +1159,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 	appendStringInfo(&buf, "EXECUTE FUNCTION %s(",
 					 generate_function_name(trigrec->tgfoid, 0,
 											NIL, NULL,
-											false, NULL, false));
+											false, NULL, false, false));
 
 	if (trigrec->tgnargs > 0)
 	{
@@ -3041,7 +3070,7 @@ pg_get_functiondef(PG_FUNCTION_ARGS)
 		appendStringInfo(&buf, " SUPPORT %s",
 						 generate_function_name(proc->prosupport, 1,
 												NIL, argtypes,
-												false, NULL, false));
+												false, NULL, false, false));
 	}
 
 	if (oldlen != buf.len)
@@ -3694,6 +3723,7 @@ deparse_expression_pretty(Node *expr, List *dpcontext,
 	context.indentLevel = startIndent;
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
+	context.inRPRDefine = false;
 	context.varInOrderBy = false;
 	context.appendparents = NULL;
 
@@ -4025,6 +4055,120 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 }
 
 /*
+ * collapse_define_join_vars: 펼쳐진 병합 조인 컬럼을 다시 하나로 합친다
+ *
+ * 위에서 DEFINE 절의 GROUP Var 를 펼치면, 그 그룹화 표현식이 원래 무엇 위에
+ * 쓰였든 그 내용을 그대로 담게 되는데, USING 으로 병합된 컬럼 위에서라면
+ * 그것은 파서가 병합을 위해 만든 표현식 -- 조인이 FULL 일 때의 두 입력의
+ * COALESCE -- 이다.  이를 그대로 출력하면 두 가지로 틀린다.  DEFINE 절은
+ * 한정자를 갖지 않으므로 양쪽 가지 모두 똑같이 COALESCE(id, id) 로 나오고,
+ * 어느 컬럼에서 왔는지는 텍스트에서 사라져 버린다; 그리고 출력된 것을 다시
+ * 파싱하면 병합된 컬럼 하나가 다른 컬럼 안에 중첩되어, 형태마저도 그룹화
+ * 단계가 제공하는 것과 더 이상 맞지 않게 된다.
+ *
+ * 조인 RTE 는 자신이 만든 표현식을 여전히 담고 있으므로, 펼쳐진 것을 그곳에서
+ * 알아보고 병합된 컬럼 자체를 가리키는 Var 로 다시 접을 수 있다.  그것이
+ * 사용자가 작성한 것이며, 다시 파싱된다.  노드의 입력들은 그 노드를 살펴보기
+ * 전에 접히므로, 다른 병합 위에 만들어진 병합 -- USING 조인 위의 또 다른
+ * USING 조인 -- 도 안쪽 병합이 다시 Var 가 되고 나면 전체가 온전히 보인다.
+ */
+static void
+collapse_define_join_vars(Query *query)
+{
+	collapse_define_context context;
+	ListCell   *lc;
+	int			rtindex = 0;
+
+	/* 병합 표현식을 한 번만 모은다; 대부분의 질의에는 없다 */
+	context.exprs = NIL;
+	context.vars = NIL;
+	context.relids = bms_add_range(NULL, 1, list_length(query->rtable));
+	foreach(lc, query->rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+		ListCell   *lc2;
+		AttrNumber	attno = 0;
+
+		rtindex++;
+		if (rte->rtekind != RTE_JOIN)
+			continue;
+
+		foreach(lc2, rte->joinaliasvars)
+		{
+			Node	   *aliasvar = (Node *) lfirst(lc2);
+
+			if (++attno > rte->joinmergedcols)
+				break;
+
+			/* 값이 단순히 입력 하나가 아닌 병합만 이를 가진다 */
+			if (aliasvar == NULL || IsA(aliasvar, Var))
+				continue;
+
+			context.exprs = lappend(context.exprs,
+									remove_nulling_relids(aliasvar,
+														  context.relids,
+														  NULL));
+			context.vars = lappend(context.vars,
+								   makeVar(rtindex, attno, exprType(aliasvar),
+										   exprTypmod(aliasvar),
+										   exprCollation(aliasvar), 0));
+		}
+	}
+
+	if (context.exprs == NIL)
+		return;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+
+		if (wc->defineClause != NIL)
+			wc->defineClause = (List *)
+				collapse_define_join_vars_mutator((Node *) wc->defineClause,
+												  &context);
+	}
+}
+
+static Node *
+collapse_define_join_vars_mutator(Node *node, collapse_define_context *context)
+{
+	if (node == NULL)
+		return NULL;
+
+	/* 입력을 먼저 접어서, 병합 위의 병합도 온전히 보이게 한다 */
+	node = expression_tree_mutator(node, collapse_define_join_vars_mutator,
+								   context);
+
+	/*
+	 * buildMergedJoinVar() 가 만든 것만 병합 표현식이 될 수 있다: 두 입력의
+	 * COALESCE 이거나, 한 입력을 공통 타입으로 강제 변환한 것이다.  그 밖의
+	 * 것은 비교하지 않고 그대로 둔다.
+	 */
+	if (IsA(node, CoalesceExpr) || IsA(node, FuncExpr) ||
+		IsA(node, RelabelType) || IsA(node, CoerceViaIO) ||
+		IsA(node, ArrayCoerceExpr) || IsA(node, CoerceToDomain))
+	{
+		/*
+		 * 컬럼을 병합한 조인보다 위에 있는 외부 조인은, 조인 RTE 가 보관하는
+		 * 사본이 아니라 그룹화 표현식이 담고 있는 사본에 표시를 남기며, 둘 중
+		 * 어느 표시도 출력된 텍스트에는 나타나지 않는다.
+		 */
+		Node	   *stripped = remove_nulling_relids(node, context->relids,
+													 NULL);
+		ListCell   *lc;
+		ListCell   *lc2;
+
+		forboth(lc, context->exprs, lc2, context->vars)
+		{
+			if (equal(stripped, (Node *) lfirst(lc)))
+				return (Node *) copyObject((Var *) lfirst(lc2));
+		}
+	}
+
+	return node;
+}
+
+/*
  * set_deparse_for_query: set up deparse_namespace for deparsing a Query tree
  *
  * For convenience, this is defined to initialize the deparse_namespace struct
@@ -4061,6 +4205,13 @@ set_deparse_for_query(deparse_namespace *dpns, Query *query,
 		/* Detect whether global uniqueness of USING names is needed */
 		dpns->unique_using =
 			has_dangerous_join_using(dpns, (Node *) query->jointree);
+
+		/*
+		 * DEFINE 절이 참조하는 컬럼 이름을 먼저 확정해서, 다음에 고를 USING
+		 * 이름이 이들과 충돌하지 않고 이들을 피해 고르게 하고, 질의를 다시
+		 * 파싱했을 때도 작성된 그대로 해석되게 한다.
+		 */
+		mark_define_columns(dpns, query);
 
 		/*
 		 * Select names for columns merged by USING, via a recursive pass over
@@ -4265,6 +4416,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (leftattnos[i] > 0)
 				{
 					expand_colnames_array_to(leftcolinfo, leftattnos[i]);
+					Assert(leftcolinfo->colnames[leftattnos[i] - 1] == NULL ||
+						   strcmp(leftcolinfo->colnames[leftattnos[i] - 1],
+								  colname) == 0);
 					leftcolinfo->colnames[leftattnos[i] - 1] = colname;
 				}
 
@@ -4272,6 +4426,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (rightattnos[i] > 0)
 				{
 					expand_colnames_array_to(rightcolinfo, rightattnos[i]);
+					Assert(rightcolinfo->colnames[rightattnos[i] - 1] == NULL ||
+						   strcmp(rightcolinfo->colnames[rightattnos[i] - 1],
+								  colname) == 0);
 					rightcolinfo->colnames[rightattnos[i] - 1] = colname;
 				}
 			}
@@ -4300,7 +4457,10 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 		 *
 		 * Though significantly different in results, these two strategies are
 		 * implemented by the same code, with only the difference of whether
-		 * to put assigned names into dpns->using_names.
+		 * to put assigned names into dpns->using_names.  어느 쪽이든 새
+		 * 이름은 이미 dpns->using_names 에 있는 것을 피해서 고르는데,
+		 * 여기에는 mark_define_columns() 가 확정한 이름도 포함된다; DEFINE
+		 * 절이 읽는 병합된 컬럼은 그곳에서 확정된 이름을 그대로 따른다.
 		 */
 		if (j->usingClause)
 		{
@@ -4313,6 +4473,7 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 			foreach(lc, j->usingClause)
 			{
 				char	   *colname = strVal(lfirst(lc));
+				char	   *preset;
 
 				/* Assert it's a merged column */
 				Assert(leftattnos[i] != 0 && rightattnos[i] != 0);
@@ -4320,6 +4481,19 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				/* Adopt passed-down name if any, else select unique name */
 				if (colinfo->colnames[i] != NULL)
 					colname = colinfo->colnames[i];
+				else if ((preset = preset_input_colname(dpns, colinfo->leftrti,
+														leftattnos[i])) != NULL ||
+						 (preset = preset_input_colname(dpns, colinfo->rightrti,
+														rightattnos[i])) != NULL)
+				{
+					/*
+					 * 아래에서 mark_define_columns() 가 확정한 이름이 이
+					 * 병합된 컬럼이 가지는 이름이다: DEFINE 절은 이를 그대로
+					 * 출력한다.  이미 고유하며 예약되어 있다.
+					 */
+					colname = preset;
+					colinfo->colnames[i] = colname;
+				}
 				else
 				{
 					/* Prefer user-written output alias if any */
@@ -4342,6 +4516,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (leftattnos[i] > 0)
 				{
 					expand_colnames_array_to(leftcolinfo, leftattnos[i]);
+					Assert(leftcolinfo->colnames[leftattnos[i] - 1] == NULL ||
+						   strcmp(leftcolinfo->colnames[leftattnos[i] - 1],
+								  colname) == 0);
 					leftcolinfo->colnames[leftattnos[i] - 1] = colname;
 				}
 
@@ -4349,6 +4526,9 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 				if (rightattnos[i] > 0)
 				{
 					expand_colnames_array_to(rightcolinfo, rightattnos[i]);
+					Assert(rightcolinfo->colnames[rightattnos[i] - 1] == NULL ||
+						   strcmp(rightcolinfo->colnames[rightattnos[i] - 1],
+								  colname) == 0);
 					rightcolinfo->colnames[rightattnos[i] - 1] = colname;
 				}
 
@@ -4367,6 +4547,259 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 	else
 		elog(ERROR, "unrecognized node type: %d",
 			 (int) nodeTag(jtnode));
+}
+
+/*
+ * colname_is_fixed: 어떤 이름 변경도 닿을 수 없는 컬럼인가?
+ *
+ * FROM 절 밖의 릴레이션 RTE -- 규칙의 NEW 나 OLD, 또는 UPDATE 나 DELETE 의
+ * 대상 -- 는 컬럼 별칭 목록을 출력할 곳이 없으므로, 그런 RTE 의 컬럼 이름을
+ * 바꾸면 그 출력은 참조되는 곳에서만 나타나며 존재하지 않는 컬럼을 가리키게
+ * 된다.  set_relation_column_names() 는 그런 컬럼을 건드리지 않고 남겨둔다.
+ */
+static bool
+colname_is_fixed(RangeTblEntry *rte)
+{
+	return rte->rtekind == RTE_RELATION && !rte->inFromCl;
+}
+
+/*
+ * mark_define_columns: DEFINE 절이 읽는 컬럼의 이름을 확정한다
+ *
+ * DEFINE 절 안에서는 컬럼을 한정자 없이만 이름 붙일 수 있는데, 한정자 자리는
+ * 패턴 변수를 위한 것이기 때문이다; get_rule_define() 이 varprefix 를 끄고
+ * 디파스하는 것도 그래서다.  따라서 그곳의 수식되지 않은 참조는 출력된 그대로
+ * 해석되어야 하며, 그 이름은 질의의 다른 어떤 RTE 도 출력하지 않는 이름이어야
+ * 한다.
+ *
+ * set_using_names() 가 이름을 만들어내기 전에 그런 이름을 먼저 확정한다:
+ * 자신의 RTE 안에서, 그리고 지금까지 예약된 이름들과 비교해 고유한 이름을
+ * 고르고, 그 RTE 의 colnames 항목에 저장해 다른 이름을 위해 그 컬럼이 이름
+ * 변경되는 일을 막으며, dpns->using_names 에 예약해 다른 RTE 에 주어지지 않게
+ * 한다.  그 컬럼을 병합하는 USING 절은 새 이름을 만드는 대신 확정된 이름을
+ * 그대로 받아들이고(set_using_names 참고), 그 밖의 것은 모두 보통의 절차를
+ * 따른다.  이름을 바꿀 수 없는 컬럼은 자신의 이름을 유지한 채 예약만 된다.
+ */
+static void
+mark_define_columns(deparse_namespace *dpns, Query *query)
+{
+	ListCell   *lc;
+
+	foreach(lc, query->windowClause)
+	{
+		WindowClause *wc = lfirst_node(WindowClause, lc);
+		List	   *vars;
+
+		/* DEFINE 에는 외부 레벨 Var 나 서브 select 가 없다 */
+		vars = pull_vars_of_level((Node *) wc->defineClause, 0);
+		foreach_node(Var, var, vars)
+			mark_define_column(dpns, var);
+	}
+}
+
+/*
+ * DEFINE 이 참조하는 컬럼 하나의 출력 이름을 확정한다.
+ */
+static void
+mark_define_column(deparse_namespace *dpns, Var *var)
+{
+	RangeTblEntry *rte;
+	deparse_columns *colinfo;
+	int			varno;
+	AttrNumber	attno;
+	char	   *colname;
+
+	/*
+	 * get_variable() 이 이 Var 를 출력할 때와 같은 방식으로 참조를 해석한다;
+	 * 그렇지 않으면 여기서 확정한 이름이 출력에 반영되는 이름이 아니게 된다.
+	 * 조인 컬럼을 읽는 Var 는 varno 에 자식 릴레이션을, varnosyn 에 조인
+	 * RTE 를 담고 있으며, 출력되는 것은 후자다.
+	 */
+	Assert(var->varnosyn > 0);
+	varno = var->varnosyn;
+	attno = var->varattnosyn;
+	Assert(attno != InvalidAttrNumber); /* 전체 행 참조는 DEFINE 에서 거부된다 */
+
+	rte = rt_fetch(varno, dpns->rtable);
+	colinfo = deparse_columns_fetch(varno, dpns);
+
+	/*
+	 * 시스템 컬럼의 이름은 고정되어 있고 get_variable() 이 카탈로그에서 이를
+	 * 읽으므로, 고를 별칭이 없다; 이름만 보관한다.
+	 */
+	if (attno < 0)
+	{
+		if (rte->rtekind == RTE_RELATION)
+			reserve_colname(dpns, get_rte_attribute_name(rte, attno));
+		return;
+	}
+
+	/* 같은 컬럼에 대한 이전 참조에서 이미 확정됨 */
+	if (attno <= colinfo->num_cols && colinfo->colnames[attno - 1] != NULL)
+		return;
+
+	/*
+	 * 이 컬럼이 출력될 때 쓰일 이름을 찾는다.  set_relation_column_names() 와
+	 * 같은 방식으로 해석한다: 사용자가 쓴 컬럼 별칭이 있으면 그것이 출력되고,
+	 * 없을 때만 카탈로그 이름이 그 자리를 대신한다.
+	 */
+	if (rte->rtekind == RTE_RELATION)
+	{
+		char	   *real_colname = get_attname(rte->relid, attno, true);
+
+		/*
+		 * NULL 이라면 그런 속성이 아예 없다는 뜻이다.  드롭된 컬럼도 여전히
+		 * pg_attribute 행을 가지고 있어 플레이스홀더 이름과 함께 돌아오지만,
+		 * DEFINE 절이 읽는 컬럼은 그 밑에서 드롭될 수 없다.
+		 */
+		Assert(real_colname != NULL);
+
+		if (rte->alias && attno <= list_length(rte->alias->colnames))
+			colname = strVal(list_nth(rte->alias->colnames, attno - 1));
+		else
+			colname = real_colname;
+	}
+	else
+	{
+		Assert(attno <= list_length(rte->eref->colnames));
+		colname = strVal(list_nth(rte->eref->colnames, attno - 1));
+		Assert(colname[0] != '\0');	/* 드롭된 컬럼이 아니다 */
+	}
+
+	/*
+	 * 이름을 바꿀 수 없는 컬럼은 이름만 보관하면 되지만, DEFINE 절은 FROM 절
+	 * 밖 릴레이션의 컬럼을 이름으로 부를 수 없다: 한정자 자리를 패턴 변수가
+	 * 차지하고 있기 때문이다.
+	 */
+	Assert(!colname_is_fixed(rte));
+
+	/*
+	 * RTE 안에서, 그리고 예약된 것들과 비교해 고유한 이름을 고르고, 저장한 뒤
+	 * 예약한다.  같은 이름을 가진 같은 RTE 의 다른 컬럼에 대한 이후 참조 --
+	 * 뷰 아래에서 컬럼 이름이 바뀐 뒤라면 가능한 일이다 -- 는 여기서
+	 * name_N 을 받게 되며, DEFINE 절은 colinfo 에서 출력되므로 그 이름을
+	 * 그대로 따른다.
+	 */
+	expand_colnames_array_to(colinfo, attno);
+	colname = make_colname_unique(colname, dpns, colinfo);
+	colinfo->colnames[attno - 1] = colname;
+	reserve_colname(dpns, colname);
+}
+
+/*
+ * preset_input_colname: 조인 아래에서 그 조인의 한 컬럼에 대해 확정된 이름
+ *
+ * mark_define_columns() 는 DEFINE 참조가 가리키는 RTE 의 colnames 항목에
+ * 이름을 저장하며, 별칭 없는 INNER, LEFT, RIGHT JOIN 으로 타입 강제 변환 없이
+ * 병합된 컬럼에 대해서는 조인 자신이 아니라 그 조인의 입력 쪽에 저장한다.
+ * 병합된 컬럼은 양쪽에서 같은 이름을 가져야 하므로, set_using_names() 는 새
+ * 이름을 만들기 전에 입력 중 하나가 이미 이름을 확정했는지 여기서 묻는다.
+ * 조인 입력은 joinaliasvars 를 통해, 파서가 병합된 컬럼을 만든 방식 그대로
+ * 따라 내려간다.
+ */
+static char *
+preset_input_colname(deparse_namespace *dpns, int varno, AttrNumber attno)
+{
+	RangeTblEntry *rte;
+	deparse_columns *colinfo;
+
+	Assert(varno >= 1 && attno > 0);
+
+	colinfo = deparse_columns_fetch(varno, dpns);
+	if (attno <= colinfo->num_cols && colinfo->colnames[attno - 1] != NULL)
+		return colinfo->colnames[attno - 1];
+
+	rte = rt_fetch(varno, dpns->rtable);
+	if (rte->rtekind == RTE_JOIN &&
+		attno <= list_length(rte->joinaliasvars))
+	{
+		Node	   *aliasvar = (Node *) list_nth(rte->joinaliasvars, attno - 1);
+		List	   *vars = pull_var_clause(aliasvar, 0);
+		ListCell   *lc;
+
+		foreach(lc, vars)
+		{
+			Var		   *var = (Var *) lfirst(lc);
+			char	   *colname;
+
+			colname = preset_input_colname(dpns, var->varno, var->varattno);
+			if (colname != NULL)
+				return colname;
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * reserve_colname: 다른 어떤 RTE 도 이 컬럼 이름을 갖지 못하게 한다
+ */
+static void
+reserve_colname(deparse_namespace *dpns, char *colname)
+{
+	ListCell   *lc;
+
+	foreach(lc, dpns->using_names)
+	{
+		if (strcmp((char *) lfirst(lc), colname) == 0)
+			return;
+	}
+	dpns->using_names = lappend(dpns->using_names, colname);
+}
+
+/*
+ * function_rte_late_colnames: 질의가 파싱된 이후 함수 RTE 의 결과 타입에
+ * 늘어난 컬럼들의 이름
+ *
+ * expandRTE() 는 파싱 시점에 기록된 컬럼 개수에서 멈추므로, 그 이후에 타입에
+ * 늘어난 컬럼은 디파서가 다루는 목록에 없다.  그럼에도 그것은 지금 그 RTE 가
+ * 가진 컬럼이다: 출력된 그대로 해석되어야 하는 이름 -- 전역적으로 고유한
+ * USING 이름이나 DEFINE 절이 읽는 이름 -- 은 그 컬럼을 피해야 하며, 컬럼 별칭
+ * 목록은 위치 기반이므로 위쪽의 별칭 붙은 조인이 자신의 목록을 이 목록 위에
+ * 끝에서 끝까지 겹쳐 놓기 때문에 늘어난 컬럼도 세어 넣어야 한다.
+ *
+ * 함수가 하나이고 WITH ORDINALITY 가 없는 경우가 아니면 NIL 을 반환한다; 그런
+ * 경우에만 늘어난 컬럼이 RTE 의 끝에 놓이기 때문이다.  그 밖의 경우에는
+ * 중간에 놓여, 이 질의가 파싱될 때의 attno 를 밀어낸다.
+ */
+static List *
+function_rte_late_colnames(RangeTblEntry *rte)
+{
+	RangeTblFunction *rtfunc;
+	TypeFuncClass functypclass;
+	Oid			funcrettype;
+	TupleDesc	tupdesc;
+	List	   *result = NIL;
+	int			i;
+
+	if (rte->funcordinality || list_length(rte->functions) != 1)
+		return NIL;
+
+	rtfunc = (RangeTblFunction *) linitial(rte->functions);
+
+	/* coldeflist 는 컬럼 집합을 고정하고, 반환 타입을 RECORD 로 고정한다 */
+	if (rtfunc->funccolnames != NIL)
+		return NIL;
+
+	functypclass = get_expr_result_type(rtfunc->funcexpr, &funcrettype,
+										&tupdesc);
+	if (functypclass != TYPEFUNC_COMPOSITE &&
+		functypclass != TYPEFUNC_COMPOSITE_DOMAIN)
+		return NIL;
+
+	for (i = rtfunc->funccolcount; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+		/* 드롭된 컬럼은 expandRTE() 와 같은 방식으로 표기한다 */
+		if (attr->attisdropped)
+			result = lappend(result, makeString(pstrdup("")));
+		else
+			result = lappend(result,
+							 makeString(pstrdup(NameStr(attr->attname))));
+	}
+
+	return result;
 }
 
 /*
@@ -4441,6 +4874,15 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			/* Since we're not creating Vars, rtindex etc. don't matter */
 			expandRTE(rte, 1, 0, VAR_RETURNING_DEFAULT, -1,
 					  true /* include dropped */ , &colnames, NULL);
+
+			/*
+			 * 파싱 시점 이후 결과 타입에 늘어난 컬럼도 함께 가져온다: 이들도
+			 * 지금 그 RTE 가 가진 컬럼이므로, 출력된 그대로 해석되어야 하는
+			 * 이름은 이들도 피해야 하며, 별칭 목록은 위치 기반이므로 전부
+			 * 출력한다.
+			 */
+			colnames = list_concat(colnames,
+								   function_rte_late_colnames(rte));
 		}
 		else
 			colnames = rte->eref->colnames;
@@ -4519,8 +4961,17 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			else
 				colname = real_colname;
 
-			/* Unique-ify and insert into colinfo */
-			colname = make_colname_unique(colname, dpns, colinfo);
+			/*
+			 * 고유하게 만들어 colinfo 에 넣는다, 단 이것이 어떤 이름 변경도
+			 * 닿을 수 없는 컬럼이면 예외다: FROM 절 밖의 릴레이션 RTE 는 컬럼
+			 * 별칭 목록을 실어 나를 곳이 없으므로, 이름이 바뀐 컬럼은
+			 * 참조되는 곳에서만 출력에 나타나며 존재하지 않는 컬럼을 가리키게
+			 * 된다.  다른 종류들은 inFromCl 이 꺼진 채로 여기 도달해도 여전히
+			 * 출력되는데, 그 중에는 INSERT ...  SELECT 가 읽어오는 서브쿼리도
+			 * 있으므로, 이들은 예전처럼 이름이 바뀐다.
+			 */
+			if (!colname_is_fixed(rte))
+				colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
 			add_to_names_hash(colinfo, colname);
@@ -4553,17 +5004,17 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 	 * are different from the underlying "real" names.  For a function RTE,
 	 * always emit a complete column alias list; this is to protect against
 	 * possible instability of the default column names (eg, from altering
-	 * parameter names).  For tablefunc RTEs, we never print aliases, because
-	 * the column names are part of the clause itself.  For other RTE types,
-	 * print if we changed anything OR if there were user-written column
-	 * aliases (since the latter would be part of the underlying "reality").
+	 * parameter names).  For other RTE types, print if we changed anything OR
+	 * if there were user-written column aliases (since the latter would be
+	 * part of the underlying "reality").  tablefunc RTE 도 그 중 하나다: 그
+	 * 절은 자신이 만들어내는 컬럼의 이름을 짓지만, 다른 것과 마찬가지로 컬럼
+	 * 별칭 목록을 받아들이며, 컬럼 이름이 한 번이라도 바뀌어야 했다면 그
+	 * 목록이 필요하다.
 	 */
 	if (rte->rtekind == RTE_RELATION)
 		colinfo->printaliases = changed_any;
 	else if (rte->rtekind == RTE_FUNCTION)
 		colinfo->printaliases = true;
-	else if (rte->rtekind == RTE_TABLEFUNC)
-		colinfo->printaliases = false;
 	else if (rte->alias && rte->alias->colnames != NIL)
 		colinfo->printaliases = true;
 	else
@@ -4905,8 +5356,9 @@ colname_is_unique(const char *colname, deparse_namespace *dpns,
 	}
 
 	/*
-	 * Also check against USING-column names that must be globally unique.
-	 * These are not hashed, but there should be few of them.
+	 * 질의 레벨 전체에서 예약된 이름들과도 비교한다: 전역적으로 고유해야 하는
+	 * USING 컬럼 이름과, DEFINE 절이 읽는 이름들이다.  수가 적을 것으로
+	 * 예상되므로 해시하지 않는다.
 	 */
 	foreach(lc, dpns->using_names)
 	{
@@ -5488,6 +5940,7 @@ make_ruledef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc,
 		context.indentLevel = PRETTYINDENT_STD;
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
+		context.inRPRDefine = false;
 		context.varInOrderBy = false;
 		context.appendparents = NULL;
 
@@ -5651,10 +6104,28 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	 */
 	if (query->hasGroupRTE)
 	{
+		ListCell   *lc;
+
 		query->targetList = (List *)
 			flatten_group_exprs(NULL, query, (Node *) query->targetList);
 		query->havingQual =
 			flatten_group_exprs(NULL, query, query->havingQual);
+
+		/*
+		 * 행 패턴 DEFINE 절은 자신만의 GROUP Var 를 담고 있다; 이를 펼치지
+		 * 않으면 디파스된 텍스트가 사용자가 작성한 표현식이 아니라 그룹화
+		 * 단계를 가리키게 되어, 뷰가 다시 파싱되지 않는다.
+		 */
+		foreach(lc, query->windowClause)
+		{
+			WindowClause *wc = lfirst_node(WindowClause, lc);
+
+			if (wc->defineClause != NIL)
+				wc->defineClause = (List *)
+					flatten_group_exprs(NULL, query, (Node *) wc->defineClause);
+		}
+
+		collapse_define_join_vars(query);
 	}
 
 	/*
@@ -5680,6 +6151,7 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	context.indentLevel = startIndent;
 	context.colNamesVisible = colNamesVisible;
 	context.inGroupBy = false;
+	context.inRPRDefine = false;
 	context.varInOrderBy = false;
 	context.appendparents = NULL;
 
@@ -6749,6 +7221,169 @@ get_rule_orderby(List *orderList, List *targetList,
 }
 
 /*
+ * 패턴 노드의 수량자 문자열을 덧붙이는 헬퍼 함수
+ */
+static void
+append_pattern_quantifier(StringInfo buf, RPRPatternNode *node)
+{
+	bool		has_quantifier = true;
+
+	if (node->min == 1 && node->max == 1)
+	{
+		/* {1,1} = 수량자 없음 */
+		has_quantifier = false;
+	}
+	else if (node->min == 0 && node->max == RPR_QUANTITY_INF)
+		appendStringInfoChar(buf, '*');
+	else if (node->min == 1 && node->max == RPR_QUANTITY_INF)
+		appendStringInfoChar(buf, '+');
+	else if (node->min == 0 && node->max == 1)
+		appendStringInfoChar(buf, '?');
+	else if (node->max == RPR_QUANTITY_INF)
+		appendStringInfo(buf, "{%d,}", node->min);
+	else if (node->min == node->max)
+		appendStringInfo(buf, "{%d}", node->min);
+	else
+		appendStringInfo(buf, "{%d,%d}", node->min, node->max);
+
+	if (node->reluctant)
+	{
+		if (!has_quantifier)
+			appendStringInfoString(buf, "{1}"); /* reluctant ?를
+												 * 모호하지 않게 함 */
+		appendStringInfoChar(buf, '?');
+	}
+}
+
+/*
+ * quote_pattern_variable
+ *		quote_identifier() 와 비슷하지만, PERMUTE 도 인용한다.
+ *
+ * PERMUTE 는 비예약어이므로 quote_identifier() 는 이를 그대로 두지만, PATTERN
+ * 안에서 '('가 뒤따르는 맨 permute 는 지원되지 않는 PERMUTE 구문으로 다시
+ * 읽혀 버린다.
+ *
+ * EXPLAIN 은 컴파일된 패턴을 자신의 프린터로 디파스하므로, 이 함수도
+ * 호출한다; 패턴의 두 표기는 반드시 일치해야 한다.
+ */
+const char *
+quote_pattern_variable(const char *varName)
+{
+	const char *result = quote_identifier(varName);
+
+	if (result == varName && strcmp(varName, "permute") == 0)
+		result = psprintf("\"%s\"", varName);
+
+	return result;
+}
+
+/*
+ * RPRPatternNode 트리를 출력하는 재귀 헬퍼
+ */
+static void
+get_rule_pattern_node(RPRPatternNode *node, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+	const char *sep;
+
+	Assert(node != NULL);
+
+	switch (node->nodeType)
+	{
+		case RPR_PATTERN_VAR:
+			appendStringInfoString(buf, quote_pattern_variable(node->varName));
+			append_pattern_quantifier(buf, node);
+			break;
+
+		case RPR_PATTERN_SEQ:
+			sep = "";
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				appendStringInfoString(buf, sep);
+				get_rule_pattern_node(child, context);
+				sep = " ";
+			}
+			break;
+
+		case RPR_PATTERN_ALT:
+			sep = "";
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				appendStringInfoString(buf, sep);
+				get_rule_pattern_node(child, context);
+				sep = " | ";
+			}
+			break;
+
+		case RPR_PATTERN_GROUP:
+			appendStringInfoChar(buf, '(');
+			sep = "";
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				appendStringInfoString(buf, sep);
+				get_rule_pattern_node(child, context);
+				sep = " ";
+			}
+			appendStringInfoChar(buf, ')');
+			append_pattern_quantifier(buf, node);
+			break;
+	}
+}
+
+/*
+ * PATTERN 절을 출력한다.
+ */
+static void
+get_rule_pattern(RPRPatternNode *rpPattern, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+
+	appendStringInfoChar(buf, '(');
+	get_rule_pattern_node(rpPattern, context);
+	appendStringInfoChar(buf, ')');
+}
+
+/*
+ * DEFINE 절을 출력한다.
+ */
+static void
+get_rule_define(List *defineClause, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+	const char *sep = "  ";
+	bool		save_inrprdefine = context->inRPRDefine;
+	bool		save_varprefix = context->varprefix;
+
+	/*
+	 * DEFINE 절 안에서 수식되지 않은 prev/next/first/last 는 탐색 연산이므로,
+	 * 그런 이름을 가진 사용자 함수는 재파싱에서 살아남으려면 스키마로
+	 * 수식되어야 한다; generate_function_name() 을 참고한다.
+	 */
+	context->inRPRDefine = true;
+
+	/*
+	 * DEFINE 절이 참조하는 컬럼은 테이블/스키마로 수식할 수 없다: 한정자
+	 * 자리는 패턴 변수를 위한 것이므로, 맨 컬럼 이름을 출력한다.
+	 */
+	context->varprefix = false;
+
+	/*
+	 * 여기서 이름은 항상 AS 가 뒤따르므로 PERMUTE 구성을 시작할 수 없고,
+	 * 그래서 평범한 quote_identifier() 로 충분하다: 같은 변수라도 여기서는
+	 * 그대로, PATTERN 에서는 인용되어 출력될 수 있다.
+	 */
+	foreach_node(TargetEntry, te, defineClause)
+	{
+		appendStringInfo(buf, "%s%s AS ", sep, quote_identifier(te->resname));
+		get_rule_expr((Node *) te->expr, context, false);
+		sep = ",\n  ";
+	}
+
+	context->varprefix = save_varprefix;
+	context->inRPRDefine = save_inrprdefine;
+}
+
+/*
  * Display a WINDOW clause.
  *
  * Note that the windowClause list might contain only anonymous window
@@ -6837,6 +7472,28 @@ get_rule_windowspec(WindowClause *wc, List *targetList,
 								 wc->startOffset, wc->endOffset,
 								 context);
 	}
+
+	/* RPR 절은 자신만의 줄에서 시작하므로 구분 공백이 필요 없다 */
+	if (wc->rpPattern)
+	{
+		if (wc->rpSkipTo == ST_NEXT_ROW)
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP TO NEXT ROW");
+		else
+		{
+			Assert(wc->rpSkipTo == ST_PAST_LAST_ROW);
+
+			appendStringInfoString(buf,
+								   "\n  AFTER MATCH SKIP PAST LAST ROW");
+		}
+
+		appendStringInfoString(buf, "\n  INITIAL\n  PATTERN ");
+		get_rule_pattern(wc->rpPattern, context);
+
+		appendStringInfoString(buf, "\n  DEFINE\n");
+		get_rule_define(wc->defineClause, context);
+	}
+
 	appendStringInfoChar(buf, ')');
 }
 
@@ -6932,6 +7589,7 @@ get_window_frame_options_for_explain(int frameOptions,
 	context.indentLevel = 0;
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
+	context.inRPRDefine = false;
 	context.varInOrderBy = false;
 	context.appendparents = NULL;
 
@@ -8913,6 +9571,7 @@ isSimpleNode(Node *node, Node *parentNode, int prettyFlags)
 		case T_FuncExpr:
 		case T_JsonConstructorExpr:
 		case T_JsonExpr:
+		case T_RPRNavExpr:
 			/* function-like: name(..) or name[..] */
 			return true;
 
@@ -9406,6 +10065,89 @@ get_rule_expr(Node *node, deparse_context *context,
 
 		case T_FuncExpr:
 			get_func_expr((FuncExpr *) node, context, showimplicit);
+			break;
+
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *nav = (RPRNavExpr *) node;
+				const char *outer_func = NULL;
+				const char *inner_func;
+
+				switch (nav->kind)
+				{
+					case RPR_NAV_PREV:
+						inner_func = "PREV(";
+						break;
+					case RPR_NAV_NEXT:
+						inner_func = "NEXT(";
+						break;
+					case RPR_NAV_FIRST:
+						inner_func = "FIRST(";
+						break;
+					case RPR_NAV_LAST:
+						inner_func = "LAST(";
+						break;
+					case RPR_NAV_PREV_FIRST:
+						outer_func = "PREV(";
+						inner_func = "FIRST(";
+						break;
+					case RPR_NAV_PREV_LAST:
+						outer_func = "PREV(";
+						inner_func = "LAST(";
+						break;
+					case RPR_NAV_NEXT_FIRST:
+						outer_func = "NEXT(";
+						inner_func = "FIRST(";
+						break;
+					case RPR_NAV_NEXT_LAST:
+						outer_func = "NEXT(";
+						inner_func = "LAST(";
+						break;
+					default:
+						elog(ERROR, "unrecognized RPR navigation kind: %d",
+							 nav->kind);
+						inner_func = NULL;	/* 컴파일러 경고를 막는다 */
+						break;
+				}
+
+				if (outer_func != NULL)
+				{
+					/*
+					 * 복합: PREV(FIRST(arg [, inner_offset]) [,
+					 * outer_offset])
+					 */
+					appendStringInfoString(buf, outer_func);
+					appendStringInfoString(buf, inner_func);
+					get_rule_expr((Node *) nav->arg, context, showimplicit);
+					if (nav->offset_arg != NULL)
+					{
+						appendStringInfoString(buf, ", ");
+						get_rule_expr((Node *) nav->offset_arg, context,
+									  showimplicit);
+					}
+					appendStringInfoChar(buf, ')');
+					if (nav->compound_offset_arg != NULL)
+					{
+						appendStringInfoString(buf, ", ");
+						get_rule_expr((Node *) nav->compound_offset_arg,
+									  context, showimplicit);
+					}
+					appendStringInfoChar(buf, ')');
+				}
+				else
+				{
+					/* 단순: FUNC(arg [, offset]) */
+					appendStringInfoString(buf, inner_func);
+					get_rule_expr((Node *) nav->arg, context, showimplicit);
+					if (nav->offset_arg != NULL)
+					{
+						appendStringInfoString(buf, ", ");
+						get_rule_expr((Node *) nav->offset_arg, context,
+									  showimplicit);
+					}
+					appendStringInfoChar(buf, ')');
+				}
+			}
 			break;
 
 		case T_NamedArgExpr:
@@ -10900,7 +11642,8 @@ get_func_expr(FuncExpr *expr, deparse_context *context,
 											argnames, argtypes,
 											expr->funcvariadic,
 											&use_variadic,
-											context->inGroupBy));
+											context->inGroupBy,
+											context->inRPRDefine));
 	nargs = 0;
 	foreach(l, expr->args)
 	{
@@ -10970,7 +11713,8 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 		funcname = generate_function_name(aggref->aggfnoid, nargs, NIL,
 										  argtypes, aggref->aggvariadic,
 										  &use_variadic,
-										  context->inGroupBy);
+										  context->inGroupBy,
+										  context->inRPRDefine);
 
 	/* Print the aggregate name, schema-qualified if needed */
 	appendStringInfo(buf, "%s(%s", funcname,
@@ -11111,7 +11855,8 @@ get_windowfunc_expr_helper(WindowFunc *wfunc, deparse_context *context,
 	if (!funcname)
 		funcname = generate_function_name(wfunc->winfnoid, nargs, argnames,
 										  argtypes, false, NULL,
-										  context->inGroupBy);
+										  context->inGroupBy,
+										  context->inRPRDefine);
 
 	appendStringInfo(buf, "%s(", funcname);
 
@@ -13024,7 +13769,7 @@ get_tablesample_def(TableSampleClause *tablesample, deparse_context *context)
 	appendStringInfo(buf, " TABLESAMPLE %s (",
 					 generate_function_name(tablesample->tsmhandler, 1,
 											NIL, argtypes,
-											false, NULL, false));
+											false, NULL, false, false));
 
 	nargs = 0;
 	foreach(l, tablesample->args)
@@ -13438,12 +14183,14 @@ generate_qualified_relation_name(Oid relid)
  *
  * inGroupBy must be true if we're deparsing a GROUP BY clause.
  *
+ * RPR DEFINE 절을 디파스하는 중이라면 inRPRDefine 이 true 여야 한다.
+ *
  * The result includes all necessary quoting and schema-prefixing.
  */
 static char *
 generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 					   bool has_variadic, bool *use_variadic_p,
-					   bool inGroupBy)
+					   bool inGroupBy, bool inRPRDefine)
 {
 	char	   *result;
 	HeapTuple	proctup;
@@ -13474,6 +14221,21 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	if (inGroupBy)
 	{
 		if (strcmp(proname, "cube") == 0 || strcmp(proname, "rollup") == 0)
+			force_qualify = true;
+	}
+
+	/*
+	 * 행 패턴 DEFINE 절 안에서는, 파서가 어떤 카탈로그 조회보다도 먼저
+	 * 수식되지 않은 prev/next/first/last 를 탐색 연산에 묶어 버리므로, 그런
+	 * 이름을 가진 사용자 함수에 대한 수식되지 않은 호출은 디파스/재파싱
+	 * 과정에서 의미가 바뀌어 버린다.  스키마 수식을 강제한다; 수식된 형태가
+	 * 공식적으로 문서화된 탈출구다.  정확히 소문자인 이름만 위험하다:
+	 * 대소문자가 섞인 proname 은 인용된 채로 디파스되므로 파서의 소문자
+	 * 비교와 맞을 수 없다.
+	 */
+	if (inRPRDefine)
+	{
+		if (is_rpr_navigation_name(proname))
 			force_qualify = true;
 	}
 

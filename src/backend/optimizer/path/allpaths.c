@@ -2457,6 +2457,16 @@ find_window_run_conditions(Query *subquery, AttrNumber attno,
 	wclause = (WindowClause *) list_nth(subquery->windowClause,
 										wfunc->winref - 1);
 
+	/*
+	 * 행 패턴 인식 윈도우라면 Run Condition을 푸시다운할 수 없다. 이 경우
+	 * 윈도우 파티션(또는 프레임)이 여러 개의 축소된 프레임으로 나뉘며, 각
+	 * 프레임은 파티션의 끝(또는 프레임 전체의 끝)까지 평가되어야 한다.  이는
+	 * 특정 경우에 윈도우 함수 평가를 멈추게 하므로 Run Condition 최적화를
+	 * 적용할 수 없다는 뜻이다.
+	 */
+	if (wclause->rpPattern != NULL)
+		return false;
+
 	req.type = T_SupportRequestWFuncMonotonic;
 	req.window_func = wfunc;
 	req.window_clause = wclause;

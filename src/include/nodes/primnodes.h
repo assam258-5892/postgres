@@ -645,6 +645,64 @@ typedef struct WindowFuncRunCondition
 } WindowFuncRunCondition;
 
 /*
+ * RPRNavExpr
+ *
+ * RPR DEFINE 절 안의 PREV/NEXT/FIRST/LAST 내비게이션 호출을 나타낸다.  표현식
+ * 컴파일 시점에 이는 일반 함수 호출이 아니라 EEOP_RPR_NAV_SET /
+ * EEOP_RPR_NAV_RESTORE 옵코드로 변환된다.
+ *
+ * 단순 내비게이션(PREV/NEXT/FIRST/LAST):
+ *   kind: RPR_NAV_PREV, RPR_NAV_NEXT, RPR_NAV_FIRST, 또는 RPR_NAV_LAST arg:
+ *   대상 행에 대해 평가할 표현식
+ *   offset_arg: 명시적 오프셋 표현식(선택, 2-인자 형태); 1-인자
+ *               형태에서는 NULL(암묵적 오프셋: PREV/NEXT는 1, FIRST/LAST는 0)
+ *
+ * 복합 내비게이션(FIRST/LAST를 감싸는 PREV/NEXT):
+ *   kind:              RPR_NAV_PREV_FIRST, PREV_LAST, NEXT_FIRST, NEXT_LAST
+ *   arg: 최종 대상 행에 대해 평가할 표현식 offset_arg: 내부
+ *   오프셋(FIRST/LAST), NULL = 암묵적 기본값 compound_offset_arg: 외부
+ *   오프셋(PREV/NEXT), NULL = 암묵적 기본값
+ *
+ * 복합 대상 계산:
+ *   PREV_FIRST: (match_start + inner) - outer
+ *   NEXT_FIRST: (match_start + inner) + outer
+ *   PREV_LAST:  (currentpos  - inner) - outer
+ *   NEXT_LAST:  (currentpos  - inner) + outer
+ */
+typedef enum RPRNavKind
+{
+	RPR_NAV_PREV,				/* 오프셋 기본값: 1 */
+	RPR_NAV_NEXT,				/* 오프셋 기본값: 1 */
+	RPR_NAV_FIRST,				/* 오프셋 기본값: 0 */
+	RPR_NAV_LAST,				/* 오프셋 기본값: 0 */
+	/* 복합: outer(inner(arg)) */
+	RPR_NAV_PREV_FIRST,			/* (offset, compound_offset) 기본값: (0, 1) */
+	RPR_NAV_PREV_LAST,			/* (offset, compound_offset) 기본값: (0, 1) */
+	RPR_NAV_NEXT_FIRST,			/* (offset, compound_offset) 기본값: (0, 1) */
+	RPR_NAV_NEXT_LAST,			/* (offset, compound_offset) 기본값: (0, 1) */
+} RPRNavKind;
+
+typedef struct RPRNavExpr
+{
+	Expr		xpr;
+	RPRNavKind	kind;			/* 내비게이션 종류 */
+	Expr	   *arg;			/* 인자 표현식 */
+	Expr	   *offset_arg;		/* 오프셋 표현식, 기본값이면 NULL */
+	Expr	   *compound_offset_arg;	/* 복합 내비게이션의 외부 오프셋,
+										 * 기본값이면 NULL */
+
+	/* WindowAgg 내에서 고유한 ID; 플래너가 배정하기 전까지는 -1 */
+	int			navno pg_node_attr(query_jumble_ignore);
+
+	/* 결과 타입(arg의 타입과 동일) */
+	Oid			resulttype pg_node_attr(query_jumble_ignore);
+	/* 결과의 collation OID */
+	Oid			resultcollid pg_node_attr(query_jumble_ignore);
+	/* 토큰 위치, 알 수 없으면 -1 */
+	ParseLoc	location;
+} RPRNavExpr;
+
+/*
  * MergeSupportFunc
  *
  * A MergeSupportFunc is a merge support function expression that can only

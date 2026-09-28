@@ -51,6 +51,7 @@ typedef enum ParseExprKind
 	EXPR_KIND_WINDOW_FRAME_RANGE,	/* window frame clause with RANGE */
 	EXPR_KIND_WINDOW_FRAME_ROWS,	/* window frame clause with ROWS */
 	EXPR_KIND_WINDOW_FRAME_GROUPS,	/* window frame clause with GROUPS */
+	EXPR_KIND_RPR_DEFINE,		/* DEFINE */
 	EXPR_KIND_SELECT_TARGET,	/* SELECT target list item */
 	EXPR_KIND_INSERT_TARGET,	/* INSERT target list item */
 	EXPR_KIND_UPDATE_SOURCE,	/* UPDATE assignment source item */
@@ -162,6 +163,17 @@ typedef Node *(*CoerceParamHook) (ParseState *pstate, Param *param,
  * p_expr_kind: kind of expression we're currently parsing, as per enum above;
  * EXPR_KIND_NONE when not in an expression.
  *
+ * p_rpr_define: 이 질의 레벨의 행 패턴 DEFINE 표현식 안 어디에든 있는 동안
+ * true 이다.  p_expr_kind 는 가장 안쪽 절만을 가리키므로, 조건 안에 중첩된
+ * 구성체가 자신만의 kind 를 설정하는 순간 -- FILTER 와 집계의 ORDER BY 가
+ * 모두 그렇게 한다 -- EXPR_KIND_RPR_DEFINE 을 더 이상 가리키지 않게 된다.
+ * DEFINE 제약은 조건 전체에 적용되므로, 그 대신 이 필드를 검사한다. 이 필드는
+ * 서브 select 의 ParseState 에 상속되지 않으며, 이는 올바르다: 그 제약은 질의
+ * 경계에서 멈추기 때문이다.
+ *
+ * p_rpr_pattern_vars: 현재 파싱 중인 DEFINE 표현식이 속한 PATTERN 의 행 패턴
+ * 변수 이름들이다; p_rpr_define 이 false 이면 NIL 이다.
+ *
  * p_next_resno: next TargetEntry.resno to assign, starting from 1.
  *
  * p_multiassign_exprs: partially-processed MultiAssignRef source expressions.
@@ -207,6 +219,8 @@ struct ParseState
 	ParseNamespaceItem *p_grouping_nsitem;	/* NSItem for grouping, or NULL */
 	List	   *p_windowdefs;	/* raw representations of window clauses */
 	ParseExprKind p_expr_kind;	/* what kind of expression we're parsing */
+	bool		p_rpr_define;	/* 행 패턴 DEFINE 표현식 내부인가? */
+	List	   *p_rpr_pattern_vars; /* 행 패턴 변수 이름 */
 	int			p_next_resno;	/* next targetlist resno to assign */
 	List	   *p_multiassign_exprs;	/* junk tlist entries for multiassign */
 	List	   *p_locking_clause;	/* raw FOR UPDATE/FOR SHARE info */

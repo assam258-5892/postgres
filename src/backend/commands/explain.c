@@ -30,6 +30,7 @@
 #include "nodes/extensible.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "optimizer/rpr.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteHandler.h"
@@ -119,6 +120,14 @@ static void show_window_def(WindowAggState *planstate,
 static void show_window_keys(StringInfo buf, PlanState *planstate,
 							 int nkeys, AttrNumber *keycols,
 							 List *ancestors, ExplainState *es);
+static void append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem);
+static char *deparse_rpr_pattern(RPRPattern *pattern);
+static void deparse_rpr_seq(RPRPattern *pattern, int start, int limit,
+							StringInfo buf);
+static int	deparse_rpr_node(RPRPattern *pattern, int idx, int limit,
+							 StringInfo buf);
+static int	rpr_match_end(RPRPattern *pattern, int beginIdx);
+static int	rpr_alt_scope_end(RPRPattern *pattern, int idx);
 static void show_storage_info(char *maxStorageType, int64 maxSpaceUsed,
 							  ExplainState *es);
 static void show_tablesample(TableSampleClause *tsc, PlanState *planstate,
@@ -129,6 +138,7 @@ static void show_incremental_sort_info(IncrementalSortState *incrsortstate,
 static void show_hash_info(HashState *hashstate, ExplainState *es);
 static void show_material_info(MaterialState *mstate, ExplainState *es);
 static void show_windowagg_info(WindowAggState *winstate, ExplainState *es);
+static void show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es);
 static void show_ctescan_info(CteScanState *ctescanstate, ExplainState *es);
 static void show_table_func_scan_info(TableFuncScanState *tscanstate,
 									  ExplainState *es);
@@ -2896,6 +2906,239 @@ show_sortorder_options(StringInfo buf, Node *sortexpr,
 }
 
 /*
+ * 패턴 요소에 수량자 접미사를 덧붙인다.
+ */
+static void
+append_rpr_quantifier(StringInfo buf, RPRPatternElement *elem)
+{
+	/* {1,1}이 아니면 수량자를 덧붙인다 */
+	if (elem->min == 0 && RPRElemIsUnbounded(elem))
+		appendStringInfoChar(buf, '*');
+	else if (elem->min == 1 && RPRElemIsUnbounded(elem))
+		appendStringInfoChar(buf, '+');
+	else if (elem->min == 0 && elem->max == 1)
+		appendStringInfoChar(buf, '?');
+	else if (RPRElemIsUnbounded(elem))
+		appendStringInfo(buf, "{%d,}", elem->min);
+	else if (elem->min == elem->max && elem->min != 1)
+		appendStringInfo(buf, "{%d}", elem->min);
+	else if (elem->min != 1 || elem->max != 1)
+		appendStringInfo(buf, "{%d,%d}", elem->min, elem->max);
+
+	/* 고정 개수는 탐욕적으로 정규화되므로 '?'를 {0,1}로 읽을 수 없다 */
+	if (RPRElemIsReluctant(elem))
+	{
+		Assert(elem->min != elem->max);
+		appendStringInfoChar(buf, '?');
+	}
+
+	/*
+	 * 흡수 마커를 덧붙인다: 판단 지점에는 #, 흡수 가능 영역에는 ~를 쓴다.  두
+	 * 문자 모두 단독 패턴 변수 이름에는 나타날 수 없고, 이 문자를 포함하는
+	 * 이름은 quote_identifier()가 항상 큰따옴표로 묶으므로 마커가 이름의
+	 * 일부로 읽히는 일은 없다.
+	 */
+	if (RPRElemIsAbsorbable(elem))
+	{
+		Assert(RPRElemIsUnbounded(elem));
+		appendStringInfoChar(buf, '#');
+	}
+	else if (RPRElemIsAbsorbableBranch(elem))
+		appendStringInfoChar(buf, '~');
+}
+
+/*
+ * 컴파일된 RPRPattern(바이트코드)을 패턴 문자열로 다시 디파스한다.
+ *
+ * 평평한 RPRPatternElement[] 배열을 재귀 하강 방식으로 순회한다.  각 구문은
+ * 상속받은 [start, limit) 구간 안에서 디파스되는데, 이 경계는 호출자가
+ * 넘겨주므로 각 구문의 범위는 호출자에 의해 고정된다.  순회를 이끄는 신호는
+ * 세 가지다:
+ *
+ *   - GROUP 본문의 끝은 depth를 통해 rpr_match_end()로 구하고, ALT의 스코프
+ *     끝은 SEP 체인을 통해 rpr_alt_scope_end()로 구한다.
+ *   - 분기 경계("|"가 들어갈 위치)는 ALT의 SEP 체인에서 나온다: 각 분기는
+ *     jump가 다음 분기의 SEP로 이어지는 SEP로 끝나며(마지막은 -1), 따라서
+ *     분기는 자신의 내용 시작부터 해당 SEP까지 이어진다.
+ *   - 괄호는 구조(BEGIN 그룹, ALT)에서 나오며, 여기에 단독 ALT를 감싸는
+ *     그룹을 위한 한 단계 룩어헤드가 더해진다.
+ *
+ * depth와 SEP 체인은 컴파일러가 분기 꼬리와 중첩된 교대에 부여하는 next/jump
+ * 값과 무관하게 안정적이며, 이 때문에 스코프와 분기 경계를 고정하는 기준으로
+ * 쓰기에 적합하다.
+ *
+ * EXPLAIN은 모든 ALT를 각각 괄호로 묶으므로, 최상위 "A | B"는 "(a | b)"로
+ * 디파스된다. 이 자기 일관적인 EXPLAIN 형식이 여기서 정합성을 판단하는
+ * 기준이며, pg_get_viewdef 함수는 다르다: 그쪽의 괄호는 오직 이를 감싸는
+ * GROUP에서만 나온다.  흡수 마커(# ~)는 이와 무관하며
+ * append_rpr_quantifier()가 처리한다.
+ *
+ * 두 가지 컴파일러 불변조건이 전체에 걸쳐 성립한다: {1,1} 그룹은 바이트코드
+ * 생성 전에 풀리므로(따라서 모든 BEGIN/END 그룹은 자명하지 않은 수량자를
+ * 가지며, 그룹 안의 단독 ALT는 항상 그룹의 END까지 이어진다) 그룹의 수량자는
+ * END 요소에서 읽는다(BEGIN의 사본은 무시한다).
+ */
+static char *
+deparse_rpr_pattern(RPRPattern *pattern)
+{
+	StringInfoData buf;
+
+	Assert(pattern != NULL && pattern->numElements >= 2);
+
+	initStringInfo(&buf);
+	deparse_rpr_seq(pattern, 0, pattern->numElements, &buf);
+	return buf.data;
+}
+
+/*
+ * [start, limit) 구간의 형제 요소들을 공백으로 구분해 디파스한다.
+ *
+ * limit에 도달하거나 FIN 종료자를 만나면 멈춘다(최상위 호출은 limit을
+ * numElements 값으로 넘기며, 이때 마지막 요소가 FIN이다).
+ */
+static void
+deparse_rpr_seq(RPRPattern *pattern, int start, int limit, StringInfo buf)
+{
+	int			i = start;
+	bool		first = true;
+
+	while (i < limit && !RPRElemIsFin(&pattern->elements[i]))
+	{
+		if (!first)
+			appendStringInfoChar(buf, ' ');
+		first = false;
+		i = deparse_rpr_node(pattern, i, limit, buf);
+	}
+}
+
+/*
+ * idx 위치에서 시작하는 구문 하나를 상속받은 limit 범위 안에서 디파스한다.
+ * 반환값은 그 구문 바로 다음 인덱스다.
+ *
+ * VAR는 이름과 수량자로 이루어진다.  BEGIN은 대응하는 END까지 (rpr_match_end)
+ * 이어지는 그룹을 연다.  그룹의 유일한 자식이 END까지 이어지는 ALT라면 괄호는
+ * 그 ALT가 제공하고 그룹은 수량자만 더하며, 그렇지 않으면 그룹 본문을
+ * 자체적으로 "( )"로 감싼다.  ALT는 (상속받은 limit로 제한되는) SEP 체인
+ * 스코프 끝까지 이어지며 "( b1 | b2 | ... )"를 출력하고, 각 분기는 그 SEP
+ * 체인이 넘겨주는 경계 안에서 디파스된다.
+ */
+static int
+deparse_rpr_node(RPRPattern *pattern, int idx, int limit, StringInfo buf)
+{
+	RPRPatternElement *elem = &pattern->elements[idx];
+
+	if (RPRElemIsVar(elem))
+	{
+		Assert(elem->varId < pattern->numVars);
+		appendStringInfoString(buf,
+							   quote_pattern_variable(pattern->varNames[elem->varId]));
+		append_rpr_quantifier(buf, elem);
+		return idx + 1;
+	}
+
+	if (RPRElemIsBegin(elem))
+	{
+		int			end = rpr_match_end(pattern, idx);
+		bool		loneAlt;
+
+		loneAlt = (idx + 1 < end &&
+				   RPRElemIsAlt(&pattern->elements[idx + 1]) &&
+				   rpr_alt_scope_end(pattern, idx + 1) == end);
+
+		if (loneAlt)
+		{
+			/* ALT 자식이 이미 그룹 본문 전체를 괄호로 감싼 상태다. */
+			(void) deparse_rpr_node(pattern, idx + 1, end, buf);
+		}
+		else
+		{
+			appendStringInfoChar(buf, '(');
+			deparse_rpr_seq(pattern, idx + 1, end, buf);
+			appendStringInfoChar(buf, ')');
+		}
+		append_rpr_quantifier(buf, &pattern->elements[end]);
+		return end + 1;
+	}
+
+	if (RPRElemIsAlt(elem))
+	{
+		int			altEnd = rpr_alt_scope_end(pattern, idx);
+		int			branchStart;
+		int			sepIdx;
+		bool		first = true;
+
+		/* 교대의 SEP 체인 스코프 끝은 limit을 절대 넘지 않는다 */
+		Assert(altEnd <= limit);
+
+		appendStringInfoChar(buf, '(');
+		branchStart = elem->next;
+		sepIdx = elem->jump;
+		while (sepIdx != RPR_ELEMIDX_INVALID)
+		{
+			RPRPatternElement *sepElem = &pattern->elements[sepIdx];
+
+			/* 분기는 그 분기를 끝내는 SEP까지 이어진다 */
+			Assert(RPRElemIsSep(sepElem));
+			if (!first)
+				appendStringInfoString(buf, " | ");
+			first = false;
+			deparse_rpr_seq(pattern, branchStart, sepIdx, buf);
+
+			/* 마지막 분기의 SEP는 링크가 없어 순회가 끝난다 */
+			branchStart = sepElem->next;
+			sepIdx = sepElem->jump;
+		}
+		appendStringInfoChar(buf, ')');
+		return altEnd;
+	}
+
+	pg_unreachable();			/* 노드는 VAR, BEGIN, ALT로만 시작한다 */
+}
+
+/*
+ * beginIdx 위치에 있는 BEGIN이 여는 그룹을 닫는 END를 찾는다: 앞으로
+ * 스캔하면서 만나는, 같은 depth의 첫 END다.
+ */
+static int
+rpr_match_end(RPRPattern *pattern, int beginIdx)
+{
+	RPRDepth	d = pattern->elements[beginIdx].depth;
+	int			i;
+
+	for (i = beginIdx + 1; i < pattern->numElements; i++)
+	{
+		RPRPatternElement *e = &pattern->elements[i];
+
+		if (RPRElemIsEnd(e) && e->depth == d)
+			return i;
+	}
+	pg_unreachable();			/* BEGIN에는 항상 대응하는 END가 있다 */
+}
+
+/*
+ * idx에 있는 교대 마커의 스코프 끝: 마지막 분기 바로 다음 요소다.
+ * ALT.jump에서 시작해 마지막 SEP(jump가 invalid)까지 SEP 체인을 따라가면, 그
+ * SEP 바로 다음 요소가 post-ALT 요소다.  항상 ALT에 대해서만 호출된다.
+ *
+ * SEP의 next가 아니라 "last SEP index + 1"을 쓴다: 중첩된 ALT의 경우
+ * fillRPRPatternAlt 함수의 분기 탈출 수정에 의해 마지막 SEP의 next는 *감싸는*
+ * 교대를 지나친 위치로 재지정되지만, 마지막 SEP는 교대의 마지막 요소로
+ * 출력되므로 그 다음 인덱스는 항상 이 ALT 자신의 post-ALT 요소다.
+ */
+static int
+rpr_alt_scope_end(RPRPattern *pattern, int idx)
+{
+	int			sepIdx;
+
+	Assert(RPRElemIsAlt(&pattern->elements[idx]));
+
+	sepIdx = pattern->elements[idx].jump;
+	while (pattern->elements[sepIdx].jump != RPR_ELEMIDX_INVALID)
+		sepIdx = pattern->elements[sepIdx].jump;
+	return sepIdx + 1;
+}
+
+/*
  * Show the window definition for a WindowAgg node.
  */
 static void
@@ -2953,6 +3196,60 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 	appendStringInfoChar(&wbuf, ')');
 	ExplainPropertyText("Window", wbuf.data, es);
 	pfree(wbuf.data);
+
+	/* 있으면 행 패턴 인식(RPR) 패턴을 보여준다 */
+	if (wagg->rpPattern != NULL)
+	{
+		char	   *patternStr = deparse_rpr_pattern(wagg->rpPattern);
+
+		ExplainPropertyText("Pattern", patternStr, es);
+
+		pfree(patternStr);
+
+		/*
+		 * 튜플스토어 trim을 위한 내비게이션 오프셋은 실행기 초기화 단계에서
+		 * 결정되며, 이는 일반 EXPLAIN에서도 실행되므로 planstate에서 이미
+		 * 결정된 값과 그 종류를 읽는다.
+		 */
+		if (planstate->hasMaxNav)
+		{
+			switch (planstate->navMaxOffsetKind)
+			{
+				case RPR_NAV_OFFSET_NEEDS_EVAL:
+					ExplainPropertyText("Nav Mark Lookback", "runtime", es);
+					break;
+				case RPR_NAV_OFFSET_RETAIN_ALL:
+					ExplainPropertyText("Nav Mark Lookback", "retain all", es);
+					break;
+				case RPR_NAV_OFFSET_FIXED:
+					ExplainPropertyInteger("Nav Mark Lookback", NULL,
+										   planstate->navMaxOffset, es);
+					break;
+			}
+		}
+
+		if (planstate->hasFirstNav)
+		{
+			switch (planstate->navFirstOffsetKind)
+			{
+				case RPR_NAV_OFFSET_NEEDS_EVAL:
+					ExplainPropertyText("Nav Mark Lookahead", "runtime", es);
+					break;
+				case RPR_NAV_OFFSET_FIXED:
+					if (planstate->navFirstOffset == PG_INT64_MAX)
+						ExplainPropertyText("Nav Mark Lookahead", "infinite", es);
+					else
+						ExplainPropertyInteger("Nav Mark Lookahead", NULL,
+											   planstate->navFirstOffset, es);
+					break;
+				case RPR_NAV_OFFSET_RETAIN_ALL:
+					/* 전방 도달 범위는 무한하므로 retain all이 되는
+					 * 경우는 없다 */
+					Assert(false);
+					break;
+			}
+		}
+	}
 }
 
 /*
@@ -3510,6 +3807,7 @@ show_windowagg_info(WindowAggState *winstate, ExplainState *es)
 {
 	char	   *maxStorageType;
 	int64		maxSpaceUsed;
+	WindowAgg  *wagg = (WindowAgg *) winstate->ss.ps.plan;
 
 	Tuplestorestate *tupstore = winstate->buffer;
 
@@ -3522,6 +3820,160 @@ show_windowagg_info(WindowAggState *winstate, ExplainState *es)
 
 	tuplestore_get_stats(tupstore, &maxStorageType, &maxSpaceUsed);
 	show_storage_info(maxStorageType, maxSpaceUsed, es);
+
+	/* 행 패턴 인식(RPR)의 NFA 통계를 보여준다 */
+	if (wagg->rpPattern != NULL)
+		show_rpr_nfa_stats(winstate, es);
+}
+
+/*
+ * WindowAgg 노드에서 행 패턴 인식(RPR)의 NFA 통계를 보여준다.
+ */
+static void
+show_rpr_nfa_stats(WindowAggState *winstate, ExplainState *es)
+{
+	if (es->format != EXPLAIN_FORMAT_TEXT)
+	{
+		/* 상태 및 컨텍스트 카운터 */
+		ExplainPropertyInteger("NFA States Peak", NULL, winstate->nfaStatesMax, es);
+		ExplainPropertyInteger("NFA States Total", NULL, winstate->nfaStatesTotalCreated, es);
+		ExplainPropertyInteger("NFA States Merged", NULL, winstate->nfaStatesMerged, es);
+		ExplainPropertyInteger("NFA Contexts Peak", NULL, winstate->nfaContextsMax, es);
+		ExplainPropertyInteger("NFA Contexts Total", NULL, winstate->nfaContextsTotalCreated, es);
+		ExplainPropertyInteger("NFA Contexts Absorbed", NULL, winstate->nfaContextsAbsorbed, es);
+		ExplainPropertyInteger("NFA Contexts Skipped", NULL, winstate->nfaContextsSkipped, es);
+		ExplainPropertyInteger("NFA Contexts Pruned", NULL, winstate->nfaContextsPruned, es);
+
+		/* 매치/미스매치 개수와 길이 통계 */
+		ExplainPropertyInteger("NFA Matched", NULL, winstate->nfaMatchesSucceeded, es);
+		ExplainPropertyInteger("NFA Mismatched", NULL, winstate->nfaMatchesFailed, es);
+		if (winstate->nfaMatchesSucceeded > 0)
+		{
+			ExplainPropertyInteger("NFA Match Length Min", NULL, winstate->nfaMatchLen.min, es);
+			ExplainPropertyInteger("NFA Match Length Max", NULL, winstate->nfaMatchLen.max, es);
+			ExplainPropertyFloat("NFA Match Length Avg", NULL,
+								 (double) winstate->nfaMatchLen.total / winstate->nfaMatchesSucceeded, 1,
+								 es);
+		}
+		if (winstate->nfaMatchesFailed > 0)
+		{
+			ExplainPropertyInteger("NFA Mismatch Length Min", NULL, winstate->nfaFailLen.min, es);
+			ExplainPropertyInteger("NFA Mismatch Length Max", NULL, winstate->nfaFailLen.max, es);
+			ExplainPropertyFloat("NFA Mismatch Length Avg", NULL,
+								 (double) winstate->nfaFailLen.total / winstate->nfaMatchesFailed, 1,
+								 es);
+		}
+
+		/* 흡수/건너뜀 컨텍스트 길이 통계 */
+		if (winstate->nfaContextsAbsorbed > 0)
+		{
+			ExplainPropertyInteger("NFA Absorbed Length Min", NULL, winstate->nfaAbsorbedLen.min, es);
+			ExplainPropertyInteger("NFA Absorbed Length Max", NULL, winstate->nfaAbsorbedLen.max, es);
+			ExplainPropertyFloat("NFA Absorbed Length Avg", NULL,
+								 (double) winstate->nfaAbsorbedLen.total / winstate->nfaContextsAbsorbed, 1,
+								 es);
+		}
+		if (winstate->nfaContextsSkipped > 0)
+		{
+			ExplainPropertyInteger("NFA Skipped Length Min", NULL, winstate->nfaSkippedLen.min, es);
+			ExplainPropertyInteger("NFA Skipped Length Max", NULL, winstate->nfaSkippedLen.max, es);
+			ExplainPropertyFloat("NFA Skipped Length Avg", NULL,
+								 (double) winstate->nfaSkippedLen.total / winstate->nfaContextsSkipped, 1,
+								 es);
+		}
+	}
+	else
+	{
+		/* 상태 및 컨텍스트 카운터 */
+		ExplainIndentText(es);
+		appendStringInfo(es->str,
+						 "NFA States: " INT64_FORMAT " peak, " INT64_FORMAT " total, " INT64_FORMAT " merged\n",
+						 winstate->nfaStatesMax,
+						 winstate->nfaStatesTotalCreated,
+						 winstate->nfaStatesMerged);
+		ExplainIndentText(es);
+		appendStringInfo(es->str,
+						 "NFA Contexts: " INT64_FORMAT " peak, " INT64_FORMAT " total, " INT64_FORMAT " pruned\n",
+						 winstate->nfaContextsMax,
+						 winstate->nfaContextsTotalCreated,
+						 winstate->nfaContextsPruned);
+
+		/* 매치/미스매치 개수와 길이 최소/최대/평균 */
+		ExplainIndentText(es);
+		appendStringInfoString(es->str, "NFA: ");
+		if (winstate->nfaMatchesSucceeded > 0)
+		{
+			double		avgLen = (double) winstate->nfaMatchLen.total / winstate->nfaMatchesSucceeded;
+
+			appendStringInfo(es->str,
+							 INT64_FORMAT " matched (len " INT64_FORMAT "/" INT64_FORMAT "/%.1f)",
+							 winstate->nfaMatchesSucceeded,
+							 winstate->nfaMatchLen.min,
+							 winstate->nfaMatchLen.max,
+							 avgLen);
+		}
+		else
+		{
+			appendStringInfoString(es->str, "0 matched");
+		}
+		if (winstate->nfaMatchesFailed > 0)
+		{
+			double		avgFail = (double) winstate->nfaFailLen.total / winstate->nfaMatchesFailed;
+
+			appendStringInfo(es->str,
+							 ", " INT64_FORMAT " mismatched (len " INT64_FORMAT "/" INT64_FORMAT "/%.1f)",
+							 winstate->nfaMatchesFailed,
+							 winstate->nfaFailLen.min,
+							 winstate->nfaFailLen.max,
+							 avgFail);
+		}
+		else
+		{
+			appendStringInfoString(es->str, ", 0 mismatched");
+		}
+		appendStringInfoChar(es->str, '\n');
+
+		/* 흡수/건너뜀 컨텍스트 길이 통계 */
+		if (winstate->nfaContextsAbsorbed > 0 || winstate->nfaContextsSkipped > 0)
+		{
+			ExplainIndentText(es);
+			appendStringInfoString(es->str, "NFA: ");
+
+			if (winstate->nfaContextsAbsorbed > 0)
+			{
+				double		avgAbsorbed = (double) winstate->nfaAbsorbedLen.total / winstate->nfaContextsAbsorbed;
+
+				appendStringInfo(es->str,
+								 INT64_FORMAT " absorbed (len " INT64_FORMAT "/" INT64_FORMAT "/%.1f)",
+								 winstate->nfaContextsAbsorbed,
+								 winstate->nfaAbsorbedLen.min,
+								 winstate->nfaAbsorbedLen.max,
+								 avgAbsorbed);
+			}
+			else
+			{
+				appendStringInfoString(es->str, "0 absorbed");
+			}
+
+			if (winstate->nfaContextsSkipped > 0)
+			{
+				double		avgSkipped = (double) winstate->nfaSkippedLen.total / winstate->nfaContextsSkipped;
+
+				appendStringInfo(es->str,
+								 ", " INT64_FORMAT " skipped (len " INT64_FORMAT "/" INT64_FORMAT "/%.1f)",
+								 winstate->nfaContextsSkipped,
+								 winstate->nfaSkippedLen.min,
+								 winstate->nfaSkippedLen.max,
+								 avgSkipped);
+			}
+			else
+			{
+				appendStringInfoString(es->str, ", 0 skipped");
+			}
+
+			appendStringInfoChar(es->str, '\n');
+		}
+	}
 }
 
 /*

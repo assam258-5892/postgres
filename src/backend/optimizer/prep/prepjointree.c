@@ -2596,6 +2596,13 @@ perform_pullup_replace_vars(PlannerInfo *root,
 	parse->returningList = (List *)
 		pullup_replace_vars((Node *) parse->returningList, rvcontext);
 
+	foreach_node(WindowClause, wc, parse->windowClause)
+	{
+		if (wc->defineClause != NIL)
+			wc->defineClause = (List *)
+				pullup_replace_vars((Node *) wc->defineClause, rvcontext);
+	}
+
 	if (parse->onConflict)
 	{
 		parse->onConflict->onConflictSet = (List *)
@@ -2798,9 +2805,15 @@ pullup_replace_vars_callback(const Var *var,
 	 * a Var or PlaceHolderVar that we can just add the nullingrels to).  We
 	 * also need one if the caller has instructed us that certain expression
 	 * replacements need to be wrapped for identification purposes.
+	 *
+	 * 행 패턴 내비게이션 연산의 인자 아래에 있는 Var도 마찬가지로 하나가
+	 * 필요한데, 행에 의존하지 않는 치환이 그대로 접혀 들어가지 않도록 하기
+	 * 위해서다: 그 인자는 이 행이 아니라 내비게이션이 도달하는 행을 읽기
+	 * 때문이다.
 	 */
 	need_phv = (var->varnullingrels != NULL) ||
-		(rcon->wrap_option != REPLACE_WRAP_NONE);
+		(rcon->wrap_option != REPLACE_WRAP_NONE) ||
+		context->in_rpr_nav_arg;
 
 	/*
 	 * If PlaceHolderVars are needed, we cache the modified expressions in

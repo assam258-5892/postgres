@@ -48,6 +48,9 @@ static void unify_hypothetical_args(ParseState *pstate,
 									List *fargs, int numAggregatedArgs,
 									Oid *actual_arg_types, Oid *declared_arg_types);
 static Oid	FuncNameAsType(List *funcname);
+static Node *ParseRPRNavCall(ParseState *pstate, List *funcname,
+							 List *fargs, List *argnames, FuncCall *fn,
+							 int location);
 static Node *ParseComplexProjection(ParseState *pstate, const char *funcname,
 									Node *first_arg, int location);
 static Oid	LookupFuncNameInternal(ObjectType objtype, List *funcname,
@@ -121,6 +124,7 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	int			fgc_flags;
 	char		aggkind = 0;
 	ParseCallbackState pcbstate;
+	bool		could_be_rpr_nav = false;
 
 	/*
 	 * If there's an aggregate filter, transform it using transformWhereClause
@@ -218,6 +222,22 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	}
 
 	/*
+	 * RPR DEFINE 절 안에서는, 행 패턴 탐색 이름 PREV/NEXT/FIRST/LAST 중
+	 * 하나에 대한 수식되지 않은 호출은 일반 함수가 아니라 탐색 연산을
+	 * 가리킨다.  여기서는 그 사실만 기록해 둔다; 카탈로그 조회는 건너뛰고
+	 * 공통 장식(decoration) 검사가 끝난 뒤 마지막에 RPRNavExpr 을 만든다
+	 * (아래의 could_be_rpr_nav 처리를 참고한다).  이들 이름의 일반 함수에
+	 * 도달하는 명시적인 방법은 스키마로 수식된 호출이다.
+	 */
+	if (!is_column && !proc_call &&
+		pstate->p_rpr_define &&
+		list_length(funcname) == 1)
+	{
+		if (is_rpr_navigation_name(strVal(linitial(funcname))))
+			could_be_rpr_nav = true;
+	}
+
+	/*
 	 * Decide whether it's legitimate to consider the construct to be a column
 	 * projection.  For that, there has to be a single argument of complex
 	 * type, the function name must not be qualified, and there cannot be any
@@ -265,17 +285,32 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 	 * with default arguments.
 	 */
 
-	setup_parser_errposition_callback(&pcbstate, pstate, location);
+	if (!could_be_rpr_nav)
+	{
+		setup_parser_errposition_callback(&pcbstate, pstate, location);
 
-	fdresult = func_get_detail(funcname, fargs, argnames, nargs,
-							   actual_arg_types,
-							   !func_variadic, true, proc_call,
-							   &fgc_flags,
-							   &funcid, &rettype, &retset,
-							   &nvargs, &vatype,
-							   &declared_arg_types, &argdefaults);
+		fdresult = func_get_detail(funcname, fargs, argnames, nargs,
+								   actual_arg_types,
+								   !func_variadic, true, proc_call,
+								   &fgc_flags,
+								   &funcid, &rettype, &retset,
+								   &nvargs, &vatype,
+								   &declared_arg_types, &argdefaults);
 
-	cancel_parser_errposition_callback(&pcbstate);
+		cancel_parser_errposition_callback(&pcbstate);
+	}
+	else
+	{
+		/*
+		 * 인식된 탐색 이름은 카탈로그 조회를 완전히 건너뛴다.  아래의
+		 * 공통적인 wrong-kind-of-routine 및 장식 검사가 기존 메시지 그대로
+		 * 실행되도록 일단 일반 함수처럼 취급한 다음, RPRNavExpr 을 만들기
+		 * 위해 ParseRPRNavCall 로 넘긴다.
+		 */
+		Assert(!proc_call);
+
+		fdresult = FUNCDETAIL_NORMAL;
+	}
 
 	/*
 	 * Check for various wrong-kind-of-routine cases.
@@ -655,6 +690,15 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 												 proc_call),
 					 parser_errposition(pstate, location)));
 	}
+
+	/*
+	 * 인식된 탐색 이름은 이제 위의 공통 장식 검사와 wrong-kind 검사를
+	 * 통과했다; RPRNavExpr 을 만든다.  여기서는 함수 해석으로 다시 돌아가는
+	 * 일이 결코 일어나지 않는다.
+	 */
+	if (could_be_rpr_nav)
+		return ParseRPRNavCall(pstate, funcname, fargs, argnames, fn,
+							   location);
 
 	/*
 	 * If there are default arguments, we have to include their types in
@@ -2090,6 +2134,170 @@ FuncNameAsType(List *funcname)
 }
 
 /*
+ * is_rpr_navigation_name
+ *		이 수식되지 않은, 파서가 소문자로 바꾼 이름은 DEFINE 절 안에서 행 패턴
+ *		탐색 연산인가?
+ *
+ * ruleutils.c 도 이들 이름 중 하나를 가진 사용자 함수를 언제 스키마로
+ * 수식해서 출력해야 하는지 결정할 때 같은 질문을 하므로, 양쪽이 하나의
+ * 목록을 공유한다.
+ */
+bool
+is_rpr_navigation_name(const char *name)
+{
+	return strcmp(name, "prev") == 0 ||
+		strcmp(name, "next") == 0 ||
+		strcmp(name, "first") == 0 ||
+		strcmp(name, "last") == 0;
+}
+
+/*
+ * ParseRPRNavCall
+ *		DEFINE 절 안의 행 패턴 탐색 연산을 인식한다.
+ *
+ * DEFINE 조건 안 어디에서든(중첩된 FILTER 나 집계의 ORDER BY 가
+ * p_expr_kind 를 바꿔 놓은 곳이라도 p_rpr_define 이 설정되어 있으면), 이름
+ * PREV/NEXT/FIRST/LAST 중 하나에 대한 수식되지 않은 호출은 일반 함수 호출이
+ * 아니라 그에 대응하는 행 패턴 탐색 연산(ISO/IEC 19075-5 Subclause 5.6) 을
+ * 가리킨다. 이 이름은 어떤 카탈로그 조회보다도 먼저 여기서 매칭되며, 함수
+ * 해석으로 돌아가는 fallback 은 없다: 일단 매칭되면 장식이나 인수 개수 위반은
+ * 같은 이름의 일반 함수가 대신 처리하게 두는 대신 하드 오류가 된다.  그 대신
+ * 그런 함수에 도달하는 공식적인 방법은 스키마로 수식된 호출이다(호출자가
+ * 우리를 수식되지 않은 이름으로 제한한다).
+ *
+ * 호출자는 이름이 네 가지 탐색 이름 중 하나와 매칭되고 ParseFuncOrColumn 의
+ * 공통 장식/wrong-kind 검사가 실행된 뒤에만 여기로 넘기므로, 이 함수는 항상
+ * RPRNavExpr 을 반환한다.
+ */
+static Node *
+ParseRPRNavCall(ParseState *pstate, List *funcname, List *fargs,
+				List *argnames, FuncCall *fn, int location)
+{
+	const char *name = strVal(linitial(funcname));
+	RPRNavKind	kind;
+	const char *navname;
+	int			nargs = list_length(fargs);
+	Node	   *arg;
+	RPRNavExpr *navexpr;
+
+	/* 파서가 소문자로 바꾼 식별자를 매칭한다; 아니면 탐색 이름 아님 */
+	if (strcmp(name, "prev") == 0)
+	{
+		kind = RPR_NAV_PREV;
+		navname = "PREV";
+	}
+	else if (strcmp(name, "next") == 0)
+	{
+		kind = RPR_NAV_NEXT;
+		navname = "NEXT";
+	}
+	else if (strcmp(name, "first") == 0)
+	{
+		kind = RPR_NAV_FIRST;
+		navname = "FIRST";
+	}
+	else if (strcmp(name, "last") == 0)
+	{
+		kind = RPR_NAV_LAST;
+		navname = "LAST";
+	}
+	else
+	{
+		/* 호출자는 네 이름 중 하나와 매칭된 뒤에만 여기로 넘긴다 */
+		pg_unreachable();
+		return NULL;
+	}
+
+	/*
+	 * 이름이 매칭되면 함수 해석으로 다시 돌아가는 일은 결코 없으므로, 탐색
+	 * 연산에 맞지 않는 장식은 모두 하드 오류다.  집계/윈도우 장식(agg_star,
+	 * DISTINCT, WITHIN GROUP, ORDER BY, FILTER, OVER, RESPECT/IGNORE
+	 * NULLS) 은 인식된 이름을 일반 함수로 취급한 ParseFuncOrColumn 의 공통
+	 * 경로에서 이미 거부되었다; 남은 것은 그 경로가 평범한 함수에는
+	 * 허용하지만 탐색 연산은 여전히 거부해야 하는 장식들이다.
+	 */
+	if (fn->func_variadic)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("cannot use VARIADIC with row pattern navigation function %s",
+						navname),
+				 parser_errposition(pstate, location)));
+	if (argnames != NIL)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("cannot use named arguments with row pattern navigation function %s",
+						navname),
+				 parser_errposition(pstate, location)));
+	/* 값 표현식과 선택적 offset 을 받는다 */
+	if (nargs == 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("too few arguments for row pattern navigation function %s",
+						navname),
+				 errdetail("%s takes a value expression and an optional offset argument.",
+						   navname),
+				 parser_errposition(pstate, location)));
+	if (nargs > 2)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("too many arguments for row pattern navigation function %s",
+						navname),
+				 errdetail("%s takes a value expression and an optional offset argument.",
+						   navname),
+				 parser_errposition(pstate, location)));
+
+	/*
+	 * anycompatible 계열과 같은 방식으로, 아직 타입을 모르는 첫 번째 인수를
+	 * text 로 해석한다.  탐색 연산은 다형(polymorphic) 함수가 아니므로 예전의
+	 * "could not determine polymorphic type" 오류는 해당하지 않는다; 타입을
+	 * 모르는 리터럴은 열 참조를 담을 수 없으므로, 워커는 나중에도 여전히
+	 * 이를 거부한다.
+	 */
+	arg = linitial(fargs);
+	if (exprType(arg) == UNKNOWNOID)
+		arg = coerce_to_common_type(pstate, arg, TEXTOID, navname);
+
+	navexpr = makeNode(RPRNavExpr);
+	navexpr->kind = kind;
+	navexpr->arg = (Expr *) arg;
+	navexpr->navno = -1;		/* 플래닝 중에 할당됨 */
+
+	/* 명시적 offset 은 int8 로 강제 변환되며, 실행기가 이를 읽는다 */
+	if (nargs == 2)
+	{
+		Node	   *offset = lsecond(fargs);
+		Oid			offtype = exprType(offset);
+
+		if (offtype != INT8OID)
+		{
+			Node	   *newoffset;
+
+			newoffset = coerce_to_target_type(pstate, offset, offtype,
+											  INT8OID, -1, COERCION_IMPLICIT,
+											  COERCE_IMPLICIT_CAST, -1);
+			if (newoffset == NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
+						 errmsg("offset argument of %s must be type %s, not type %s",
+								navname, "bigint", format_type_be(offtype)),
+						 parser_errposition(pstate, exprLocation(offset))));
+			offset = newoffset;
+		}
+		navexpr->offset_arg = (Expr *) offset;
+	}
+	else
+		navexpr->offset_arg = NULL;
+
+	/* compound_offset_arg 는 NULL 로 남는다;
+	 * define_walker 의 평탄화가 이를 채운다 */
+	navexpr->resulttype = exprType(arg);
+	/* resultcollid 는 parse_collate.c 가 설정한다 */
+	navexpr->location = location;
+
+	return (Node *) navexpr;
+}
+
+/*
  * ParseComplexProjection -
  *	  handles function calls with a single argument that is of complex type.
  *	  If the function call is actually a column projection, return a suitably
@@ -2840,6 +3048,9 @@ check_srf_call_placement(ParseState *pstate, Node *last_srf, int location)
 			err = _("set-returning functions are not allowed in column generation expressions");
 			break;
 		case EXPR_KIND_CYCLE_MARK:
+			errkind = true;
+			break;
+		case EXPR_KIND_RPR_DEFINE:
 			errkind = true;
 			break;
 

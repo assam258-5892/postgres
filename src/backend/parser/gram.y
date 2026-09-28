@@ -209,6 +209,12 @@ static void preprocess_pub_all_objtype_list(List *all_objects_list,
 static void preprocess_pubobj_list(List *pubobjspec_list,
 								   core_yyscan_t yyscanner);
 static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+static RPRPatternNode *makeRPRSeqOrSingle(List *children, int location);
+static RPRPatternNode *splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner);
+static RPRPatternNode *makeRPRQuantifier(int32 min, int32 max, bool reluctant,
+										 int location);
+static const char *rpr_invalid_quantifier_token(const char *tok);
+static bool rpr_is_quantifier_token(const char *tok);
 
 %}
 
@@ -692,6 +698,14 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 				json_object_constructor_null_clause_opt
 				json_array_constructor_null_clause_opt
 
+%type <target>	row_pattern_definition
+%type <node>	opt_row_pattern_common_syntax
+				row_pattern row_pattern_alt row_pattern_seq
+				row_pattern_term row_pattern_primary
+				row_pattern_quantifier_opt
+%type <list>	row_pattern_definition_list row_pattern_permute_list
+%type <ival>	opt_row_pattern_skip_to
+
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -734,7 +748,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
 
 	DATA_P DATABASE DAY_P DEALLOCATE DEC DECIMAL_P DECLARE DEFAULT DEFAULTS
-	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DEPENDS DEPTH DESC
+	DEFERRABLE DEFERRED DEFINE DEFINER DELETE_P DELIMITER DELIMITERS DEPENDS DEPTH DESC
 	DETACH DICTIONARY DISABLE_P DISCARD DISTINCT DO DOCUMENT_P DOMAIN_P
 	DOUBLE_P DROP
 
@@ -750,7 +764,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	HANDLER HAVING HEADER_P HOLD HOUR_P
 
 	IDENTITY_P IF_P IGNORE_P ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IMPORT_P IN_P INCLUDE
-	INCLUDING INCREMENT INDENT INDEX INDEXES INHERIT INHERITS INITIALLY INLINE_P
+	INCLUDING INCREMENT INDENT INDEX INDEXES INHERIT INHERITS INITIAL_P INITIALLY INLINE_P
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER
 	INTERSECT INTERVAL INTO INVOKER IS ISNULL ISOLATION
 
@@ -775,8 +789,8 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	ORDER ORDINALITY OTHERS OUT_P OUTER_P
 	OVER OVERLAPS OVERLAY OVERRIDING OWNED OWNER
 
-	PARALLEL PARAMETER PARSER PARTIAL PARTITION PASSING PASSWORD PATH
-	PERIOD PLACING PLAN PLANS POLICY
+	PARALLEL PARAMETER PARSER PARTIAL PARTITION PASSING PASSWORD PAST PATH
+	PATTERN_P PERIOD PERMUTE PLACING PLAN PLANS POLICY
 	POSITION PRECEDING PRECISION PRESERVE PREPARE PREPARED PRIMARY
 	PRIOR PRIVILEGES PROCEDURAL PROCEDURE PROCEDURES PROGRAM PUBLICATION
 
@@ -787,7 +801,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	RESET RESPECT_P RESTART RESTRICT RETURN RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLUP
 	ROUTINE ROUTINES ROW ROWS RULE
 
-	SAVEPOINT SCALAR SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT
+	SAVEPOINT SCALAR SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SEEK SELECT
 	SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHOW
 	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SOURCE SQL_P STABLE STANDALONE_P
@@ -870,8 +884,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * reference point for a precedence level that we can assign to other
  * keywords that lack a natural precedence level.
  *
- * We need to do this for PARTITION, RANGE, ROWS, and GROUPS to support
- * opt_existing_window_name (see comment there).
+ * opt_existing_window_name 을 지원하기 위해 PARTITION, RANGE, ROWS, GROUPS,
+ * AFTER, INITIAL, SEEK, PATTERN 에도 이 작업이 필요하다
+ * (그곳의 주석을 참고한다).
  *
  * The frame_bound productions UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING
  * are even messier: since UNBOUNDED is an unreserved keyword (per spec!),
@@ -897,11 +912,15 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  *
  * Like the UNBOUNDED PRECEDING/FOLLOWING case, NESTED is assigned a lower
  * precedence than PATH to fix ambiguity in the json_table production.
+ *
+ * PERMUTE '('가 PERMUTE 를 패턴 변수로 리듀스하는 대신 시프트하도록,
+ * PERMUTE 도 CUBE, ROLLUP 과 같은 방식으로 처리한다.
  */
 %nonassoc	UNBOUNDED NESTED /* ideally would have same precedence as IDENT */
 %nonassoc	IDENT PARTITION RANGE ROWS GROUPS PRECEDING FOLLOWING CUBE ROLLUP
 			SET KEYS OBJECT_P SCALAR VALUE_P WITH WITHOUT PATH
-%left		Op OPERATOR		/* multi-character ops and user-defined operators */
+			AFTER INITIAL_P SEEK PATTERN_P PERMUTE
+%left		Op OPERATOR '|'	/* multi-character ops and user-defined operators */
 %left		'+' '-'
 %left		'*' '/' '%'
 %left		'^'
@@ -15364,6 +15383,10 @@ a_expr:		c_expr									{ $$ = $1; }
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, ">=", $1, $3, @2); }
 			| a_expr NOT_EQUALS a_expr
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "<>", $1, $3, @2); }
+			| '|' a_expr
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "|", NULL, $2, @1); }
+			| a_expr '|' a_expr
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "|", $1, $3, @2); }
 
 			| a_expr qual_Op a_expr				%prec Op
 				{ $$ = (Node *) makeA_Expr(AEXPR_OP, $2, $1, $3, @2); }
@@ -15844,6 +15867,10 @@ b_expr:		c_expr
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, ">=", $1, $3, @2); }
 			| b_expr NOT_EQUALS b_expr
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "<>", $1, $3, @2); }
+			| '|' b_expr
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "|", NULL, $2, @1); }
+			| b_expr '|' b_expr
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "|", $1, $3, @2); }
 			| b_expr qual_Op b_expr				%prec Op
 				{ $$ = (Node *) makeA_Expr(AEXPR_OP, $2, $1, $3, @2); }
 			| qual_Op b_expr					%prec Op
@@ -16795,6 +16822,8 @@ over_clause: OVER window_specification
 					n->startOffset = NULL;
 					n->endOffset = NULL;
 					n->location = @2;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 			| /*EMPTY*/
@@ -16802,7 +16831,8 @@ over_clause: OVER window_specification
 		;
 
 window_specification: '(' opt_existing_window_name opt_partition_clause
-						opt_sort_clause opt_frame_clause ')'
+						opt_sort_clause opt_frame_clause
+						opt_row_pattern_common_syntax ')'
 				{
 					WindowDef  *n = makeNode(WindowDef);
 
@@ -16814,20 +16844,23 @@ window_specification: '(' opt_existing_window_name opt_partition_clause
 					n->frameOptions = $5->frameOptions;
 					n->startOffset = $5->startOffset;
 					n->endOffset = $5->endOffset;
+					n->frameLocation = $5->frameLocation;
+					n->excludeLocation = $5->excludeLocation;
+					n->rpCommonSyntax = (RPCommonSyntax *)$6;
 					n->location = @1;
 					$$ = n;
 				}
 		;
 
 /*
- * If we see PARTITION, RANGE, ROWS or GROUPS as the first token after the '('
- * of a window_specification, we want the assumption to be that there is
- * no existing_window_name; but those keywords are unreserved and so could
- * be ColIds.  We fix this by making them have the same precedence as IDENT
- * and giving the empty production here a slightly higher precedence, so
- * that the shift/reduce conflict is resolved in favor of reducing the rule.
- * These keywords are thus precluded from being an existing_window_name but
- * are not reserved for any other purpose.
+ * window_specification 의 '(' 다음 첫 토큰으로 PARTITION, RANGE, ROWS,
+ * GROUPS, AFTER, INITIAL, SEEK, PATTERN 중 하나가 보이면,
+ * existing_window_name 이 없다고 가정하고 싶다; 하지만 이 키워드들은
+ * 비예약어이므로 ColIds 일 수도 있다.  We fix this by making them have the
+ * same precedence as IDENT and giving the empty production here a slightly
+ * higher precedence, so that the shift/reduce conflict is resolved in favor
+ * of reducing the rule.  These keywords are thus precluded from being an
+ * existing_window_name but are not reserved for any other purpose.
  */
 opt_existing_window_name: ColId						{ $$ = $1; }
 			| /*EMPTY*/				%prec Op		{ $$ = NULL; }
@@ -16848,6 +16881,9 @@ opt_frame_clause:
 
 					n->frameOptions |= FRAMEOPTION_NONDEFAULT | FRAMEOPTION_RANGE;
 					n->frameOptions |= $3;
+					n->frameLocation = @1;
+					/* EXCLUDE 없으면 -1 (opt_window_exclusion_clause 는 0) */
+					n->excludeLocation = ($3 != 0) ? @3 : -1;
 					$$ = n;
 				}
 			| ROWS frame_extent opt_window_exclusion_clause
@@ -16856,6 +16892,9 @@ opt_frame_clause:
 
 					n->frameOptions |= FRAMEOPTION_NONDEFAULT | FRAMEOPTION_ROWS;
 					n->frameOptions |= $3;
+					n->frameLocation = @1;
+					/* EXCLUDE 없으면 -1 (opt_window_exclusion_clause 는 0) */
+					n->excludeLocation = ($3 != 0) ? @3 : -1;
 					$$ = n;
 				}
 			| GROUPS frame_extent opt_window_exclusion_clause
@@ -16864,6 +16903,9 @@ opt_frame_clause:
 
 					n->frameOptions |= FRAMEOPTION_NONDEFAULT | FRAMEOPTION_GROUPS;
 					n->frameOptions |= $3;
+					n->frameLocation = @1;
+					/* EXCLUDE 없으면 -1 (opt_window_exclusion_clause 는 0) */
+					n->excludeLocation = ($3 != 0) ? @3 : -1;
 					$$ = n;
 				}
 			| /*EMPTY*/
@@ -16873,6 +16915,8 @@ opt_frame_clause:
 					n->frameOptions = FRAMEOPTION_DEFAULTS;
 					n->startOffset = NULL;
 					n->endOffset = NULL;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 		;
@@ -16948,6 +16992,8 @@ frame_bound:
 					n->frameOptions = FRAMEOPTION_START_UNBOUNDED_PRECEDING;
 					n->startOffset = NULL;
 					n->endOffset = NULL;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 			| UNBOUNDED FOLLOWING
@@ -16957,6 +17003,8 @@ frame_bound:
 					n->frameOptions = FRAMEOPTION_START_UNBOUNDED_FOLLOWING;
 					n->startOffset = NULL;
 					n->endOffset = NULL;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 			| CURRENT_P ROW
@@ -16966,6 +17014,8 @@ frame_bound:
 					n->frameOptions = FRAMEOPTION_START_CURRENT_ROW;
 					n->startOffset = NULL;
 					n->endOffset = NULL;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 			| a_expr PRECEDING
@@ -16975,6 +17025,8 @@ frame_bound:
 					n->frameOptions = FRAMEOPTION_START_OFFSET_PRECEDING;
 					n->startOffset = $1;
 					n->endOffset = NULL;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 			| a_expr FOLLOWING
@@ -16984,6 +17036,8 @@ frame_bound:
 					n->frameOptions = FRAMEOPTION_START_OFFSET_FOLLOWING;
 					n->startOffset = $1;
 					n->endOffset = NULL;
+					n->frameLocation = -1;
+					n->excludeLocation = -1;
 					$$ = n;
 				}
 		;
@@ -16996,6 +17050,457 @@ opt_window_exclusion_clause:
 			| /*EMPTY*/				{ $$ = 0; }
 		;
 
+opt_row_pattern_common_syntax:
+opt_row_pattern_skip_to opt_row_pattern_initial_or_seek
+				PATTERN_P '(' row_pattern ')'
+				DEFINE row_pattern_definition_list
+			{
+				RPCommonSyntax *n = makeNode(RPCommonSyntax);
+				n->rpSkipTo = $1;
+				n->rpPattern = (RPRPatternNode *) $5;
+				n->rpDefs = $8;
+				n->location = @3;
+				$$ = (Node *) n;
+			}
+			| /*EMPTY*/		{ $$ = NULL; }
+		;
+
+opt_row_pattern_skip_to:
+			AFTER MATCH SKIP TO NEXT ROW
+				{
+					$$ = ST_NEXT_ROW;
+				}
+			| AFTER MATCH SKIP PAST LAST_P ROW
+				{
+					$$ = ST_PAST_LAST_ROW;
+				}
+			| /*EMPTY*/
+				{
+					$$ = ST_PAST_LAST_ROW;
+				}
+		;
+
+opt_row_pattern_initial_or_seek:
+			INITIAL_P
+			| SEEK
+				{
+					ereport(ERROR,
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("SEEK is not supported"),
+							errhint("Use INITIAL instead."),
+							parser_errposition(@1));
+				}
+			| /*EMPTY*/
+		;
+
+row_pattern:
+			row_pattern_alt						{ $$ = $1; }
+		;
+
+row_pattern_alt:
+			row_pattern_seq
+				{
+					$$ = (Node *) splitRPRTrailingAlt((RPRPatternNode *) $1,
+													 yyscanner);
+				}
+			| row_pattern_alt '|' row_pattern_seq
+				{
+					RPRPatternNode *lhs = castNode(RPRPatternNode, $1);
+					RPRPatternNode *rhs = splitRPRTrailingAlt(castNode(RPRPatternNode, $3),
+															 yyscanner);
+
+					/* 왼쪽이 이미 ALT 이면 여기에 덧붙인다 */
+					if (lhs->nodeType == RPR_PATTERN_ALT)
+					{
+						lhs->children = lappend(lhs->children, rhs);
+						$$ = (Node *) lhs;
+					}
+					else
+					{
+						RPRPatternNode *n = makeNode(RPRPatternNode);
+
+						n->nodeType = RPR_PATTERN_ALT;
+						n->children = list_make2(lhs, rhs);
+						n->min = 1;
+						n->max = 1;
+						n->reluctant = false;
+						n->location = @1;
+						$$ = (Node *) n;
+					}
+				}
+		;
+
+row_pattern_seq:
+			row_pattern_term					{ $$ = $1; }
+			| row_pattern_seq row_pattern_term
+				{
+					RPRPatternNode *seq = castNode(RPRPatternNode, $1);
+
+					/*
+					 * 왼쪽이 이미 SEQ 이면 여기에 덧붙인다.  결합된 수량자의
+					 * trailing_alt 는 자식 term 에 남으며; seq 가 완성되면
+					 * row_pattern_alt 가 이를 기준으로 분리한다.
+					 */
+					if (seq->nodeType == RPR_PATTERN_SEQ)
+					{
+						seq->children = lappend(seq->children, $2);
+						$$ = (Node *) seq;
+					}
+					else
+					{
+						RPRPatternNode *n = makeNode(RPRPatternNode);
+
+						n->nodeType = RPR_PATTERN_SEQ;
+						n->children = list_make2(seq, $2);
+						n->min = 1;
+						n->max = 1;
+						n->reluctant = false;
+						n->location = @1;
+						$$ = (Node *) n;
+					}
+				}
+		;
+
+row_pattern_term:
+			row_pattern_primary row_pattern_quantifier_opt
+				{
+					RPRPatternNode *n = (RPRPatternNode *) $1;
+					RPRPatternNode *q = (RPRPatternNode *) $2;
+
+					n->min = q->min;
+					n->max = q->max;
+					n->reluctant = q->reluctant;
+					n->trailing_alt = q->trailing_alt;
+					$$ = (Node *) n;
+				}
+		;
+
+row_pattern_primary:
+			ColId
+				{
+					RPRPatternNode *n = makeNode(RPRPatternNode);
+					n->nodeType = RPR_PATTERN_VAR;
+					n->varName = $1;
+					n->min = 1;
+					n->max = 1;
+					n->reluctant = false;
+					n->children = NIL;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| '(' row_pattern ')'
+				{
+					RPRPatternNode *inner = (RPRPatternNode *) $2;
+					RPRPatternNode *n = makeNode(RPRPatternNode);
+					n->nodeType = RPR_PATTERN_GROUP;
+					n->children = list_make1(inner);
+					n->min = 1;
+					n->max = 1;
+					n->reluctant = false;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| PERMUTE '(' row_pattern_permute_list ')'
+				{
+					ereport(ERROR,
+							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("PERMUTE is not supported"),
+							errhint("Write the alternations out instead, or write \"permute\" to use it as a pattern variable."),
+							parser_errposition(@1));
+					$$ = NULL;		/* 컴파일러 경고를 막는다 */
+				}
+		;
+
+row_pattern_permute_list:
+			row_pattern							{ $$ = list_make1($1); }
+			| row_pattern_permute_list ',' row_pattern
+				{ $$ = lappend($1, $3); }
+		;
+
+row_pattern_quantifier_opt:
+			/*EMPTY*/
+				{
+					/*
+					 * 수량자가 없으면 정확히 한 번을 의미한다; min=max=1 은
+					 * 결코 오류를 내지 않으므로 @$는 쓰이지 않는다.
+					 */
+					$$ = (Node *) makeRPRQuantifier(1, 1, false, @$);
+				}
+			| '*'
+				{
+					$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, false, @1);
+				}
+			| '+'
+				{
+					$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, false, @1);
+				}
+			| Op
+				{
+					/* 단일 Op 처리: ? 또는 reluctant 수량자 *?, +?, ?? */
+					if (strcmp($1, "?") == 0)
+						$$ = (Node *) makeRPRQuantifier(0, 1, false, @1);
+					else if (strcmp($1, "*?") == 0)
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
+					else if (strcmp($1, "+?") == 0)
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
+					else if (strcmp($1, "??") == 0)
+						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
+					else if (strcmp($1, "*|") == 0)
+					{
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, false, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else if (strcmp($1, "+|") == 0)
+					{
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, false, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else if (strcmp($1, "?|") == 0)
+					{
+						$$ = (Node *) makeRPRQuantifier(0, 1, false, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else if (strcmp($1, "*?|") == 0)
+					{
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else if (strcmp($1, "+?|") == 0)
+					{
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else if (strcmp($1, "??|") == 0)
+					{
+						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid quantifier \"%s\"", rpr_invalid_quantifier_token($1)),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@1));
+				}
+			/* RELUCTANT 수량자 (렉서가 토큰을 분리하는 경우) */
+			| '*' Op
+				{
+					if (strcmp($2, "?") == 0)
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
+					else if (strcmp($2, "?|") == 0)
+					{
+						/* "A* ?|B" = reluctant "A*?"와 alternation 의 결합 */
+						$$ = (Node *) makeRPRQuantifier(0, RPR_QUANTITY_INF, true, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after \"*\" quantifier", rpr_invalid_quantifier_token($2)),
+								errhint("Did you mean \"*?\" for reluctant quantifier?"),
+								parser_errposition(@2));
+				}
+			| '+' Op
+				{
+					if (strcmp($2, "?") == 0)
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
+					else if (strcmp($2, "?|") == 0)
+					{
+						/* "A+ ?|B" = reluctant "A+?"와 alternation 의 결합 */
+						$$ = (Node *) makeRPRQuantifier(1, RPR_QUANTITY_INF, true, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after \"+\" quantifier", rpr_invalid_quantifier_token($2)),
+								errhint("Did you mean \"+?\" for reluctant quantifier?"),
+								parser_errposition(@2));
+				}
+			| Op Op
+				{
+					if (!rpr_is_quantifier_token($1))
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid quantifier \"%s\"", rpr_invalid_quantifier_token($1)),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@1));
+					/*
+					 * "|"로 끝나는 첫 토큰은 alternation 연산자를 담고
+					 * 있으므로, 그 뒤에 오는 것은 패턴이어야 한다.  Op 는
+					 * 결코 패턴이 될 수 없으며, 이 쌍에 이름을 붙이면 토큰이
+					 * 절반만 표현하는 수량자를 설명하는 셈이 된다.
+					 */
+					if (strchr($1, '|') != NULL)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("alternation operator \"|\" requires a pattern on both sides"),
+								parser_errposition(@2));
+					if (strcmp($1, "?") != 0)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after \"%s\" quantifier",
+									   rpr_invalid_quantifier_token($2), $1),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@2));
+					if (strcmp($2, "?") == 0)
+						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
+					else if (strcmp($2, "?|") == 0)
+					{
+						/* "A? ?|B" = reluctant "A??"와 alternation 의 결합 */
+						$$ = (Node *) makeRPRQuantifier(0, 1, true, @1);
+						((RPRPatternNode *) $$)->trailing_alt = true;
+					}
+					else
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after \"?\" quantifier", rpr_invalid_quantifier_token($2)),
+								errhint("Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally followed by \"?\" for the reluctant version."),
+								parser_errposition(@2));
+				}
+			/* {n}, {n,}, {,m}, {n,m} 수량자 */
+			| '{' Iconst '}'
+				{
+					if ($2 <= 0 || $2 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@2));
+					$$ = (Node *) makeRPRQuantifier($2, $2, false, @1);
+				}
+			| '{' Iconst ',' '}'
+				{
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@2));
+					$$ = (Node *) makeRPRQuantifier($2, RPR_QUANTITY_INF, false, @1);
+				}
+			| '{' ',' Iconst '}'
+				{
+					if ($3 <= 0 || $3 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@3));
+					$$ = (Node *) makeRPRQuantifier(0, $3, false, @1);
+				}
+			| '{' Iconst ',' Iconst '}'
+				{
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@2));
+					if ($4 <= 0 || $4 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@4));
+					if ($2 > $4)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier minimum bound must not exceed maximum"),
+								parser_errposition(@2));
+					$$ = (Node *) makeRPRQuantifier($2, $4, false, @1);
+				}
+			/* Reluctant 버전: {n}?, {n,}?, {,m}?, {n,m}? */
+			| '{' Iconst '}' Op
+				{
+					if (strcmp($4, "?") != 0 && strcmp($4, "?|") != 0)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($4)),
+								errhint("Only \"?\" is allowed after {n} to make it reluctant."),
+								parser_errposition(@4));
+					if ($2 <= 0 || $2 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@2));
+					$$ = (Node *) makeRPRQuantifier($2, $2, true, @1);
+					if (strcmp($4, "?|") == 0)
+						((RPRPatternNode *) $$)->trailing_alt = true;
+				}
+			| '{' Iconst ',' '}' Op
+				{
+					if (strcmp($5, "?") != 0 && strcmp($5, "?|") != 0)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($5)),
+								errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
+								parser_errposition(@5));
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@2));
+					$$ = (Node *) makeRPRQuantifier($2, RPR_QUANTITY_INF, true, @1);
+					if (strcmp($5, "?|") == 0)
+						((RPRPatternNode *) $$)->trailing_alt = true;
+				}
+			| '{' ',' Iconst '}' Op
+				{
+					if (strcmp($5, "?") != 0 && strcmp($5, "?|") != 0)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($5)),
+								errhint("Only \"?\" is allowed after {n,} or {,m} to make it reluctant."),
+								parser_errposition(@5));
+					if ($3 <= 0 || $3 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@3));
+					$$ = (Node *) makeRPRQuantifier(0, $3, true, @1);
+					if (strcmp($5, "?|") == 0)
+						((RPRPatternNode *) $$)->trailing_alt = true;
+				}
+			| '{' Iconst ',' Iconst '}' Op
+				{
+					if (strcmp($6, "?") != 0 && strcmp($6, "?|") != 0)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("invalid token \"%s\" after range quantifier", rpr_invalid_quantifier_token($6)),
+								errhint("Only \"?\" is allowed after {n,m} to make it reluctant."),
+								parser_errposition(@6));
+					if ($2 < 0 || $2 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 0 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@2));
+					if ($4 <= 0 || $4 >= RPR_QUANTITY_INF)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier bound must be between 1 and %d", RPR_QUANTITY_INF - 1),
+								parser_errposition(@4));
+					if ($2 > $4)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("quantifier minimum bound must not exceed maximum"),
+								parser_errposition(@2));
+					$$ = (Node *) makeRPRQuantifier($2, $4, true, @1);
+					if (strcmp($6, "?|") == 0)
+						((RPRPatternNode *) $$)->trailing_alt = true;
+				}
+		;
+
+row_pattern_definition_list:
+			row_pattern_definition										{ $$ = list_make1($1); }
+			| row_pattern_definition_list ',' row_pattern_definition	{ $$ = lappend($1, $3); }
+		;
+
+row_pattern_definition:
+			ColId AS a_expr
+				{
+					$$ = makeNode(ResTarget);
+					$$->name = $1;
+					$$->indirection = NIL;
+					$$->val = (Node *) $3;
+					$$->location = @1;
+				}
+		;
 
 /*
  * Supporting nonterminals for expressions.
@@ -17040,6 +17545,7 @@ MathOp:		 '+'									{ $$ = "+"; }
 			| LESS_EQUALS							{ $$ = "<="; }
 			| GREATER_EQUALS						{ $$ = ">="; }
 			| NOT_EQUALS							{ $$ = "<>"; }
+			| '|'									{ $$ = "|"; }
 		;
 
 qual_Op:	Op
@@ -18134,6 +18640,7 @@ unreserved_keyword:
 			| DECLARE
 			| DEFAULTS
 			| DEFERRED
+			| DEFINE
 			| DEFINER
 			| DELETE_P
 			| DELIMITER
@@ -18199,6 +18706,7 @@ unreserved_keyword:
 			| INDEXES
 			| INHERIT
 			| INHERITS
+			| INITIAL_P
 			| INLINE_P
 			| INPUT_P
 			| INSENSITIVE
@@ -18273,8 +18781,11 @@ unreserved_keyword:
 			| PARTITION
 			| PASSING
 			| PASSWORD
+			| PAST
 			| PATH
+			| PATTERN_P
 			| PERIOD
+			| PERMUTE
 			| PLAN
 			| PLANS
 			| POLICY
@@ -18328,6 +18839,7 @@ unreserved_keyword:
 			| SEARCH
 			| SECOND_P
 			| SECURITY
+			| SEEK
 			| SEQUENCE
 			| SEQUENCES
 			| SERIALIZABLE
@@ -18714,6 +19226,7 @@ bare_label_keyword:
 			| DEFAULTS
 			| DEFERRABLE
 			| DEFERRED
+			| DEFINE
 			| DEFINER
 			| DELETE_P
 			| DELIMITER
@@ -18792,6 +19305,7 @@ bare_label_keyword:
 			| INDEXES
 			| INHERIT
 			| INHERITS
+			| INITIAL_P
 			| INITIALLY
 			| INLINE_P
 			| INNER_P
@@ -18904,8 +19418,11 @@ bare_label_keyword:
 			| PARTITION
 			| PASSING
 			| PASSWORD
+			| PAST
 			| PATH
+			| PATTERN_P
 			| PERIOD
+			| PERMUTE
 			| PLACING
 			| PLAN
 			| PLANS
@@ -18964,6 +19481,7 @@ bare_label_keyword:
 			| SCROLL
 			| SEARCH
 			| SECURITY
+			| SEEK
 			| SELECT
 			| SEQUENCE
 			| SEQUENCES
@@ -20154,6 +20672,150 @@ makeRecursiveViewSelect(char *relname, List *aliases, Node *query)
 	s->fromClause = list_make1(makeRangeVar(NULL, relname, -1));
 
 	return (Node *) s;
+}
+
+/*
+ * makeRPRQuantifier
+ *		지정된 수량자 범위를 가진 RPRPatternNode 를 만든다.
+ */
+static RPRPatternNode *
+makeRPRQuantifier(int32 min, int32 max, bool reluctant, int location)
+{
+	RPRPatternNode *n = makeNode(RPRPatternNode);
+
+	n->min = min;
+	n->max = max;
+	n->reluctant = reluctant;
+	n->location = location;
+
+	/* 수량자 노드에서는 다른 필드들이 무관하다 */
+	return n;
+}
+
+/*
+ * 자식들로부터 SEQ 노드를 만들거나, 자식이 하나뿐이면 그대로 반환한다.
+ */
+static RPRPatternNode *
+makeRPRSeqOrSingle(List *children, int location)
+{
+	RPRPatternNode *n;
+
+	if (list_length(children) == 1)
+		return (RPRPatternNode *) linitial(children);
+
+	n = makeNode(RPRPatternNode);
+	n->nodeType = RPR_PATTERN_SEQ;
+	n->children = children;
+	n->min = 1;
+	n->max = 1;
+	n->reluctant = false;
+	n->location = location;
+	return n;
+}
+
+/*
+ * "A*|"와 같이 결합된 수량자는, 그것을 감싸는 시퀀스가 만들어지는 동안 자신의
+ * term 에 trailing_alt 를 설정해 둔다.  시퀀스가 완성되면, 표시된 term 에서
+ * 이를 alt(left, right) 로 분리하며, 오른쪽 피연산자는 나머지 시퀀스 전체가
+ * 된다 -- 이렇게 하면 "|"가 가장 낮은 우선순위의 연산자로 유지되므로,
+ * "A*|B C"는 띄어 쓴 형태와 동일하게 "A* | (B C)"로 파싱된다.  오른쪽에
+ * 아무것도 없는 표시는 매달린 "|"이며 거부된다.
+ */
+static RPRPatternNode *
+splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
+{
+	if (node->nodeType != RPR_PATTERN_SEQ)
+	{
+		if (node->trailing_alt)
+		{
+			node->trailing_alt = false;
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("alternation operator \"|\" requires a pattern on both sides"),
+					parser_errposition(node->location));
+		}
+		return node;
+	}
+
+	foreach_node(RPRPatternNode, child, node->children)
+	{
+		if (child->trailing_alt)
+		{
+			int			splitIdx = foreach_current_index(child);
+			List	   *lefthalf = list_copy_head(node->children, splitIdx + 1);
+			List	   *righthalf = list_copy_tail(node->children, splitIdx + 1);
+			RPRPatternNode *altn;
+			RPRPatternNode *rightnode;
+
+			child->trailing_alt = false;
+			if (righthalf == NIL)
+				ereport(ERROR,
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("alternation operator \"|\" requires a pattern on both sides"),
+						parser_errposition(child->location));
+
+			/* 오른쪽 가지는 seq 시작이 아니라 자신의 첫 요소에서 시작 */
+			rightnode = splitRPRTrailingAlt(makeRPRSeqOrSingle(righthalf,
+															   ((RPRPatternNode *) linitial(righthalf))->location),
+											yyscanner);
+			altn = makeNode(RPRPatternNode);
+			altn->nodeType = RPR_PATTERN_ALT;
+			altn->children = list_make2(makeRPRSeqOrSingle(lefthalf, node->location),
+										rightnode);
+			altn->min = 1;
+			altn->max = 1;
+			altn->reluctant = false;
+			altn->location = node->location;
+			return altn;
+		}
+	}
+	return node;
+}
+
+/*
+ * rpr_invalid_quantifier_token
+ *		수량자 위치에 있는 잘못된 토큰에서 문제가 되는 부분을 반환한다.
+ *
+ * 렉서는 수량자와 뒤따르는 alternation 연산자를 하나의 토큰으로 붙여 버린다
+ * (예: "*|").  그 뒤에 붙은 '|'를 떼어낸다: 이는 alternation 연산자이지
+ * 문제가 되는 수량자의 일부가 아니므로, "*|"는 '*'를, "*?|"는 "*?"를
+ * 보고하며, 이는 띄어 쓴 표기 "* |"와 "*? |"와 정확히 같다.  뒤에 붙은
+ * 연산자는 하나만 떼어낸다: '|'가 하나 더 남아 있으면 드러낼 수량자가
+ * 없으므로 "||"와 "*||"는 전체가 그대로 보고되며, "??"나 "?+"처럼 뒤에 '|'가
+ * 없는 토큰도 마찬가지다.
+ */
+static const char *
+rpr_invalid_quantifier_token(const char *tok)
+{
+	size_t		len = strlen(tok);
+
+	if (len > 1 && tok[len - 1] == '|' && memchr(tok, '|', len - 1) == NULL)
+		return pnstrdup(tok, len - 1);
+	return tok;
+}
+
+/*
+ * rpr_is_quantifier_token
+ *		이 Op 토큰은 수량자를 표기하는가?
+ *
+ * 이는 row_pattern_quantifier_opt 의 단일 Op 분기가 받아들이는 토큰과 정확히
+ * 같으므로, 둘을 서로 맞춰 유지해야 한다. 이 집합 밖의 토큰은 전혀 수량자가
+ * 아니며, 수량자 뒤에 무언가가 따라온 것으로 보고하는 대신 그 분기가 하듯이
+ * 지원되지 않는 것으로 보고해야 한다.
+ */
+static bool
+rpr_is_quantifier_token(const char *tok)
+{
+	static const char *const quantifiers[] = {
+		"?", "*?", "+?", "??", "*|", "+|", "?|", "*?|", "+?|", "??|"
+	};
+
+	for (int i = 0; i < lengthof(quantifiers); i++)
+	{
+		if (strcmp(tok, quantifiers[i]) == 0)
+			return true;
+	}
+	return false;
 }
 
 /* parser_init()

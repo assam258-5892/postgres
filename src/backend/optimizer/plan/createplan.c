@@ -35,6 +35,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
 #include "optimizer/restrictinfo.h"
+#include "optimizer/rpr.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
 #include "parser/parse_clause.h"
@@ -294,7 +295,10 @@ static Memoize *make_memoize(Plan *lefttree, Oid *hashoperators,
 static WindowAgg *make_windowagg(List *tlist, WindowClause *wc,
 								 int partNumCols, AttrNumber *partColIdx, Oid *partOperators, Oid *partCollations,
 								 int ordNumCols, AttrNumber *ordColIdx, Oid *ordOperators, Oid *ordCollations,
-								 List *runCondition, List *qual, bool topWindow,
+								 List *runCondition,
+								 RPRPattern *compiledPattern,
+								 Bitmapset *defineMatchStartDependent,
+								 List *qual, bool topWindow,
 								 Plan *lefttree);
 static Group *make_group(List *tlist, List *qual, int numGroupCols,
 						 AttrNumber *grpColIdx, Oid *grpOperators, Oid *grpCollations,
@@ -2466,6 +2470,124 @@ create_minmaxagg_plan(PlannerInfo *root, MinMaxAggPath *best_path)
 }
 
 /*
+ * DefineMetadataContext - 아래 DEFINE 절 순회를 위한 컨텍스트.
+ *
+ * 이 순회는 한 가지만 분류한다: 어떤 DEFINE 변수가 매치 시작(match start)에
+ * 의존하는가이며, 이는 buildRPRPattern()이 컨텍스트 흡수를 결정하는 데 필요한
+ * 정보다.  trim 오프셋은 계획 시점의 메타데이터가 아니다; 실행기가 init
+ * 단계(build_define_offsets)에서 이를 기록하고 스캔마다(resolve_nav_offsets)
+ * 값을 확정하며, 둘 다 nodeWindowAgg.c에 있다.
+ *
+ * 드라이버는 각 호출 전에 curVarIdx 값을 순회 중인 변수의 인덱스로 설정한다;
+ * 워커는 이를 이용해 matchStartDependent 필드를 채운다.
+ */
+typedef struct DefineMetadataContext
+{
+	int			curVarIdx;		/* 현재 순회 중인 DEFINE 변수 */
+	int			navno;			/* 다음에 할당할 RPRNavExpr.navno */
+	Bitmapset  *matchStartDependent;	/* match_start 값에
+										 * 의존하는 변수 */
+} DefineMetadataContext;
+
+/*
+ * compute_matchStartDependent
+ *
+ * 흡수 억제를 위한 변수별 match_start 의존성: match_start 에 도달하는 바깥쪽
+ * nav 종류(FIRST, LAST-with-offset, PREV_FIRST, NEXT_FIRST,
+ * PREV_LAST/NEXT_LAST-with-offset)는 curVarIdx 를 matchStartDependent 에
+ * 추가한다.
+ *
+ * 분류는 오직 바깥쪽 nav 종류만 사용한다: 파서의 중첩 제한 때문에 PREV/NEXT
+ * 값 하위 표현식 안에 FIRST/LAST가 올 수 없다.
+ */
+static void
+compute_matchStartDependent(RPRNavExpr *nav, DefineMetadataContext *context)
+{
+	/*
+	 * 파서가 보장하는 것: 플래너가 DEFINE 표현식을 보는 시점에는 복합 중첩이
+	 * 이미 단일 RPRNavExpr 하나로 평탄화되어 있고, 그 밖의 다른 RPRNavExpr
+	 * 중첩은 거부된 상태다.  따라서 nav의 직계 자식 필드 자신은 RPRNavExpr
+	 * 노드가 아니며, 아래의 바깥쪽 종류 디스패치로 충분하다.
+	 */
+	Assert(nav->arg == NULL || !IsA(nav->arg, RPRNavExpr));
+	Assert(nav->offset_arg == NULL || !IsA(nav->offset_arg, RPRNavExpr));
+	Assert(nav->compound_offset_arg == NULL ||
+		   !IsA(nav->compound_offset_arg, RPRNavExpr));
+
+	/*
+	 * 매치 시작 의존성: 바깥쪽 nav 종류를 분류한다.  상수 LAST(x, 0)은
+	 * 보수적으로 포함시키는데(offset_arg 필드가 non-NULL Const이므로), 이는
+	 * 무해한 추가 재평가를 일으킬 뿐이다; LAST(x, 0)은 현재 행이므로 그
+	 * 결과는 매치 시작과 무관하기 때문이다.
+	 */
+	if (nav->kind == RPR_NAV_FIRST ||
+		(nav->kind == RPR_NAV_LAST && nav->offset_arg != NULL) ||
+		nav->kind == RPR_NAV_PREV_FIRST ||
+		nav->kind == RPR_NAV_NEXT_FIRST ||
+		((nav->kind == RPR_NAV_PREV_LAST ||
+		  nav->kind == RPR_NAV_NEXT_LAST) &&
+		 nav->offset_arg != NULL))
+		context->matchStartDependent =
+			bms_add_member(context->matchStartDependent,
+						   context->curVarIdx);
+}
+
+static bool
+define_metadata_walker(Node *node, DefineMetadataContext *ctx)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, RPRNavExpr))
+	{
+		RPRNavExpr *nav = castNode(RPRNavExpr, node);
+
+		nav->navno = ctx->navno++;
+		compute_matchStartDependent(nav, ctx);
+	}
+
+	return expression_tree_walker(node, define_metadata_walker, ctx);
+}
+
+/*
+ * compute_define_metadata
+ *		어떤 DEFINE 변수가 매치 시작에 의존하는지 분류하고, 내비게이션에
+ *		번호를 매긴다.
+ *
+ * 각 DEFINE 변수 표현식을 한 번씩 순회하며, 내비게이션이 match_start 에
+ * 도달하는 변수 인덱스의 집합을 반환한다: FIRST나 복합 PREV_FIRST/NEXT_FIRST
+ * 형태를 포함하거나, 단독이든 복합 PREV_LAST/NEXT_LAST 안이든 자신만의
+ * 오프셋을 가진 LAST를 포함하는 변수다.  이런 변수는 NFA 처리 중에
+ * per-context 재평가가 필요하며, 이런 변수가 있으면 그 패턴은 컨텍스트 흡수
+ * 대상에서 제외된다.
+ *
+ * 같은 순회가 방문 순서대로 RPRNavExpr.navno를 배정하는데, 이는 실행기가
+ * WindowAggState.rprNavOffsets 를 구성하는 순서와 같다.
+ *
+ * 튜플스토어 trim을 위한 내비게이션 오프셋은 여기서 계산하지 않는다; 이는
+ * 실행기 초기화(build_define_offsets)에서 만들어지고
+ * 스캔마다(resolve_nav_offsets) 확정되는데, 이 단계는 플래너가 폴딩할 수 없는
+ * 비상수 오프셋도 평가할 수 있다.
+ */
+static void
+compute_define_metadata(List *defineClause, Bitmapset **matchStartDependent)
+{
+	DefineMetadataContext ctx;
+
+	ctx.curVarIdx = 0;
+	ctx.navno = 0;
+	ctx.matchStartDependent = NULL;
+
+	foreach_node(TargetEntry, te, defineClause)
+	{
+		ctx.curVarIdx = foreach_current_index(te);
+
+		define_metadata_walker((Node *) te->expr, &ctx);
+	}
+
+	*matchStartDependent = ctx.matchStartDependent;
+}
+
+/*
  * create_windowagg_plan
  *
  *	  Create a WindowAgg plan for 'best_path' and (recursively) plans
@@ -2489,6 +2611,8 @@ create_windowagg_plan(PlannerInfo *root, WindowAggPath *best_path)
 	Oid		   *ordOperators;
 	Oid		   *ordCollations;
 	ListCell   *lc;
+	RPRPattern *compiledPattern = NULL;
+	Bitmapset  *matchStartDependent = NULL;
 
 	/*
 	 * Choice of tlist here is motivated by the fact that WindowAgg will be
@@ -2539,6 +2663,25 @@ create_windowagg_plan(PlannerInfo *root, WindowAggPath *best_path)
 		ordNumCols++;
 	}
 
+	/* RPR 패턴을 빌드한다 */
+	if (wc->rpPattern)
+	{
+		/*
+		 * 어떤 DEFINE 변수가 match_start 에 의존하는지 분류한다
+		 * (buildRPRPattern 함수가 흡수 억제를 위해 쓰인다).  튜플스토어
+		 * trim을 위한 내비게이션 오프셋은 실행기 초기화 시점에 만들어지고
+		 * 스캔마다 결정된다.
+		 */
+		compute_define_metadata(wc->defineClause, &matchStartDependent);
+
+		/* RPR 패턴을 컴파일하고 최적화한다 */
+		compiledPattern = buildRPRPattern(wc->rpPattern,
+										  wc->defineClause,
+										  wc->rpSkipTo,
+										  wc->frameOptions,
+										  !bms_is_empty(matchStartDependent));
+	}
+
 	/* And finally we can make the WindowAgg node */
 	plan = make_windowagg(tlist,
 						  wc,
@@ -2551,6 +2694,8 @@ create_windowagg_plan(PlannerInfo *root, WindowAggPath *best_path)
 						  ordOperators,
 						  ordCollations,
 						  best_path->runCondition,
+						  compiledPattern,
+						  matchStartDependent,
 						  best_path->qual,
 						  best_path->topwindow,
 						  subplan);
@@ -6677,7 +6822,9 @@ static WindowAgg *
 make_windowagg(List *tlist, WindowClause *wc,
 			   int partNumCols, AttrNumber *partColIdx, Oid *partOperators, Oid *partCollations,
 			   int ordNumCols, AttrNumber *ordColIdx, Oid *ordOperators, Oid *ordCollations,
-			   List *runCondition, List *qual, bool topWindow, Plan *lefttree)
+			   List *runCondition, RPRPattern *compiledPattern,
+			   Bitmapset *defineMatchStartDependent,
+			   List *qual, bool topWindow, Plan *lefttree)
 {
 	WindowAgg  *node = makeNode(WindowAgg);
 	Plan	   *plan = &node->plan;
@@ -6704,6 +6851,15 @@ make_windowagg(List *tlist, WindowClause *wc,
 	node->inRangeAsc = wc->inRangeAsc;
 	node->inRangeNullsFirst = wc->inRangeNullsFirst;
 	node->topWindow = topWindow;
+	node->rpSkipTo = wc->rpSkipTo;
+
+	/* NFA 실행을 위해 컴파일된 패턴을 저장한다 */
+	node->rpPattern = compiledPattern;
+
+	node->defineClause = wc->defineClause;
+
+	/* 미리 계산된 match_start 의존성 bitmapset을 저장한다 */
+	node->defineMatchStartDependent = defineMatchStartDependent;
 
 	plan->targetlist = tlist;
 	plan->lefttree = lefttree;

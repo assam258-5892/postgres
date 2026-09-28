@@ -2603,6 +2603,23 @@ set_upper_references(PlannerInfo *root, Plan *plan, int rtoffset)
 					   rtoffset,
 					   NUM_EXEC_QUAL(plan));
 
+	/*
+	 * 모든 Var 노드의 varno가 OUTER_VAR 를 가리키도록 각 DEFINE 절의 표현식
+	 * 트리를 치환한다.
+	 */
+	if (IsA(plan, WindowAgg))
+	{
+		WindowAgg  *wplan = (WindowAgg *) plan;
+
+		wplan->defineClause = (List *)
+			fix_upper_expr(root,
+						   (Node *) wplan->defineClause,
+						   subplan_itlist,
+						   OUTER_VAR,
+						   rtoffset,
+						   NUM_EXEC_QUAL(plan));
+	}
+
 	pfree(subplan_itlist);
 }
 
@@ -3374,6 +3391,28 @@ fix_upper_expr_mutator(Node *node, fix_upper_expr_context *context)
 		/* If not supplied by input plan, evaluate the contained expr */
 		/* XXX can we assert something about phnullingrels? */
 		return fix_upper_expr_mutator((Node *) phv->phexpr, context);
+	}
+	if (IsA(node, RPRNavExpr))
+	{
+		RPRNavExpr *nav = (RPRNavExpr *) node;
+		RPRNavExpr *newnav = makeNode(RPRNavExpr);
+
+		memcpy(newnav, nav, sizeof(RPRNavExpr));
+
+		/*
+		 * 오프셋은 outer 슬롯이 설정되기 전에 스캔마다 한 번 풀리므로,
+		 * arg처럼 그 슬롯을 참조할 수 없다.  WindowAgg 프레임 오프셋과 같은
+		 * 방식으로 처리한다.
+		 */
+		newnav->arg = (Expr *)
+			fix_upper_expr_mutator((Node *) nav->arg, context);
+		newnav->offset_arg = (Expr *)
+			fix_scan_expr(context->root, (Node *) nav->offset_arg,
+						  context->rtoffset, context->num_exec);
+		newnav->compound_offset_arg = (Expr *)
+			fix_scan_expr(context->root, (Node *) nav->compound_offset_arg,
+						  context->rtoffset, context->num_exec);
+		return (Node *) newnav;
 	}
 	/* Try matching more complex expressions too, if tlist has any */
 	if (context->subplan_itlist->has_non_vars)

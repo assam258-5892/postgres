@@ -1449,6 +1449,7 @@ replace_rte_variables(Node *node, int target_varno, int sublevels_up,
 	context.callback_arg = callback_arg;
 	context.target_varno = target_varno;
 	context.sublevels_up = sublevels_up;
+	context.in_rpr_nav_arg = false;
 
 	/*
 	 * We try to initialize inserted_sublink to true if there is no need to
@@ -1506,6 +1507,32 @@ replace_rte_variables_mutator(Node *node,
 			return newnode;
 		}
 		/* otherwise fall through to copy the var normally */
+	}
+	else if (IsA(node, RPRNavExpr))
+	{
+		/*
+		 * 행 패턴 내비게이션 연산의 인자는 내비게이션이 도달하는 행에서
+		 * 평가되므로, 콜백을 위해 이를 표시해 둔다.  그 옆의 오프셋들은
+		 * 평범한 표현식이다.
+		 */
+		RPRNavExpr *nav = (RPRNavExpr *) node;
+		RPRNavExpr *newnode = makeNode(RPRNavExpr);
+		bool		save_in_rpr_nav_arg = context->in_rpr_nav_arg;
+
+		memcpy(newnode, nav, sizeof(RPRNavExpr));
+
+		context->in_rpr_nav_arg = true;
+		newnode->arg = (Expr *)
+			replace_rte_variables_mutator((Node *) nav->arg, context);
+		context->in_rpr_nav_arg = save_in_rpr_nav_arg;
+
+		newnode->offset_arg = (Expr *)
+			replace_rte_variables_mutator((Node *) nav->offset_arg, context);
+		newnode->compound_offset_arg = (Expr *)
+			replace_rte_variables_mutator((Node *) nav->compound_offset_arg,
+										  context);
+
+		return (Node *) newnode;
 	}
 	else if (IsA(node, Query))
 	{
