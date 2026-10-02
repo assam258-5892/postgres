@@ -825,3 +825,67 @@ select * from a, coalesce(b) as c(d int, e int, f int, g int);  -- fail
 with a(b) as (values (row(1,2,3)))
 select * from a, coalesce(b) as c(d int, e int, f float);  -- fail
 select * from int8_tbl, coalesce(row(1)) as (a int, b int);  -- fail
+
+-- A column added to a composite type that a function returns is seen by a
+-- reparsed query, in the middle of the RTE's columns if there is an ordinality
+-- column or another function; the alias list must account for it
+create type rngfunc_addcol_t as (a int, b int);
+create function rngfunc_addcol() returns rngfunc_addcol_t
+  language sql as 'select 1, 2';
+create view rngfunc_addcol_v1 as
+  select a, b, ordinality from rngfunc_addcol() with ordinality;
+create view rngfunc_addcol_v2 as
+  select a, generate_series, ordinality
+  from rows from (rngfunc_addcol(), generate_series(10, 11)) with ordinality;
+create view rngfunc_addcol_v3 as
+  select a, b, ordinality
+  from rngfunc_addcol() with ordinality f join (select 1 as a) s using (a);
+alter type rngfunc_addcol_t add attribute c int;
+create or replace function rngfunc_addcol() returns rngfunc_addcol_t
+  language sql as 'select 1, 2, 3';
+select * from rngfunc_addcol_v1;
+select * from rngfunc_addcol_v2;
+select * from rngfunc_addcol_v3;
+select pg_get_viewdef('rngfunc_addcol_v1'::regclass);
+select pg_get_viewdef('rngfunc_addcol_v2'::regclass);
+select pg_get_viewdef('rngfunc_addcol_v3'::regclass);
+select pg_get_viewdef('rngfunc_addcol_v1'::regclass) as def \gset
+create view rngfunc_addcol_v1_re as :def
+select pg_get_viewdef('rngfunc_addcol_v2'::regclass) as def \gset
+create view rngfunc_addcol_v2_re as :def
+select pg_get_viewdef('rngfunc_addcol_v3'::regclass) as def \gset
+create view rngfunc_addcol_v3_re as :def
+select * from rngfunc_addcol_v1 except select * from rngfunc_addcol_v1_re;
+select * from rngfunc_addcol_v2 except select * from rngfunc_addcol_v2_re;
+select * from rngfunc_addcol_v3 except select * from rngfunc_addcol_v3_re;
+drop view rngfunc_addcol_v1, rngfunc_addcol_v2, rngfunc_addcol_v3,
+  rngfunc_addcol_v1_re, rngfunc_addcol_v2_re, rngfunc_addcol_v3_re;
+drop function rngfunc_addcol();
+drop type rngfunc_addcol_t;
+
+-- the same if the function had no columns at all when the query was parsed
+create type rngfunc_zerocol_t as ();
+create function rngfunc_zerocol() returns rngfunc_zerocol_t
+  language sql as 'select row()::rngfunc_zerocol_t';
+create view rngfunc_zerocol_v1 as
+  select ordinality from rngfunc_zerocol() with ordinality;
+create view rngfunc_zerocol_v2 as
+  select generate_series, ordinality
+  from rows from (rngfunc_zerocol(), generate_series(10, 11)) with ordinality;
+alter type rngfunc_zerocol_t add attribute a int;
+create or replace function rngfunc_zerocol() returns rngfunc_zerocol_t
+  language sql as 'select 42';
+select * from rngfunc_zerocol_v1;
+select * from rngfunc_zerocol_v2;
+select pg_get_viewdef('rngfunc_zerocol_v1'::regclass);
+select pg_get_viewdef('rngfunc_zerocol_v2'::regclass);
+select pg_get_viewdef('rngfunc_zerocol_v1'::regclass) as def \gset
+create view rngfunc_zerocol_v1_re as :def
+select pg_get_viewdef('rngfunc_zerocol_v2'::regclass) as def \gset
+create view rngfunc_zerocol_v2_re as :def
+select * from rngfunc_zerocol_v1 except select * from rngfunc_zerocol_v1_re;
+select * from rngfunc_zerocol_v2 except select * from rngfunc_zerocol_v2_re;
+drop view rngfunc_zerocol_v1, rngfunc_zerocol_v2,
+  rngfunc_zerocol_v1_re, rngfunc_zerocol_v2_re;
+drop function rngfunc_zerocol();
+drop type rngfunc_zerocol_t;

@@ -2505,3 +2505,150 @@ DETAIL:  Returned type integer at ordinal position 3, but query expects double p
 select * from int8_tbl, coalesce(row(1)) as (a int, b int);  -- fail
 ERROR:  function return row and query-specified return row do not match
 DETAIL:  Returned row contains 1 attribute, but query expects 2.
+-- A column added to a composite type that a function returns is seen by a
+-- reparsed query, in the middle of the RTE's columns if there is an ordinality
+-- column or another function; the alias list must account for it
+create type rngfunc_addcol_t as (a int, b int);
+create function rngfunc_addcol() returns rngfunc_addcol_t
+  language sql as 'select 1, 2';
+create view rngfunc_addcol_v1 as
+  select a, b, ordinality from rngfunc_addcol() with ordinality;
+create view rngfunc_addcol_v2 as
+  select a, generate_series, ordinality
+  from rows from (rngfunc_addcol(), generate_series(10, 11)) with ordinality;
+create view rngfunc_addcol_v3 as
+  select a, b, ordinality
+  from rngfunc_addcol() with ordinality f join (select 1 as a) s using (a);
+alter type rngfunc_addcol_t add attribute c int;
+create or replace function rngfunc_addcol() returns rngfunc_addcol_t
+  language sql as 'select 1, 2, 3';
+select * from rngfunc_addcol_v1;
+ a | b | ordinality 
+---+---+------------
+ 1 | 2 |          1
+(1 row)
+
+select * from rngfunc_addcol_v2;
+ a | generate_series | ordinality 
+---+-----------------+------------
+ 1 |              10 |          1
+   |              11 |          2
+(2 rows)
+
+select * from rngfunc_addcol_v3;
+ a | b | ordinality 
+---+---+------------
+ 1 | 2 |          1
+(1 row)
+
+select pg_get_viewdef('rngfunc_addcol_v1'::regclass);
+                                pg_get_viewdef                                 
+-------------------------------------------------------------------------------
+  SELECT a,                                                                   +
+     b,                                                                       +
+     ordinality                                                               +
+    FROM rngfunc_addcol() WITH ORDINALITY rngfunc_addcol(a, b, c, ordinality);
+(1 row)
+
+select pg_get_viewdef('rngfunc_addcol_v2'::regclass);
+                                                           pg_get_viewdef                                                           
+------------------------------------------------------------------------------------------------------------------------------------
+  SELECT a,                                                                                                                        +
+     generate_series,                                                                                                              +
+     ordinality                                                                                                                    +
+    FROM ROWS FROM(rngfunc_addcol(), generate_series(10, 11)) WITH ORDINALITY rngfunc_addcol(a, b, c, generate_series, ordinality);
+(1 row)
+
+select pg_get_viewdef('rngfunc_addcol_v3'::regclass);
+                          pg_get_viewdef                          
+------------------------------------------------------------------
+  SELECT f.a,                                                    +
+     f.b,                                                        +
+     f.ordinality                                                +
+    FROM (rngfunc_addcol() WITH ORDINALITY f(a, b, c, ordinality)+
+      JOIN ( SELECT 1 AS a) s USING (a));
+(1 row)
+
+select pg_get_viewdef('rngfunc_addcol_v1'::regclass) as def \gset
+create view rngfunc_addcol_v1_re as :def
+select pg_get_viewdef('rngfunc_addcol_v2'::regclass) as def \gset
+create view rngfunc_addcol_v2_re as :def
+select pg_get_viewdef('rngfunc_addcol_v3'::regclass) as def \gset
+create view rngfunc_addcol_v3_re as :def
+select * from rngfunc_addcol_v1 except select * from rngfunc_addcol_v1_re;
+ a | b | ordinality 
+---+---+------------
+(0 rows)
+
+select * from rngfunc_addcol_v2 except select * from rngfunc_addcol_v2_re;
+ a | generate_series | ordinality 
+---+-----------------+------------
+(0 rows)
+
+select * from rngfunc_addcol_v3 except select * from rngfunc_addcol_v3_re;
+ a | b | ordinality 
+---+---+------------
+(0 rows)
+
+drop view rngfunc_addcol_v1, rngfunc_addcol_v2, rngfunc_addcol_v3,
+  rngfunc_addcol_v1_re, rngfunc_addcol_v2_re, rngfunc_addcol_v3_re;
+drop function rngfunc_addcol();
+drop type rngfunc_addcol_t;
+-- the same if the function had no columns at all when the query was parsed
+create type rngfunc_zerocol_t as ();
+create function rngfunc_zerocol() returns rngfunc_zerocol_t
+  language sql as 'select row()::rngfunc_zerocol_t';
+create view rngfunc_zerocol_v1 as
+  select ordinality from rngfunc_zerocol() with ordinality;
+create view rngfunc_zerocol_v2 as
+  select generate_series, ordinality
+  from rows from (rngfunc_zerocol(), generate_series(10, 11)) with ordinality;
+alter type rngfunc_zerocol_t add attribute a int;
+create or replace function rngfunc_zerocol() returns rngfunc_zerocol_t
+  language sql as 'select 42';
+select * from rngfunc_zerocol_v1;
+ ordinality 
+------------
+          1
+(1 row)
+
+select * from rngfunc_zerocol_v2;
+ generate_series | ordinality 
+-----------------+------------
+              10 |          1
+              11 |          2
+(2 rows)
+
+select pg_get_viewdef('rngfunc_zerocol_v1'::regclass);
+                              pg_get_viewdef                               
+---------------------------------------------------------------------------
+  SELECT ordinality                                                       +
+    FROM rngfunc_zerocol() WITH ORDINALITY rngfunc_zerocol(a, ordinality);
+(1 row)
+
+select pg_get_viewdef('rngfunc_zerocol_v2'::regclass);
+                                                         pg_get_viewdef                                                         
+--------------------------------------------------------------------------------------------------------------------------------
+  SELECT generate_series,                                                                                                      +
+     ordinality                                                                                                                +
+    FROM ROWS FROM(rngfunc_zerocol(), generate_series(10, 11)) WITH ORDINALITY rngfunc_zerocol(a, generate_series, ordinality);
+(1 row)
+
+select pg_get_viewdef('rngfunc_zerocol_v1'::regclass) as def \gset
+create view rngfunc_zerocol_v1_re as :def
+select pg_get_viewdef('rngfunc_zerocol_v2'::regclass) as def \gset
+create view rngfunc_zerocol_v2_re as :def
+select * from rngfunc_zerocol_v1 except select * from rngfunc_zerocol_v1_re;
+ ordinality 
+------------
+(0 rows)
+
+select * from rngfunc_zerocol_v2 except select * from rngfunc_zerocol_v2_re;
+ generate_series | ordinality 
+-----------------+------------
+(0 rows)
+
+drop view rngfunc_zerocol_v1, rngfunc_zerocol_v2,
+  rngfunc_zerocol_v1_re, rngfunc_zerocol_v2_re;
+drop function rngfunc_zerocol();
+drop type rngfunc_zerocol_t;
