@@ -854,9 +854,47 @@ SELECT functest_cap(10);
            15
 (1 row)
 
+-- The target columns of the actions of a MERGE in a function body are
+-- dependencies, like those of INSERT and UPDATE: they can't be dropped
+CREATE TABLE functest_mtgt (k int, a int, b int, c int);
+CREATE TABLE functest_msrc (k int, v int);
+CREATE FUNCTION functest_merge() RETURNS void
+  BEGIN ATOMIC
+    MERGE INTO functest_mtgt t USING functest_msrc s ON t.k = s.k
+      WHEN MATCHED THEN UPDATE SET a = s.v
+      WHEN NOT MATCHED THEN INSERT (k, b) VALUES (s.k, s.v);
+  END;
+ALTER TABLE functest_mtgt DROP COLUMN a;
+ERROR:  cannot drop column a of table functest_mtgt because other objects depend on it
+DETAIL:  function functest_merge() depends on column a of table functest_mtgt
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+ALTER TABLE functest_mtgt DROP COLUMN b;
+ERROR:  cannot drop column b of table functest_mtgt because other objects depend on it
+DETAIL:  function functest_merge() depends on column b of table functest_mtgt
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+ALTER TABLE functest_mtgt DROP COLUMN c;
+SELECT pg_get_functiondef('functest_merge'::regproc);
+                     pg_get_functiondef                     
+------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_merge()+
+  RETURNS void                                             +
+  LANGUAGE sql                                             +
+ BEGIN ATOMIC                                              +
+  MERGE INTO functest_mtgt t                               +
+     USING functest_msrc s                                 +
+     ON (t.k = s.k)                                        +
+     WHEN MATCHED                                          +
+      THEN UPDATE SET a = s.v                              +
+     WHEN NOT MATCHED                                      +
+      THEN INSERT (k, b)                                   +
+       VALUES (s.k, s.v);                                  +
+ END                                                       +
+ 
+(1 row)
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
-NOTICE:  drop cascades to 41 other objects
+NOTICE:  drop cascades to 44 other objects
 DETAIL:  drop cascades to function functest_a_1(text,date)
 drop cascades to function functest_a_2(text[])
 drop cascades to function functest_a_3()
@@ -898,5 +936,8 @@ drop cascades to function test1(anyelement)
 drop cascades to function functest_unnamed(integer,integer)
 drop cascades to table functest_cap
 drop cascades to function functest_cap(integer)
+drop cascades to table functest_mtgt
+drop cascades to table functest_msrc
+drop cascades to function functest_merge()
 DROP USER regress_unpriv_user;
 RESET search_path;
