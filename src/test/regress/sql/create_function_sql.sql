@@ -558,6 +558,24 @@ SELECT pg_get_functiondef('functest_proc'::regproc) AS def \gset
 :def ;
 CALL functest_proc(NULL, 5);
 
+-- The EXCLUDED pseudo relation of ON CONFLICT has a fixed name, so a relation
+-- named "excluded" is the one that has to be renamed
+CREATE TABLE functest_upsert (k int PRIMARY KEY, v int);
+CREATE FUNCTION functest_upsert(a int, b int) RETURNS void
+  BEGIN ATOMIC
+    INSERT INTO functest_upsert VALUES (a, b)
+      ON CONFLICT (k) DO UPDATE SET v = excluded.v;
+  END;
+SELECT functest_upsert(1, 10);
+SELECT functest_upsert(1, 20);
+SELECT * FROM functest_upsert;
+ALTER TABLE functest_upsert RENAME TO excluded;
+SELECT pg_get_functiondef('functest_upsert'::regproc);
+SELECT pg_get_functiondef('functest_upsert'::regproc) AS def \gset
+:def ;
+SELECT functest_upsert(1, 30);
+SELECT * FROM excluded;
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
 DROP USER regress_unpriv_user;

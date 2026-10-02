@@ -444,3 +444,38 @@ MERGE INTO ret_nn USING (VALUES (2), (3)) AS src(a) ON ret_nn.a = src.a
   RETURNING merge_action(), old.a IS NULL, new.a IS NULL;
 
 DROP TABLE ret_nn;
+
+-- The aliases for OLD and NEW in RETURNING must not be captured by a relation
+-- of the same name when the query is deparsed
+CREATE TABLE returning_capture (k int, c int);
+INSERT INTO returning_capture VALUES (1, 10);
+CREATE FUNCTION returning_capture_f() RETURNS TABLE (o int, n int)
+  LANGUAGE sql
+  BEGIN ATOMIC
+    UPDATE returning_capture SET c = c + 1 RETURNING old.c, new.c;
+  END;
+SELECT * FROM returning_capture_f();
+ALTER TABLE returning_capture RENAME TO old;
+SELECT pg_get_functiondef('returning_capture_f'::regproc);
+SELECT pg_get_functiondef('returning_capture_f'::regproc) AS def \gset
+:def ;
+SELECT * FROM returning_capture_f();
+DROP FUNCTION returning_capture_f();
+DROP TABLE old;
+
+-- A candidate name skipped because it is reserved for an OLD/NEW alias must
+-- not leave an uninitialized counter behind: a later relation that is
+-- aliased with that name must still be renamed as usual
+CREATE TABLE returning_t (k int, c int);
+CREATE TABLE returning_u (k int);
+CREATE FUNCTION returning_t_f() RETURNS TABLE (o bigint)
+  LANGUAGE sql
+  BEGIN ATOMIC
+    UPDATE returning_t SET c = c + 1
+      RETURNING WITH (OLD AS returning_t_1)
+        (SELECT count(*) FROM returning_t, returning_u AS returning_t_1);
+  END;
+SELECT pg_get_functiondef('returning_t_f'::regproc);
+DROP FUNCTION returning_t_f();
+DROP TABLE returning_t, returning_u;
+

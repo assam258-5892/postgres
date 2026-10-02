@@ -1021,9 +1021,66 @@ CALL functest_proc(NULL, 5);
  10
 (1 row)
 
+-- The EXCLUDED pseudo relation of ON CONFLICT has a fixed name, so a relation
+-- named "excluded" is the one that has to be renamed
+CREATE TABLE functest_upsert (k int PRIMARY KEY, v int);
+CREATE FUNCTION functest_upsert(a int, b int) RETURNS void
+  BEGIN ATOMIC
+    INSERT INTO functest_upsert VALUES (a, b)
+      ON CONFLICT (k) DO UPDATE SET v = excluded.v;
+  END;
+SELECT functest_upsert(1, 10);
+ functest_upsert 
+-----------------
+ 
+(1 row)
+
+SELECT functest_upsert(1, 20);
+ functest_upsert 
+-----------------
+ 
+(1 row)
+
+SELECT * FROM functest_upsert;
+ k | v  
+---+----
+ 1 | 20
+(1 row)
+
+ALTER TABLE functest_upsert RENAME TO excluded;
+SELECT pg_get_functiondef('functest_upsert'::regproc);
+                                       pg_get_functiondef                                        
+-------------------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_upsert(a integer, b integer)                +
+  RETURNS void                                                                                  +
+  LANGUAGE sql                                                                                  +
+ BEGIN ATOMIC                                                                                   +
+  INSERT INTO excluded (k, v)                                                                   +
+    VALUES (functest_upsert.a, functest_upsert.b) ON CONFLICT(k) DO UPDATE SET v = excluded_1.v;+
+ END                                                                                            +
+ 
+(1 row)
+
+SELECT pg_get_functiondef('functest_upsert'::regproc) AS def \gset
+:def ;
+ERROR:  missing FROM-clause entry for table "excluded_1"
+LINE 6: ...nctest_upsert.b) ON CONFLICT(k) DO UPDATE SET v = excluded_1...
+                                                             ^
+SELECT functest_upsert(1, 30);
+ functest_upsert 
+-----------------
+ 
+(1 row)
+
+SELECT * FROM excluded;
+ k | v  
+---+----
+ 1 | 30
+(1 row)
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
-NOTICE:  drop cascades to 50 other objects
+NOTICE:  drop cascades to 52 other objects
 DETAIL:  drop cascades to function functest_a_1(text,date)
 drop cascades to function functest_a_2(text[])
 drop cascades to function functest_a_3()
@@ -1074,5 +1131,7 @@ drop cascades to function functest_inout(integer,integer)
 drop cascades to function functest_var(integer[])
 drop cascades to function functest_var2(integer[])
 drop cascades to function functest_proc(integer)
+drop cascades to table excluded
+drop cascades to function functest_upsert(integer,integer)
 DROP USER regress_unpriv_user;
 RESET search_path;
