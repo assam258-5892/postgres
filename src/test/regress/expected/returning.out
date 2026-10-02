@@ -1081,13 +1081,13 @@ UPDATE returning_e1 SET c = c + 1
            Output: count(*)
            ->  Seq Scan on public.returning_e2 returning_e2_1
                  Output: returning_e2_1.k, returning_e2_1.c
-                 Filter: (returning_e2_1.c = o.c)
+                 Filter: (returning_e2_1.c = p.c)
    SubPlan expr_2
      ->  Aggregate
            Output: count(*)
            ->  Seq Scan on public.returning_e2 returning_e2_2
                  Output: returning_e2_2.k, returning_e2_2.c
-                 Filter: (returning_e2_2.c = n.c)
+                 Filter: (returning_e2_2.c = q.c)
 (21 rows)
 
 DROP TABLE returning_e1, returning_e2;
