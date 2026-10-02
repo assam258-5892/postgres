@@ -479,3 +479,16 @@ SELECT pg_get_functiondef('returning_t_f'::regproc);
 DROP FUNCTION returning_t_f();
 DROP TABLE returning_t, returning_u;
 
+-- EXPLAIN must print the OLD/NEW aliases of the ModifyTable that owns a
+-- RETURNING list also inside its SubPlans, even when a data-modifying CTE
+-- has set different aliases
+CREATE TABLE returning_e1 (k int, c int);
+CREATE TABLE returning_e2 (k int, c int);
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH x AS (UPDATE returning_e2 SET c = c + 1
+           RETURNING WITH (OLD AS o, NEW AS n) o.k)
+UPDATE returning_e1 SET c = c + 1
+  RETURNING WITH (OLD AS p, NEW AS q) p.c,
+    (SELECT count(*) FROM returning_e2 WHERE returning_e2.c = p.c) AS m,
+    (SELECT count(*) FROM returning_e2 WHERE returning_e2.c = q.c) AS m2;
+DROP TABLE returning_e1, returning_e2;
