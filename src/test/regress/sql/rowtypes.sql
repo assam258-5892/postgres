@@ -562,3 +562,36 @@ SELECT (NULL::compositetable).a;
 SELECT (NULL::compositetable).oid;
 
 DROP TABLE compositetable;
+
+-- A comparison of two ROW() constructors that is a record comparison, not a
+-- row comparison, needs its ::record casts to survive deparsing
+CREATE VIEW rowtypes_cmp_v AS
+SELECT (ROW(1, NULL::int)::record = ROW(1, NULL::int)::record) AS r;
+SELECT * FROM rowtypes_cmp_v;
+SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass);
+SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass) AS def \gset
+CREATE VIEW rowtypes_cmp_v_re AS :def
+SELECT * FROM rowtypes_cmp_v_re;
+-- The other operators of a record comparison need the casts as well
+CREATE VIEW rowtypes_cmp_v2 AS
+SELECT (ROW(1, 2)::record < ROW(1, 3)::record) AS lt,
+       (ROW(1, NULL::int)::record <> ROW(1, NULL::int)::record) AS ne;
+SELECT * FROM rowtypes_cmp_v2;
+SELECT pg_get_viewdef('rowtypes_cmp_v2'::regclass);
+SELECT pg_get_viewdef('rowtypes_cmp_v2'::regclass) AS def \gset
+CREATE VIEW rowtypes_cmp_v2_re AS :def
+SELECT * FROM rowtypes_cmp_v2_re;
+
+-- A row comparison is split by the parser into column-by-column operators,
+-- so there is no record operator to cast
+CREATE VIEW rowtypes_cmp_v3 AS
+SELECT (ROW(1, NULL::int) = ROW(1, NULL::int)) AS eq,
+       (ROW(1, NULL::int) <> ROW(1, NULL::int)) AS ne,
+       (ROW(1, 2) < ROW(1, 3)) AS lt;
+SELECT * FROM rowtypes_cmp_v3;
+SELECT pg_get_viewdef('rowtypes_cmp_v3'::regclass);
+SELECT pg_get_viewdef('rowtypes_cmp_v3'::regclass) AS def \gset
+CREATE VIEW rowtypes_cmp_v3_re AS :def
+SELECT * FROM rowtypes_cmp_v3_re;
+DROP VIEW rowtypes_cmp_v, rowtypes_cmp_v_re,
+  rowtypes_cmp_v2, rowtypes_cmp_v2_re, rowtypes_cmp_v3, rowtypes_cmp_v3_re;
