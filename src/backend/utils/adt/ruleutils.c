@@ -123,6 +123,9 @@ typedef struct
 	bool		colNamesVisible;	/* do we care about output column names? */
 	bool		inGroupBy;		/* deparsing GROUP BY clause? */
 	bool		varInOrderBy;	/* deparsing simple Var in ORDER BY? */
+	int			orderByResno;	/* resno of the sort key being printed, if it
+								 * is an output column, else 0; used only
+								 * while varInOrderBy is set */
 	Bitmapset  *appendparents;	/* if not null, map child Vars of these relids
 								 * back to the parent rel */
 } deparse_context;
@@ -462,6 +465,10 @@ static void get_window_frame_options(int frameOptions,
 									 deparse_context *context);
 static char *get_variable(Var *var, int levelsup, bool istoplevel,
 						  deparse_context *context);
+static bool tlist_has_other_column_named(Var *var, const char *attname,
+										 deparse_context *context);
+static bool inner_levels_have_column_named(deparse_context *context,
+										   int netlevelsup, const char *attname);
 static void get_special_variable(Node *node, deparse_context *context,
 								 void *callback_arg);
 static void resolve_special_varno(Node *node, deparse_context *context,
@@ -1140,6 +1147,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
 		context.varInOrderBy = false;
+		context.orderByResno = 0;
 		context.appendparents = NULL;
 
 		get_rule_expr(qual, &context, false);
@@ -3741,6 +3749,7 @@ deparse_expression_pretty(Node *expr, List *dpcontext,
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
 	context.varInOrderBy = false;
+	context.orderByResno = 0;
 	context.appendparents = NULL;
 
 	get_rule_expr(expr, &context, showimplicit);
@@ -5783,6 +5792,7 @@ make_ruledef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc,
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
 		context.varInOrderBy = false;
+		context.orderByResno = 0;
 		context.appendparents = NULL;
 
 		set_deparse_for_query(&dpns, query, NIL);
@@ -5975,6 +5985,7 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	context.colNamesVisible = colNamesVisible;
 	context.inGroupBy = false;
 	context.varInOrderBy = false;
+	context.orderByResno = 0;
 	context.appendparents = NULL;
 
 	set_deparse_for_query(&dpns, query, parentnamespace);
@@ -6907,10 +6918,13 @@ get_rule_sortgroupclause(Index ref, List *tlist, bool force_colno,
 	{
 		/* Tell get_variable to check for name conflict */
 		bool		save_varinorderby = context->varInOrderBy;
+		int			save_orderbyresno = context->orderByResno;
 
 		context->varInOrderBy = true;
+		context->orderByResno = tle->resjunk ? 0 : tle->resno;
 		(void) get_variable((Var *) expr, 0, false, context);
 		context->varInOrderBy = save_varinorderby;
+		context->orderByResno = save_orderbyresno;
 	}
 	else
 	{
@@ -7237,6 +7251,7 @@ get_window_frame_options_for_explain(int frameOptions,
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
 	context.varInOrderBy = false;
+	context.orderByResno = 0;
 	context.appendparents = NULL;
 
 	get_window_frame_options(frameOptions, startOffset, endOffset, &context);
@@ -7914,6 +7929,72 @@ get_utility_query_def(Query *query, deparse_context *context)
 }
 
 /*
+ * Does the current SELECT target list have an output column named attname
+ * whose expression is not the given Var?
+ *
+ * If a column is named in an ORDER BY or DISTINCT ON, the SQL92 rules (see
+ * findTargetlistEntrySQL92) look at the output column names first, so an
+ * unqualified name would be misread as that output column.
+ */
+static bool
+tlist_has_other_column_named(Var *var, const char *attname,
+							 deparse_context *context)
+{
+	int			colno = 0;
+
+	foreach_node(TargetEntry, tle, context->targetList)
+	{
+		char	   *colname;
+
+		if (tle->resjunk)
+			continue;			/* ignore junk entries */
+		colno++;
+
+		/* This must match colname-choosing logic in get_target_list() */
+		if (context->resultDesc && colno <= context->resultDesc->natts)
+			colname = NameStr(TupleDescAttr(context->resultDesc,
+											colno - 1)->attname);
+		else
+			colname = tle->resname;
+
+		if (colname && strcmp(colname, attname) == 0 &&
+			!equal(var, tle->expr))
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Does any relation in the query levels inside the one that netlevelsup
+ * levels up from the current one (the current level included) have a column
+ * named attname?  If so, an unqualified reference to the outer column would
+ * be bound to that column instead.
+ */
+static bool
+inner_levels_have_column_named(deparse_context *context, int netlevelsup,
+							   const char *attname)
+{
+	for (int level = 0; level < netlevelsup; level++)
+	{
+		deparse_namespace *dpns = (deparse_namespace *)
+			list_nth(context->namespaces, level);
+
+		foreach_ptr(deparse_columns, colinfo, dpns->rtable_columns)
+		{
+			for (int i = 0; i < colinfo->num_cols; i++)
+			{
+				if (colinfo->colnames[i] != NULL &&
+					strcmp(colinfo->colnames[i], attname) == 0)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+/*
  * Display a Var appropriately.
  *
  * In some cases (currently only when recursing into an unnamed join)
@@ -7930,7 +8011,9 @@ get_utility_query_def(Query *query, deparse_context *context)
  * name in the query.
  *
  * Returns the attname of the Var, or NULL if the Var has no attname (because
- * it is a whole-row Var or a subplan output reference).
+ * it is a whole-row Var or a subplan output reference), or if we printed
+ * something other than its name (a column number or the expansion of a
+ * merged JOIN USING column).
  */
 static char *
 get_variable(Var *var, int levelsup, bool istoplevel, deparse_context *context)
@@ -8090,7 +8173,8 @@ get_variable(Var *var, int levelsup, bool istoplevel, deparse_context *context)
 	 * If it's an unnamed join, look at the expansion of the alias variable.
 	 * If it's a simple reference to one of the input vars, then recursively
 	 * print the name of that var instead.  When it's not a simple reference,
-	 * we have to just print the unqualified join column name.  (This can only
+	 * we normally print the unqualified join column name, except where that
+	 * name could be captured by another column; see below.  (This can only
 	 * happen with "dangerous" merged columns in a JOIN USING; we took pains
 	 * previously to make the unqualified column name unique in such cases.)
 	 *
@@ -8112,6 +8196,59 @@ get_variable(Var *var, int levelsup, bool istoplevel, deparse_context *context)
 			{
 				return get_variable(aliasvar, var->varlevelsup + levelsup,
 									istoplevel, context);
+			}
+
+			/*
+			 * A merged JOIN USING column that is not a simple Var (say, from
+			 * a FULL JOIN) can be referenced only by its unqualified name.
+			 * That name is unique among the FROM columns of this query level,
+			 * but it could be bound to another column when read back: an
+			 * output column of the same name (if this is an ORDER BY or
+			 * DISTINCT ON key), or a same-named column of a relation in an
+			 * inner query level (added or renamed after the query was
+			 * parsed).  If an output column would capture it and the sort key
+			 * is itself an output column, print the sort key as a column
+			 * number, which a SELECT DISTINCT needs to match it with the
+			 * select list.  If it would be captured in any other way, print
+			 * the expression that the column stands for, in parentheses.
+			 */
+			if (aliasvar != NULL &&
+				attnum <= colinfo->num_cols &&
+				colinfo->colnames[attnum - 1] != NULL &&
+				context->varInOrderBy && !context->inGroupBy &&
+				context->orderByResno > 0 &&
+				tlist_has_other_column_named(var,
+											 colinfo->colnames[attnum - 1],
+											 context))
+			{
+				appendStringInfo(buf, "%d", context->orderByResno);
+				return NULL;
+			}
+
+			if (aliasvar != NULL &&
+				attnum <= colinfo->num_cols &&
+				colinfo->colnames[attnum - 1] != NULL &&
+				((netlevelsup > 0 &&
+				  inner_levels_have_column_named(context, netlevelsup,
+												 colinfo->colnames[attnum - 1])) ||
+				 (context->varInOrderBy && !context->inGroupBy &&
+				  tlist_has_other_column_named(var,
+											   colinfo->colnames[attnum - 1],
+											   context))))
+			{
+				Node	   *expansion = (Node *) copyObject(aliasvar);
+				bool		save_varinorderby = context->varInOrderBy;
+
+				/* its Vars are relative to this join's query level */
+				if (netlevelsup > 0)
+					IncrementVarSublevelsUp(expansion, netlevelsup, 0);
+
+				context->varInOrderBy = false;
+				appendStringInfoChar(buf, '(');
+				get_rule_expr(expansion, context, true);
+				appendStringInfoChar(buf, ')');
+				context->varInOrderBy = save_varinorderby;
+				return NULL;
 			}
 		}
 
@@ -8162,30 +8299,8 @@ get_variable(Var *var, int levelsup, bool istoplevel, deparse_context *context)
 	 */
 	if (context->varInOrderBy && !context->inGroupBy && !need_prefix)
 	{
-		int			colno = 0;
-
-		foreach_node(TargetEntry, tle, context->targetList)
-		{
-			char	   *colname;
-
-			if (tle->resjunk)
-				continue;		/* ignore junk entries */
-			colno++;
-
-			/* This must match colname-choosing logic in get_target_list() */
-			if (context->resultDesc && colno <= context->resultDesc->natts)
-				colname = NameStr(TupleDescAttr(context->resultDesc,
-												colno - 1)->attname);
-			else
-				colname = tle->resname;
-
-			if (colname && strcmp(colname, attname) == 0 &&
-				!equal(var, tle->expr))
-			{
-				need_prefix = true;
-				break;
-			}
-		}
+		if (tlist_has_other_column_named(var, attname, context))
+			need_prefix = true;
 	}
 
 	if (refname && need_prefix)
