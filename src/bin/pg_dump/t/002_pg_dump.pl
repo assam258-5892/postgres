@@ -3790,6 +3790,48 @@ my %tests = (
 		},
 	},
 
+	# SET EXPRESSION on an inherited column would drop the inherited CHECK
+	# constraints that refer to the column, so the column is printed in the
+	# CREATE TABLE, with its own expression
+	'Different generation expression of an inherited column' => {
+		create_order => 95,
+		create_sql => 'CREATE TABLE dump_test.test_gen_parent (
+						a int, g int generated always as (a * 2) stored);
+					CREATE TABLE dump_test.test_gen_child ()
+						INHERITS (dump_test.test_gen_parent);
+					ALTER TABLE ONLY dump_test.test_gen_child
+						ALTER COLUMN g SET EXPRESSION AS (a * 3);
+					CREATE TABLE dump_test.test_gen_grandchild ()
+						INHERITS (dump_test.test_gen_child);
+					ALTER TABLE dump_test.test_gen_parent
+						ADD CONSTRAINT test_gen_k CHECK (g < 1000);',
+		regexp => qr/^
+			\QCREATE TABLE dump_test.test_gen_child (\E\n
+			\s+\Qg integer GENERATED ALWAYS AS ((a * 3)) STORED\E\n
+			\Q)\E\n
+			\QINHERITS (dump_test.test_gen_parent);\E
+			.*
+			\QCREATE TABLE dump_test.test_gen_grandchild (\E\n
+			\Q)\E\n
+			\QINHERITS (dump_test.test_gen_child);\E
+			/xms,
+		like => {
+			%full_runs,
+			%dump_test_schema_runs,
+			section_pre_data => 1,
+		},
+		unlike => {
+			binary_upgrade => 1,
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
+	'no SET EXPRESSION for an inherited generated column' => {
+		regexp => qr/^\QALTER TABLE ONLY dump_test.test_gen_child ALTER COLUMN g SET EXPRESSION\E/m,
+		like => {},
+	},
+
 	'CREATE TABLE test_fourth_table_zero_col' => {
 		create_order => 6,
 		create_sql => 'CREATE TABLE dump_test.test_fourth_table (
