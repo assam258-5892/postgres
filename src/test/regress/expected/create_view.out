@@ -2469,21 +2469,21 @@ select * from tt33v2;
 (4 rows)
 
 select pg_get_viewdef('tt33v1'::regclass);
-          pg_get_viewdef           
------------------------------------
-  SELECT tt33v_a.y AS x           +
-    FROM (tt33v_a                 +
-      FULL JOIN tt33v_b USING (x))+
-   ORDER BY x;
+                pg_get_viewdef                
+----------------------------------------------
+  SELECT tt33v_a.y AS x                      +
+    FROM (tt33v_a                            +
+      FULL JOIN tt33v_b USING (x))           +
+   ORDER BY (COALESCE(tt33v_a.x, tt33v_b.x));
 (1 row)
 
 select pg_get_viewdef('tt33v2'::regclass);
-             pg_get_viewdef             
-----------------------------------------
-  SELECT DISTINCT ON (x) tt33v_a.y AS x+
-    FROM (tt33v_a                      +
-      FULL JOIN tt33v_b USING (x))     +
-   ORDER BY x;
+                            pg_get_viewdef                             
+-----------------------------------------------------------------------
+  SELECT DISTINCT ON ((COALESCE(tt33v_a.x, tt33v_b.x))) tt33v_a.y AS x+
+    FROM (tt33v_a                                                     +
+      FULL JOIN tt33v_b USING (x))                                    +
+   ORDER BY (COALESCE(tt33v_a.x, tt33v_b.x));
 (1 row)
 
 select pg_get_viewdef('tt33v1'::regclass) as def \gset
@@ -2493,18 +2493,18 @@ create view tt33v2_re as :def
 select * from tt33v1_re;
  x  
 ----
- 10
- 20
  30
+ 20
+ 10
    
 (4 rows)
 
 select * from tt33v2_re;
  x  
 ----
- 10
- 20
  30
+ 20
+ 10
    
 (4 rows)
 
@@ -2524,12 +2524,12 @@ select * from tt33v3 order by c;
 (4 rows)
 
 select pg_get_viewdef('tt33v3'::regclass);
-            pg_get_viewdef             
----------------------------------------
-  SELECT ( SELECT count(*) AS count   +
-            FROM tt33v_u              +
-           WHERE (tt33v_u.y = x)) AS c+
-    FROM (tt33v_a                     +
+                            pg_get_viewdef                            
+----------------------------------------------------------------------
+  SELECT ( SELECT count(*) AS count                                  +
+            FROM tt33v_u                                             +
+           WHERE (tt33v_u.y = (COALESCE(tt33v_a.x, tt33v_b.x)))) AS c+
+    FROM (tt33v_a                                                    +
       FULL JOIN tt33v_b USING (x));
 (1 row)
 
@@ -2539,9 +2539,9 @@ select * from tt33v3_re order by c;
  c 
 ---
  0
- 0
- 0
- 0
+ 1
+ 1
+ 1
 (4 rows)
 
 drop table tt33v_a, tt33v_b, tt33v_u cascade;
@@ -2619,7 +2619,7 @@ select pg_get_viewdef('tt33w2'::regclass);
      x AS zz                      +
     FROM (tt33w_a                 +
       FULL JOIN tt33w_h USING (x))+
-   ORDER BY x;
+   ORDER BY 2;
 (1 row)
 
 select pg_get_viewdef('tt33w2'::regclass) as def \gset
@@ -2671,38 +2671,38 @@ select * from tt34v2 order by x;
 (3 rows)
 
 select pg_get_viewdef('tt34v1'::regclass);
-                  pg_get_viewdef                  
---------------------------------------------------
-  SELECT ( SELECT ( SELECT count(*) AS count     +
-                    FROM tt34_c                  +
-                   WHERE (tt34_c.y = x)) AS count+
-            FROM tt34_d                          +
-          LIMIT 1) AS c                          +
-    FROM (tt34_a                                 +
+                                pg_get_viewdef                                 
+-------------------------------------------------------------------------------
+  SELECT ( SELECT ( SELECT count(*) AS count                                  +
+                    FROM tt34_c                                               +
+                   WHERE (tt34_c.y = (COALESCE(tt34_a.x, tt34_b.x)))) AS count+
+            FROM tt34_d                                                       +
+          LIMIT 1) AS c                                                       +
+    FROM (tt34_a                                                              +
       FULL JOIN tt34_b USING (x));
 (1 row)
 
 select pg_get_viewdef('tt34v2'::regclass);
-           pg_get_viewdef           
-------------------------------------
-  SELECT x,                        +
-     l.n                           +
-    FROM (tt34_a                   +
-      FULL JOIN tt34_b USING (x)), +
-     LATERAL ( SELECT count(*) AS n+
-            FROM tt34_c            +
-           WHERE (tt34_c.y = x)) l;
+                         pg_get_viewdef                          
+-----------------------------------------------------------------
+  SELECT x,                                                     +
+     l.n                                                        +
+    FROM (tt34_a                                                +
+      FULL JOIN tt34_b USING (x)),                              +
+     LATERAL ( SELECT count(*) AS n                             +
+            FROM tt34_c                                         +
+           WHERE (tt34_c.y = (COALESCE(tt34_a.x, tt34_b.x)))) l;
 (1 row)
 
 select pg_get_viewdef('tt34v1'::regclass, true);
-                 pg_get_viewdef                 
-------------------------------------------------
-  SELECT ( SELECT ( SELECT count(*) AS count   +
-                    FROM tt34_c                +
-                   WHERE tt34_c.y = x) AS count+
-            FROM tt34_d                        +
-          LIMIT 1) AS c                        +
-    FROM tt34_a                                +
+                               pg_get_viewdef                                
+-----------------------------------------------------------------------------
+  SELECT ( SELECT ( SELECT count(*) AS count                                +
+                    FROM tt34_c                                             +
+                   WHERE tt34_c.y = (COALESCE(tt34_a.x, tt34_b.x))) AS count+
+            FROM tt34_d                                                     +
+          LIMIT 1) AS c                                                     +
+    FROM tt34_a                                                             +
       FULL JOIN tt34_b USING (x);
 (1 row)
 
@@ -2715,21 +2715,17 @@ create view tt34v1_pre as :def
 select * from tt34v1 except select * from tt34v1_re;
  c 
 ---
- 1
-(1 row)
+(0 rows)
 
 select * from tt34v1 except select * from tt34v1_pre;
  c 
 ---
- 1
-(1 row)
+(0 rows)
 
 select * from tt34v2 except select * from tt34v2_re;
  x | n 
 ---+---
- 2 | 1
- 3 | 1
-(2 rows)
+(0 rows)
 
 drop table tt34_a, tt34_b, tt34_c, tt34_d cascade;
 NOTICE:  drop cascades to 5 other objects
