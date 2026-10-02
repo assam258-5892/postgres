@@ -2734,6 +2734,157 @@ drop cascades to view tt34v2
 drop cascades to view tt34v1_re
 drop cascades to view tt34v2_re
 drop cascades to view tt34v1_pre
+-- a whole-row reference to the alias of JOIN USING must keep its field names,
+-- not be turned into an anonymous ROW()
+create table tt31v_a (x int, p int);
+create table tt31v_b (x int, q int);
+insert into tt31v_a values (1, 10);
+insert into tt31v_b values (1, 20);
+create view tt31v as
+  select to_jsonb(ju) as j, (ju).x as fx, (select to_jsonb(ju)) as sub
+  from tt31v_a join tt31v_b using (x) as ju;
+select * from tt31v;
+    j     | fx |   sub    
+----------+----+----------
+ {"x": 1} |  1 | {"x": 1}
+(1 row)
+
+select pg_get_viewdef('tt31v'::regclass);
+                      pg_get_viewdef                       
+-----------------------------------------------------------
+  SELECT to_jsonb(ROW(tt31v_a.x)) AS j,                   +
+     (ROW(tt31v_a.x)).x AS fx,                            +
+     ( SELECT to_jsonb(ROW(tt31v_a.x)) AS to_jsonb) AS sub+
+    FROM (tt31v_a                                         +
+      JOIN tt31v_b USING (x) AS ju);
+(1 row)
+
+select pg_get_viewdef('tt31v'::regclass) as def \gset
+create view tt31v_re as :def
+ERROR:  could not identify column "x" in record data type
+LINE 2:     (ROW(tt31v_a.x)).x AS fx,
+             ^
+select * from tt31v;
+    j     | fx |   sub    
+----------+----+----------
+ {"x": 1} |  1 | {"x": 1}
+(1 row)
+
+select * from tt31v_re;
+ERROR:  relation "tt31v_re" does not exist
+LINE 1: select * from tt31v_re;
+                      ^
+drop table tt31v_a, tt31v_b cascade;
+NOTICE:  drop cascades to view tt31v
+-- a USING alias that an alias of the join itself hides is not visible, so it
+-- must not force a relation of the same name to be renamed, and a ROW() of the
+-- join columns must not be printed as a reference to it
+create table tt31w_a (f1 int, p int);
+create table tt31w_b (f1 int, q int);
+create table tt31w_u (d int);
+create view tt31w1 as
+  select to_jsonb(row(j.f1)) as j
+  from (tt31w_a join tt31w_b using (f1) as ju) as j;
+create view tt31w2 as
+  select j.f1, tt31w_u.d
+  from (tt31w_a join tt31w_b using (f1) as tt31w_u) as j
+       cross join tt31w_u;
+select pg_get_viewdef('tt31w1'::regclass);
+             pg_get_viewdef             
+----------------------------------------
+  SELECT to_jsonb(ROW(j.f1)) AS j      +
+    FROM (tt31w_a                      +
+      JOIN tt31w_b USING (f1) AS ju) j;
+(1 row)
+
+select pg_get_viewdef('tt31w2'::regclass);
+               pg_get_viewdef               
+--------------------------------------------
+  SELECT j.f1,                             +
+     tt31w_u.d                             +
+    FROM ((tt31w_a                         +
+      JOIN tt31w_b USING (f1) AS tt31w_u) j+
+      CROSS JOIN tt31w_u);
+(1 row)
+
+select pg_get_viewdef('tt31w1'::regclass) as def \gset
+create view tt31w1_re as :def
+select pg_get_viewdef('tt31w2'::regclass) as def \gset
+create view tt31w2_re as :def
+drop table tt31w_a, tt31w_b, tt31w_u cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to view tt31w1
+drop cascades to view tt31w2
+drop cascades to view tt31w1_re
+drop cascades to view tt31w2_re
+-- a whole-row reference to the alias at the top of a select list, which is
+-- not the select list of the view, must not be expanded into columns when
+-- the query is read back
+create table tt31w_a (x int, y int);
+create table tt31w_b (x int, y int);
+insert into tt31w_a values (1, 2);
+insert into tt31w_b values (1, 2);
+create view tt31w as
+  select to_jsonb(s.ju) as j
+  from (select ju from tt31w_a join tt31w_b using (x, y) as ju) s;
+create view tt31w_c as
+  with c as (select ju from tt31w_a join tt31w_b using (x) as ju)
+  select to_jsonb(c.ju) as j from c;
+select pg_get_viewdef('tt31w'::regclass);
+                  pg_get_viewdef                   
+---------------------------------------------------
+  SELECT to_jsonb(ju) AS j                        +
+    FROM ( SELECT ROW(tt31w_a.x, tt31w_a.y) AS ju +
+            FROM (tt31w_a                         +
+              JOIN tt31w_b USING (x, y) AS ju)) s;
+(1 row)
+
+select pg_get_viewdef('tt31w_c'::regclass);
+               pg_get_viewdef               
+--------------------------------------------
+  WITH c AS (                              +
+          SELECT ROW(tt31w_a.x) AS ju      +
+            FROM (tt31w_a                  +
+              JOIN tt31w_b USING (x) AS ju)+
+         )                                 +
+  SELECT to_jsonb(ju) AS j                 +
+    FROM c;
+(1 row)
+
+select pg_get_viewdef('tt31w'::regclass) as def \gset
+create view tt31w_re as :def
+select pg_get_viewdef('tt31w_c'::regclass) as def \gset
+create view tt31w_c_re as :def
+select * from tt31w;
+        j         
+------------------
+ {"x": 1, "y": 2}
+(1 row)
+
+select * from tt31w_re;
+         j          
+--------------------
+ {"f1": 1, "f2": 2}
+(1 row)
+
+select * from tt31w_c;
+    j     
+----------
+ {"x": 1}
+(1 row)
+
+select * from tt31w_c_re;
+     j     
+-----------
+ {"f1": 1}
+(1 row)
+
+drop table tt31w_a, tt31w_b cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to view tt31w
+drop cascades to view tt31w_c
+drop cascades to view tt31w_re
+drop cascades to view tt31w_c_re
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects
