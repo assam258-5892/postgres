@@ -1717,6 +1717,14 @@ SELECT * FROM gtest_rule;
 (1 row)
 
 DROP TABLE gtest_rule;
+-- Objects that are left in the regression database for the dump and restore
+-- tests: a child with a generation expression of its own, and a CHECK
+-- constraint of the parent on the column
+create table gtest_inhx_p (a int, g int generated always as (a * 2) stored);
+create table gtest_inhx_c () inherits (gtest_inhx_p);
+alter table only gtest_inhx_c alter column g set expression as (a * 3);
+create table gtest_inhx_g () inherits (gtest_inhx_c);
+alter table gtest_inhx_p add constraint gtest_inhx_k check (g < 1000);
 -- sanity check of system catalog
 SELECT attrelid, attname, attgenerated FROM pg_attribute WHERE attgenerated NOT IN ('', 's', 'v');
  attrelid | attname | attgenerated 
