@@ -8107,6 +8107,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 				constrinfo->conperiod = *(PQgetvalue(res, j, i_conperiod)) == 't';
 				constrinfo->conislocal = true;
 				constrinfo->separate = true;
+				constrinfo->revalidate = false;
 
 				indxinfo[j].indexconstraint = constrinfo->dobj.dumpId;
 				if (relstats != NULL)
@@ -8323,6 +8324,7 @@ getConstraints(Archive *fout, TableInfo tblinfo[], int numTables)
 		constrinfo[j].condeferred = false;
 		constrinfo[j].conislocal = true;
 		constrinfo[j].separate = true;
+		constrinfo[j].revalidate = false;
 
 		/*
 		 * Restoring an FK that points to a partitioned table requires that
@@ -8485,6 +8487,7 @@ getDomainConstraints(Archive *fout, TypeInfo *tyinfo)
 		constraint->conislocal = true;
 
 		constraint->separate = !validated;
+		constraint->revalidate = false;
 
 		/*
 		 * Make the domain depend on the constraint, ensuring it won't be
@@ -9765,6 +9768,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				 * violating data has been loaded.
 				 */
 				constrs[j].separate = true;
+				constrs[j].revalidate = false;
 
 				constrs[j].dobj.dump = tbinfo->dobj.dump;
 			}
@@ -9878,6 +9882,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				 * the constraint.
 				 */
 				constrs[j].separate = !validated;
+				constrs[j].revalidate = false;
 
 				constrs[j].dobj.dump = tbinfo->dobj.dump;
 
@@ -18994,7 +18999,7 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 	{
 		/* CHECK or invalid not-null constraint on a table */
 
-		/* Ignore if not to be dumped separately, or if it was inherited */
+		/* Emit ADD CONSTRAINT only if dumped separately and defined locally */
 		if (coninfo->separate && coninfo->conislocal)
 		{
 			const char *keyword;
@@ -19027,6 +19032,30 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 										  .section = SECTION_POST_DATA,
 										  .createStmt = q->data,
 										  .dropStmt = delq->data));
+		}
+		else if (coninfo->separate && coninfo->revalidate)
+		{
+			/*
+			 * The constraint is valid but was inherited from a NOT VALID one,
+			 * so an ancestor's ADD CONSTRAINT creates it as NOT VALID here.
+			 * Validate it, without ONLY so that the validation also reaches
+			 * the children.
+			 */
+			appendPQExpBuffer(q, "ALTER %sTABLE %s\n", foreign,
+							  fmtQualifiedDumpable(tbinfo));
+			appendPQExpBuffer(q, "    VALIDATE CONSTRAINT %s;\n",
+							  fmtId(coninfo->dobj.name));
+
+			tag = psprintf("%s %s", tbinfo->dobj.name, coninfo->dobj.name);
+
+			if (coninfo->dobj.dump & DUMP_COMPONENT_DEFINITION)
+				ArchiveEntry(fout, coninfo->dobj.catId, coninfo->dobj.dumpId,
+							 ARCHIVE_OPTS(.tag = tag,
+										  .namespace = tbinfo->dobj.namespace->dobj.name,
+										  .owner = tbinfo->rolname,
+										  .description = "CHECK CONSTRAINT",
+										  .section = SECTION_POST_DATA,
+										  .createStmt = q->data));
 		}
 	}
 	else if (tbinfo == NULL)
