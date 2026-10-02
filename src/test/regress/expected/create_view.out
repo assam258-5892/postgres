@@ -2435,6 +2435,309 @@ drop table ju, tt32v_b cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to view tt32v
 drop cascades to view tt32v_re
+-- a merged FULL JOIN USING column can be referenced only by its unqualified
+-- name, so an ORDER BY or DISTINCT ON would read it as an output column of the
+-- same name (a column rename of the view can create one), and an inner query
+-- level that later gets a column of that name would capture it
+create table tt33v_a (x int, y int);
+create table tt33v_b (x int, z int);
+insert into tt33v_a values (1, 30), (2, 20), (3, 10);
+insert into tt33v_b values (2, 2), (3, 3), (4, 4);
+create view tt33v1 as
+  select tt33v_a.y as q from tt33v_a full join tt33v_b using (x) order by x;
+alter view tt33v1 rename column q to x;
+create view tt33v2 as
+  select distinct on (x) tt33v_a.y as q from tt33v_a full join tt33v_b using (x)
+  order by x;
+alter view tt33v2 rename column q to x;
+select * from tt33v1;
+ x  
+----
+ 30
+ 20
+ 10
+   
+(4 rows)
+
+select * from tt33v2;
+ x  
+----
+ 30
+ 20
+ 10
+   
+(4 rows)
+
+select pg_get_viewdef('tt33v1'::regclass);
+          pg_get_viewdef           
+-----------------------------------
+  SELECT tt33v_a.y AS x           +
+    FROM (tt33v_a                 +
+      FULL JOIN tt33v_b USING (x))+
+   ORDER BY x;
+(1 row)
+
+select pg_get_viewdef('tt33v2'::regclass);
+             pg_get_viewdef             
+----------------------------------------
+  SELECT DISTINCT ON (x) tt33v_a.y AS x+
+    FROM (tt33v_a                      +
+      FULL JOIN tt33v_b USING (x))     +
+   ORDER BY x;
+(1 row)
+
+select pg_get_viewdef('tt33v1'::regclass) as def \gset
+create view tt33v1_re as :def
+select pg_get_viewdef('tt33v2'::regclass) as def \gset
+create view tt33v2_re as :def
+select * from tt33v1_re;
+ x  
+----
+ 10
+ 20
+ 30
+   
+(4 rows)
+
+select * from tt33v2_re;
+ x  
+----
+ 10
+ 20
+ 30
+   
+(4 rows)
+
+create table tt33v_u (y int);
+insert into tt33v_u values (1), (2), (3);
+create view tt33v3 as
+  select (select count(*) from tt33v_u where tt33v_u.y = x) as c
+  from tt33v_a full join tt33v_b using (x);
+alter table tt33v_u add column x int;
+select * from tt33v3 order by c;
+ c 
+---
+ 0
+ 1
+ 1
+ 1
+(4 rows)
+
+select pg_get_viewdef('tt33v3'::regclass);
+            pg_get_viewdef             
+---------------------------------------
+  SELECT ( SELECT count(*) AS count   +
+            FROM tt33v_u              +
+           WHERE (tt33v_u.y = x)) AS c+
+    FROM (tt33v_a                     +
+      FULL JOIN tt33v_b USING (x));
+(1 row)
+
+select pg_get_viewdef('tt33v3'::regclass) as def \gset
+create view tt33v3_re as :def
+select * from tt33v3_re order by c;
+ c 
+---
+ 0
+ 0
+ 0
+ 0
+(4 rows)
+
+drop table tt33v_a, tt33v_b, tt33v_u cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to view tt33v1
+drop cascades to view tt33v2
+drop cascades to view tt33v1_re
+drop cascades to view tt33v2_re
+drop cascades to view tt33v3
+drop cascades to view tt33v3_re
+-- An inner USING alias named like the outer relation must not make us print
+-- the expansion of a merged column that nothing in the inner levels can
+-- capture by its plain name
+create table tt33w_a (x int, v int);
+create table tt33w_f (k int, v int);
+create table tt33w_g (k int);
+create table tt33w_h (x int);
+insert into tt33w_a values (1, 1), (2, 2);
+insert into tt33w_f values (1, 1), (2, 5);
+insert into tt33w_g values (1), (2);
+insert into tt33w_h values (2), (3);
+create view tt33w1 as
+  select (select count(*) from tt33w_f join tt33w_g using (k) as tt33w_a
+          where tt33w_f.v = x) as c
+  from tt33w_a full join tt33w_h using (x);
+select * from tt33w1 order by c;
+ c 
+---
+ 0
+ 0
+ 1
+(3 rows)
+
+select pg_get_viewdef('tt33w1'::regclass);
+                 pg_get_viewdef                  
+-------------------------------------------------
+  SELECT ( SELECT count(*) AS count             +
+            FROM (tt33w_f                       +
+              JOIN tt33w_g USING (k) AS tt33w_a)+
+           WHERE (tt33w_f.v = x)) AS c          +
+    FROM (tt33w_a                               +
+      FULL JOIN tt33w_h USING (x));
+(1 row)
+
+select pg_get_viewdef('tt33w1'::regclass) as def \gset
+create view tt33w1_re as :def
+select * from tt33w1_re order by c;
+ c 
+---
+ 0
+ 0
+ 1
+(3 rows)
+
+-- when another output column has the same name, the ORDER BY key of a SELECT
+-- DISTINCT that is a merged column must be printed as the number of its own
+-- output column, to match the select list
+create view tt33w2 as
+  select distinct tt33w_a.v as q, x from tt33w_a full join tt33w_h using (x)
+  order by x;
+alter view tt33w2 rename column x to zz;
+alter view tt33w2 rename column q to x;
+select * from tt33w2 order by zz;
+ x | zz 
+---+----
+ 1 |  1
+ 2 |  2
+   |  3
+(3 rows)
+
+select pg_get_viewdef('tt33w2'::regclass);
+          pg_get_viewdef           
+-----------------------------------
+  SELECT DISTINCT tt33w_a.v AS x, +
+     x AS zz                      +
+    FROM (tt33w_a                 +
+      FULL JOIN tt33w_h USING (x))+
+   ORDER BY x;
+(1 row)
+
+select pg_get_viewdef('tt33w2'::regclass) as def \gset
+create view tt33w2_re as :def
+select * from tt33w2_re order by zz;
+ x | zz 
+---+----
+ 1 |  1
+ 2 |  2
+   |  3
+(3 rows)
+
+drop view tt33w1, tt33w2, tt33w1_re, tt33w2_re;
+drop table tt33w_a, tt33w_f, tt33w_g, tt33w_h;
+-- a merged column referenced from two query levels down, and from a LATERAL
+-- subquery, after a column of the same name has appeared at an inner level;
+-- also in the pretty-printed form
+create table tt34_a (x int, v int);
+create table tt34_b (x int, w int);
+create table tt34_c (y int);
+create table tt34_d (z int);
+insert into tt34_a values (1, 10), (2, 20);
+insert into tt34_b values (2, 200), (3, 300);
+insert into tt34_c values (2), (3);
+insert into tt34_d values (1);
+create view tt34v1 as
+  select (select (select count(*) from tt34_c where tt34_c.y = x)
+          from tt34_d limit 1) as c
+  from tt34_a full join tt34_b using (x);
+create view tt34v2 as
+  select x, l.n
+  from tt34_a full join tt34_b using (x),
+       lateral (select count(*) as n from tt34_c where tt34_c.y = x) l;
+alter table tt34_c add column x int;
+select * from tt34v1 order by c;
+ c 
+---
+ 0
+ 1
+ 1
+(3 rows)
+
+select * from tt34v2 order by x;
+ x | n 
+---+---
+ 1 | 0
+ 2 | 1
+ 3 | 1
+(3 rows)
+
+select pg_get_viewdef('tt34v1'::regclass);
+                  pg_get_viewdef                  
+--------------------------------------------------
+  SELECT ( SELECT ( SELECT count(*) AS count     +
+                    FROM tt34_c                  +
+                   WHERE (tt34_c.y = x)) AS count+
+            FROM tt34_d                          +
+          LIMIT 1) AS c                          +
+    FROM (tt34_a                                 +
+      FULL JOIN tt34_b USING (x));
+(1 row)
+
+select pg_get_viewdef('tt34v2'::regclass);
+           pg_get_viewdef           
+------------------------------------
+  SELECT x,                        +
+     l.n                           +
+    FROM (tt34_a                   +
+      FULL JOIN tt34_b USING (x)), +
+     LATERAL ( SELECT count(*) AS n+
+            FROM tt34_c            +
+           WHERE (tt34_c.y = x)) l;
+(1 row)
+
+select pg_get_viewdef('tt34v1'::regclass, true);
+                 pg_get_viewdef                 
+------------------------------------------------
+  SELECT ( SELECT ( SELECT count(*) AS count   +
+                    FROM tt34_c                +
+                   WHERE tt34_c.y = x) AS count+
+            FROM tt34_d                        +
+          LIMIT 1) AS c                        +
+    FROM tt34_a                                +
+      FULL JOIN tt34_b USING (x);
+(1 row)
+
+select pg_get_viewdef('tt34v1'::regclass) as def \gset
+create view tt34v1_re as :def
+select pg_get_viewdef('tt34v2'::regclass) as def \gset
+create view tt34v2_re as :def
+select pg_get_viewdef('tt34v1'::regclass, true) as def \gset
+create view tt34v1_pre as :def
+select * from tt34v1 except select * from tt34v1_re;
+ c 
+---
+ 1
+(1 row)
+
+select * from tt34v1 except select * from tt34v1_pre;
+ c 
+---
+ 1
+(1 row)
+
+select * from tt34v2 except select * from tt34v2_re;
+ x | n 
+---+---
+ 2 | 1
+ 3 | 1
+(2 rows)
+
+drop table tt34_a, tt34_b, tt34_c, tt34_d cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to view tt34v1
+drop cascades to view tt34v2
+drop cascades to view tt34v1_re
+drop cascades to view tt34v2_re
+drop cascades to view tt34v1_pre
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects
