@@ -474,6 +474,12 @@ flagInhIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
  *   in those cases inherited tables are recreated standalone first and then
  *   reattached to the parent.  (See also the logic in dumpTableSchema().)
  *
+ * - Detect inherited child columns whose generation expression differs from
+ *   a parent's (possible since v17, with ALTER TABLE ... SET EXPRESSION on
+ *   the child).  Such a column is made a local one, so that it is printed in
+ *   the CREATE TABLE with its own expression.  The same exceptions as above
+ *   apply: partitions and binary upgrade mode print the column anyway.
+ *
  * modifies tblinfo
  */
 static void
@@ -576,6 +582,16 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 							foundSameGenerated = true;
 						else
 							foundDiffGenerated = true;
+
+						/*
+						 * The parent's generation expression may be flagged
+						 * separate, for example because the parent has not
+						 * been processed yet.  Then this table, which
+						 * inherits the column, must be created after it.
+						 */
+						if (parentDef != NULL && parentDef->separate)
+							addObjectDependency(&tbinfo->dobj,
+												parentDef->dobj.dumpId);
 					}
 				}
 			}
@@ -643,6 +659,37 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 			if (foundSameGenerated && !foundDiffGenerated &&
 				!tbinfo->ispartition && !dopt->binary_upgrade)
 				tbinfo->attrdefs[j]->dobj.dump = DUMP_COMPONENT_NONE;
+
+			/*
+			 * If the expression differs from the parent's (possible since
+			 * v17, with ALTER TABLE ... SET EXPRESSION on the child), print
+			 * the column in the CREATE TABLE with its own expression.  Doing
+			 * that with SET EXPRESSION afterwards would drop the inherited
+			 * CHECK constraints that refer to the column.
+			 *
+			 * Like the DEFAULT NULL case above, this changes state that other
+			 * iterations might inspect: the column becomes a local one, and
+			 * its attrdef is no longer flagged separate, which a child
+			 * scanned earlier may have seen.  That is harmless, since the
+			 * attrdef is now part of this table's CREATE TABLE.  Other tables
+			 * do not look at attislocal.
+			 *
+			 * XXX The restored column then has attislocal = true, unlike the
+			 * original.  If ALTER TABLE ONLY ... SET EXPRESSION kept the
+			 * inherited constraints (see ATPostAlterTypeCleanup), this could
+			 * go back to printing the column only with SET EXPRESSION.
+			 */
+			else if (foundDiffGenerated &&
+					 tbinfo->attgenerated[j] &&
+					 tbinfo->attrdefs[j] != NULL &&
+					 !tbinfo->attislocal[j] &&
+					 !tbinfo->ispartition && !dopt->binary_upgrade)
+			{
+				tbinfo->attislocal[j] = true;
+				tbinfo->attrdefs[j]->separate = false;
+				addObjectDependency(&tbinfo->dobj,
+									tbinfo->attrdefs[j]->dobj.dumpId);
+			}
 		}
 	}
 }
