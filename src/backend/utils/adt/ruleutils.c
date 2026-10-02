@@ -10794,13 +10794,27 @@ get_oper_expr(OpExpr *expr, deparse_context *context)
 		/* binary operator */
 		Node	   *arg1 = (Node *) linitial(args);
 		Node	   *arg2 = (Node *) lsecond(args);
+		bool		rowrow = IsA(arg1, RowExpr) && IsA(arg2, RowExpr);
 
+		/*
+		 * If both operands are row constructors, the parser would turn "ROW()
+		 * op ROW()" into a column-by-column row comparison rather than an
+		 * operator on two record values (see transformAExprOp).  Print an
+		 * explicit cast on each bare ROW() so that the raw parse tree has
+		 * TypeCast nodes, not RowExprs, as operands.
+		 */
 		get_rule_expr_paren(arg1, context, true, (Node *) expr);
+		if (rowrow && ((RowExpr *) arg1)->row_format != COERCE_EXPLICIT_CAST)
+			appendStringInfo(buf, "::%s",
+							 format_type_with_typemod(((RowExpr *) arg1)->row_typeid, -1));
 		appendStringInfo(buf, " %s ",
 						 generate_operator_name(opno,
 												exprType(arg1),
 												exprType(arg2)));
 		get_rule_expr_paren(arg2, context, true, (Node *) expr);
+		if (rowrow && ((RowExpr *) arg2)->row_format != COERCE_EXPLICIT_CAST)
+			appendStringInfo(buf, "::%s",
+							 format_type_with_typemod(((RowExpr *) arg2)->row_typeid, -1));
 	}
 	else
 	{
