@@ -3774,9 +3774,9 @@ my %tests = (
 					ALTER TABLE dump_test.test_trg_aleaf
 						ENABLE ALWAYS TRIGGER test_trg_trigger;',
 		regexp => qr/^
-			\QALTER TABLE dump_test.test_trg_aleaf ENABLE ALWAYS TRIGGER test_trg_trigger;\E
-			.*
 			\QCREATE TRIGGER test_trg_trigger AFTER INSERT ON dump_test.test_trg_root\E
+			.*
+			\QALTER TABLE dump_test.test_trg_aleaf ENABLE ALWAYS TRIGGER test_trg_trigger;\E
 			/xms,
 		like => {
 			%full_runs,

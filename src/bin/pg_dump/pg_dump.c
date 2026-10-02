@@ -8617,6 +8617,7 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 				i_tgname,
 				i_tgenabled,
 				i_tgispartition,
+				i_tgsameasparent,
 				i_tgdef;
 
 	/*
@@ -8651,17 +8652,24 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 		 * under-parenthesization.
 		 *
 		 * NB: We need to see partition triggers in case the tgenabled flag
-		 * has been changed from the parent.
+		 * has been changed from the parent.  We also fetch those whose
+		 * tgenabled matches the parent's, but without their definitions
+		 * (which can be expensive for many partitions) and without dumping
+		 * them.  They must be known so that a dumped trigger below them keeps
+		 * its dependency on the trigger it is cloned from.
 		 */
 		appendPQExpBuffer(query,
 						  "SELECT t.tgrelid, t.tgname, "
-						  "pg_catalog.pg_get_triggerdef(t.oid, false) AS tgdef, "
+						  "CASE WHEN t.tgparentid <> 0 AND t.tgenabled = u.tgenabled "
+						  "THEN NULL "
+						  "ELSE pg_catalog.pg_get_triggerdef(t.oid, false) END AS tgdef, "
 						  "t.tgenabled, t.tableoid, t.oid, "
-						  "t.tgparentid <> 0 AS tgispartition\n"
+						  "t.tgparentid <> 0 AS tgispartition, "
+						  "t.tgparentid <> 0 AND t.tgenabled = u.tgenabled AS tgsameasparent\n"
 						  "FROM unnest('%s'::pg_catalog.oid[]) AS src(tbloid)\n"
 						  "JOIN pg_catalog.pg_trigger t ON (src.tbloid = t.tgrelid) "
 						  "LEFT JOIN pg_catalog.pg_trigger u ON (u.oid = t.tgparentid) "
-						  "WHERE ((NOT t.tgisinternal AND t.tgparentid = 0) "
+						  "WHERE (NOT t.tgisinternal "
 						  "OR t.tgenabled != u.tgenabled) "
 						  "ORDER BY t.tgrelid, t.tgname",
 						  tbloids->data);
@@ -8736,6 +8744,7 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 	i_tgname = PQfnumber(res, "tgname");
 	i_tgenabled = PQfnumber(res, "tgenabled");
 	i_tgispartition = PQfnumber(res, "tgispartition");
+	i_tgsameasparent = PQfnumber(res, "tgsameasparent");
 	i_tgdef = PQfnumber(res, "tgdef");
 
 	tginfo = pg_malloc_array(TriggerInfo, ntups);
@@ -8782,6 +8791,15 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 			tginfo[j].tgenabled = *(PQgetvalue(res, j, i_tgenabled));
 			tginfo[j].tgispartition = *(PQgetvalue(res, j, i_tgispartition)) == 't';
 			tginfo[j].tgdef = pg_strdup(PQgetvalue(res, j, i_tgdef));
+
+			/*
+			 * A partition trigger that is in the same state as the one it is
+			 * cloned from needs no command of its own; it is here only to
+			 * keep the order of the dump right.
+			 */
+			if (i_tgsameasparent >= 0 &&
+				*(PQgetvalue(res, j, i_tgsameasparent)) == 't')
+				tginfo[j].dobj.dump = DUMP_COMPONENT_NONE;
 		}
 	}
 
