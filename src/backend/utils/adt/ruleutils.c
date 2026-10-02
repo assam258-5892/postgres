@@ -11941,8 +11941,14 @@ get_sublink_expr(SubLink *sublink, deparse_context *context)
 		{
 			/* single combining operator */
 			OpExpr	   *opexpr = (OpExpr *) sublink->testexpr;
+			Node	   *larg = (Node *) linitial(opexpr->args);
 
-			get_rule_expr(linitial(opexpr->args), context, true);
+			/*
+			 * The test expression is the left operand of the combining
+			 * operator, so it needs the same parenthesization as any other
+			 * operator operand (we print IN / op ANY after it).
+			 */
+			get_rule_expr_paren(larg, context, true, (Node *) sublink);
 			opname = generate_operator_name(opexpr->opno,
 											exprType(linitial(opexpr->args)),
 											exprType(lsecond(opexpr->args)));
