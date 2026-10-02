@@ -3754,6 +3754,42 @@ my %tests = (
 		},
 	},
 
+	# The trigger of a partition is cloned from the one in the level above, so
+	# with an intermediate level the ALTER for the leaf must come after the
+	# CREATE TRIGGER of the root.  The leaf is named to sort before the other
+	# tables, so that only the dependencies can put it in that order.
+	'Disabled trigger on a leaf of a two-level partition tree' => {
+		create_order => 95,
+		create_sql => 'CREATE TABLE dump_test.test_trg_root (a int)
+						PARTITION BY RANGE (a);
+					CREATE TABLE dump_test.test_trg_mid
+						PARTITION OF dump_test.test_trg_root
+						FOR VALUES FROM (0) TO (100) PARTITION BY RANGE (a);
+					CREATE TABLE dump_test.test_trg_aleaf
+						PARTITION OF dump_test.test_trg_mid
+						FOR VALUES FROM (0) TO (10);
+					CREATE TRIGGER test_trg_trigger AFTER INSERT
+						ON dump_test.test_trg_root FOR EACH ROW
+						EXECUTE FUNCTION dump_test.trigger_func();
+					ALTER TABLE dump_test.test_trg_aleaf
+						ENABLE ALWAYS TRIGGER test_trg_trigger;',
+		regexp => qr/^
+			\QCREATE TRIGGER test_trg_trigger AFTER INSERT ON dump_test.test_trg_root\E
+			.*
+			\QALTER TABLE dump_test.test_trg_aleaf ENABLE ALWAYS TRIGGER test_trg_trigger;\E
+			/xms,
+		like => {
+			%full_runs,
+			%dump_test_schema_runs,
+			section_post_data => 1,
+			binary_upgrade => 1,
+		},
+		unlike => {
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
 	'CREATE TABLE test_fourth_table_zero_col' => {
 		create_order => 6,
 		create_sql => 'CREATE TABLE dump_test.test_fourth_table (
