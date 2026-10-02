@@ -525,6 +525,8 @@ typedef struct _constraintInfo
 	bool		conperiod;		/* true if the constraint is WITHOUT OVERLAPS */
 	bool		conislocal;		/* true if constraint has local definition */
 	bool		separate;		/* true if must dump as separate item */
+	bool		revalidate;		/* valid CHECK inherited from a NOT VALID one;
+								 * dump VALIDATE CONSTRAINT if separate */
 } ConstraintInfo;
 
 typedef struct _procLangInfo

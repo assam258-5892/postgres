@@ -3842,16 +3842,14 @@ my %tests = (
 		regexp => qr/^
 			\QALTER TABLE dump_test.test_nv_parent\E\n
 			\s+\QADD CONSTRAINT nv_k CHECK ((a > 0)) NOT VALID;\E
-			(?!.*
+			.*
 			\QALTER TABLE dump_test.test_nv_child\E\n
-			\s+\QVALIDATE CONSTRAINT nv_k;\E)
+			\s+\QVALIDATE CONSTRAINT nv_k;\E
 			/xms,
-		like => {
-			%full_runs, %dump_test_schema_runs,
-			binary_upgrade => 1,
-			section_post_data => 1,
-		},
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_post_data => 1, },
 		unlike => {
+			binary_upgrade => 1,
 			exclude_dump_test_schema => 1,
 			only_dump_measurement => 1,
 		},
@@ -3875,16 +3873,14 @@ my %tests = (
 		regexp => qr/^
 			\QALTER TABLE dump_test.test_nv3_zroot\E\n
 			\s+\QADD CONSTRAINT nv3_k CHECK ((a > 0)) NOT VALID;\E
-			(?!.*
+			.*
 			\QALTER TABLE dump_test.test_nv3_aleaf\E\n
-			\s+\QVALIDATE CONSTRAINT nv3_k;\E)
+			\s+\QVALIDATE CONSTRAINT nv3_k;\E
 			/xms,
-		like => {
-			%full_runs, %dump_test_schema_runs,
-			binary_upgrade => 1,
-			section_post_data => 1,
-		},
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_post_data => 1, },
 		unlike => {
+			binary_upgrade => 1,
 			exclude_dump_test_schema => 1,
 			only_dump_measurement => 1,
 		},
