@@ -1052,3 +1052,29 @@ SELECT * FROM JSON_TABLE(jsonb '{}', '$' AS p0
 \sv json_table_view_on_empty;
 
 DROP VIEW json_table_view_on_empty;
+
+-- Test JSON_TABLE() column alias list deparsing -- the columns defined in the
+-- COLUMNS clause are renamed by the alias list, so it must be kept
+CREATE VIEW json_table_view_alias AS
+SELECT t.p, t.q
+FROM JSON_TABLE(jsonb '[{"a": 1, "b": 2}]', '$[*]'
+	COLUMNS (a int PATH '$.a', b int PATH '$.b')) AS t(p, q);
+\sv json_table_view_alias;
+SELECT * FROM json_table_view_alias;
+SELECT pg_get_viewdef('json_table_view_alias'::regclass) AS def \gset
+CREATE VIEW json_table_view_alias_re AS :def
+SELECT * FROM json_table_view_alias_re;
+
+-- A JSON_TABLE() that has to be renamed to avoid a conflict with another one
+-- in an outer query level must get an explicit alias
+CREATE VIEW json_table_view_conflict AS
+SELECT a, (SELECT max(b) FROM JSON_TABLE(jsonb '[{"b": 2}]', '$[*]'
+	COLUMNS (b int PATH '$.b'))) AS m
+FROM JSON_TABLE(jsonb '[{"a": 1}]', '$[*]' COLUMNS (a int PATH '$.a'));
+\sv json_table_view_conflict;
+SELECT * FROM json_table_view_conflict;
+SELECT pg_get_viewdef('json_table_view_conflict'::regclass) AS def \gset
+CREATE VIEW json_table_view_conflict_re AS :def
+SELECT * FROM json_table_view_conflict_re;
+
+DROP VIEW json_table_view_alias, json_table_view_conflict;

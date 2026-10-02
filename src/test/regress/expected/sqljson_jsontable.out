@@ -1926,3 +1926,73 @@ CREATE OR REPLACE VIEW public.json_table_view_on_empty AS
             ) ERROR ON ERROR
         )
 DROP VIEW json_table_view_on_empty;
+-- Test JSON_TABLE() column alias list deparsing -- the columns defined in the
+-- COLUMNS clause are renamed by the alias list, so it must be kept
+CREATE VIEW json_table_view_alias AS
+SELECT t.p, t.q
+FROM JSON_TABLE(jsonb '[{"a": 1, "b": 2}]', '$[*]'
+	COLUMNS (a int PATH '$.a', b int PATH '$.b')) AS t(p, q);
+\sv json_table_view_alias;
+CREATE OR REPLACE VIEW public.json_table_view_alias AS
+ SELECT p,
+    q
+   FROM JSON_TABLE(
+            '[{"a": 1, "b": 2}]'::jsonb, '$[*]' AS json_table_path_0
+            COLUMNS (
+                a integer PATH '$."a"',
+                b integer PATH '$."b"'
+            )
+        ) t
+SELECT * FROM json_table_view_alias;
+ p | q 
+---+---
+ 1 | 2
+(1 row)
+
+SELECT pg_get_viewdef('json_table_view_alias'::regclass) AS def \gset
+CREATE VIEW json_table_view_alias_re AS :def
+ERROR:  column "p" does not exist
+LINE 1: CREATE VIEW json_table_view_alias_re AS  SELECT p,
+                                                        ^
+SELECT * FROM json_table_view_alias_re;
+ERROR:  relation "json_table_view_alias_re" does not exist
+LINE 1: SELECT * FROM json_table_view_alias_re;
+                      ^
+-- A JSON_TABLE() that has to be renamed to avoid a conflict with another one
+-- in an outer query level must get an explicit alias
+CREATE VIEW json_table_view_conflict AS
+SELECT a, (SELECT max(b) FROM JSON_TABLE(jsonb '[{"b": 2}]', '$[*]'
+	COLUMNS (b int PATH '$.b'))) AS m
+FROM JSON_TABLE(jsonb '[{"a": 1}]', '$[*]' COLUMNS (a int PATH '$.a'));
+\sv json_table_view_conflict;
+CREATE OR REPLACE VIEW public.json_table_view_conflict AS
+ SELECT a,
+    ( SELECT max(json_table_1.b) AS max
+           FROM JSON_TABLE(
+                    '[{"b": 2}]'::jsonb, '$[*]' AS json_table_path_0
+                    COLUMNS (
+                        b integer PATH '$."b"'
+                    )
+                )) AS m
+   FROM JSON_TABLE(
+            '[{"a": 1}]'::jsonb, '$[*]' AS json_table_path_0
+            COLUMNS (
+                a integer PATH '$."a"'
+            )
+        )
+SELECT * FROM json_table_view_conflict;
+ a | m 
+---+---
+ 1 | 2
+(1 row)
+
+SELECT pg_get_viewdef('json_table_view_conflict'::regclass) AS def \gset
+CREATE VIEW json_table_view_conflict_re AS :def
+ERROR:  missing FROM-clause entry for table "json_table_1"
+LINE 2:     ( SELECT max(json_table_1.b) AS max
+                         ^
+SELECT * FROM json_table_view_conflict_re;
+ERROR:  relation "json_table_view_conflict_re" does not exist
+LINE 1: SELECT * FROM json_table_view_conflict_re;
+                      ^
+DROP VIEW json_table_view_alias, json_table_view_conflict;
