@@ -506,6 +506,11 @@ static void get_coercion_expr(Node *arg, deparse_context *context,
 							  Node *parentNode);
 static void get_const_expr(Const *constval, deparse_context *context,
 						   int showtype);
+static Const *cycle_mark_const(Node *node, Oid *labeltype, int32 *labeltypmod);
+static void append_cycle_typed_literal(StringInfo buf, Oid typid, int32 typmod,
+									   const char *extval);
+static void get_cycle_mark_value(Node *expr, Node *other,
+								 deparse_context *context);
 static void get_const_collation(Const *constval, deparse_context *context);
 static void get_json_format(JsonFormat *format, StringInfo buf);
 static void get_json_returning(JsonReturning *returning, StringInfo buf,
@@ -6025,16 +6030,26 @@ get_with_clause(Query *query, deparse_context *context)
 			appendStringInfo(buf, " SET %s", quote_identifier(cte->cycle_clause->cycle_mark_column));
 
 			{
-				Const	   *cmv = castNode(Const, cte->cycle_clause->cycle_mark_value);
-				Const	   *cmd = castNode(Const, cte->cycle_clause->cycle_mark_default);
+				Node	   *cmv = cte->cycle_clause->cycle_mark_value;
+				Node	   *cmd = cte->cycle_clause->cycle_mark_default;
 
-				if (!(cmv->consttype == BOOLOID && !cmv->constisnull && DatumGetBool(cmv->constvalue) == true &&
-					  cmd->consttype == BOOLOID && !cmd->constisnull && DatumGetBool(cmd->constvalue) == false))
+				/*
+				 * The values are not necessarily Consts: the parser coerces
+				 * them to a common type, which can add a coercion node.
+				 */
+				if (!(IsA(cmv, Const) &&
+					  ((Const *) cmv)->consttype == BOOLOID &&
+					  !((Const *) cmv)->constisnull &&
+					  DatumGetBool(((Const *) cmv)->constvalue) == true &&
+					  IsA(cmd, Const) &&
+					  ((Const *) cmd)->consttype == BOOLOID &&
+					  !((Const *) cmd)->constisnull &&
+					  DatumGetBool(((Const *) cmd)->constvalue) == false))
 				{
 					appendStringInfoString(buf, " TO ");
-					get_rule_expr(cte->cycle_clause->cycle_mark_value, context, false);
+					get_cycle_mark_value(cmv, cmd, context);
 					appendStringInfoString(buf, " DEFAULT ");
-					get_rule_expr(cte->cycle_clause->cycle_mark_default, context, false);
+					get_cycle_mark_value(cmd, cmv, context);
 				}
 			}
 
@@ -11856,6 +11871,192 @@ get_const_expr(Const *constval, deparse_context *context, int showtype)
 												  constval->consttypmod));
 
 	get_const_collation(constval, context);
+}
+
+/*
+ * cycle_mark_const
+ *		Strip the coercions around the Const in a CYCLE mark value
+ *
+ * The parser coerces the two values to a common type, which can add implicit
+ * coercion nodes.  A typed literal such as char(1) 'Y' or a domain literal
+ * also has an explicit length-coercion call or a CoerceToDomain on top of the
+ * Const.  Return the Const inside, or NULL if there is none.  If such an
+ * explicit coercion was stripped, return the type of the outermost one in
+ * *labeltype and *labeltypmod, else InvalidOid and -1.
+ */
+static Const *
+cycle_mark_const(Node *node, Oid *labeltype, int32 *labeltypmod)
+{
+	*labeltype = InvalidOid;
+	*labeltypmod = -1;
+
+	for (;;)
+	{
+		if (IsA(node, RelabelType) &&
+			((RelabelType *) node)->relabelformat != COERCE_EXPLICIT_CAST)
+			node = (Node *) ((RelabelType *) node)->arg;
+		else if (IsA(node, CoerceViaIO) &&
+				 ((CoerceViaIO *) node)->coerceformat != COERCE_EXPLICIT_CAST)
+			node = (Node *) ((CoerceViaIO *) node)->arg;
+		else if (IsA(node, FuncExpr) &&
+				 ((FuncExpr *) node)->funcformat == COERCE_IMPLICIT_CAST &&
+				 ((FuncExpr *) node)->args != NIL)
+			node = (Node *) linitial(((FuncExpr *) node)->args);
+		else if ((IsA(node, FuncExpr) &&
+				  ((FuncExpr *) node)->funcformat == COERCE_EXPLICIT_CAST &&
+				  ((FuncExpr *) node)->args != NIL) ||
+				 IsA(node, CoerceToDomain))
+		{
+			/* the outermost one gives the type of the literal */
+			if (!OidIsValid(*labeltype))
+			{
+				*labeltype = exprType(node);
+				*labeltypmod = exprTypmod(node);
+			}
+			if (IsA(node, FuncExpr))
+				node = (Node *) linitial(((FuncExpr *) node)->args);
+			else
+				node = (Node *) ((CoerceToDomain *) node)->arg;
+		}
+		else
+			break;
+	}
+
+	return IsA(node, Const) ? (Const *) node : NULL;
+}
+
+/*
+ * append_cycle_typed_literal
+ *		Print a literal with a type label, as in char(1) 'Y'
+ */
+static void
+append_cycle_typed_literal(StringInfo buf, Oid typid, int32 typmod,
+						   const char *extval)
+{
+	char	   *typname = format_type_with_typemod(typid, typmod);
+
+	if (typid == INTERVALOID && strncmp(typname, "interval ", 9) == 0)
+	{
+		/* the fields go after the string, as in interval '1' day */
+		appendStringInfoString(buf, "interval ");
+		simple_quote_literal(buf, extval);
+		appendStringInfo(buf, " %s", typname + 9);
+	}
+	else
+	{
+		appendStringInfo(buf, "%s ", typname);
+		simple_quote_literal(buf, extval);
+	}
+}
+
+/*
+ * get_cycle_mark_value
+ *		Print a CYCLE clause mark value or default
+ *
+ * The grammar accepts only a constant literal here (AexprConst), not an
+ * arbitrary expression and not an x::type cast, so print the Const that the
+ * user wrote, in a form that is read back as that literal.  "other" is the
+ * other one of the two values.  A plain string literal is read back as
+ * unknown and takes the type of the other value, so a text value needs a
+ * label unless the other one is a plain text, unknown or NULL literal.
+ */
+static void
+get_cycle_mark_value(Node *expr, Node *other, deparse_context *context)
+{
+	StringInfo	buf = context->buf;
+	Const	   *constval;
+	Const	   *otherconst;
+	Oid			labeltype;
+	int32		labeltypmod;
+	Oid			otherlabeltype;
+	int32		otherlabeltypmod;
+	Oid			typoutput;
+	bool		typIsVarlena;
+	char	   *extval;
+
+	constval = cycle_mark_const(expr, &labeltype, &labeltypmod);
+	if (constval == NULL)
+	{
+		/* the grammar does not allow this, but do something sensible */
+		get_rule_expr(expr, context, false);
+		return;
+	}
+
+	if (constval->constisnull)
+	{
+		appendStringInfoString(buf, "NULL");
+		return;
+	}
+
+	getTypeOutputInfo(constval->consttype, &typoutput, &typIsVarlena);
+	extval = OidOutputFunctionCall(typoutput, constval->constvalue);
+
+	if (OidIsValid(labeltype))
+	{
+		/* char(1) 'Y', a domain literal, and so on */
+		append_cycle_typed_literal(buf, labeltype, labeltypmod, extval);
+		pfree(extval);
+		return;
+	}
+
+	switch (constval->consttype)
+	{
+		case BOOLOID:
+			appendStringInfoString(buf, strcmp(extval, "t") == 0 ? "true" : "false");
+			break;
+
+		case TEXTOID:
+
+			/*
+			 * Unlabeled, the literal is read back as unknown and takes the
+			 * type of the other value, so label it unless the other value is
+			 * a plain text, unknown or NULL literal.
+			 */
+			otherconst = cycle_mark_const(other, &otherlabeltype,
+										  &otherlabeltypmod);
+			if (OidIsValid(otherlabeltype) ||
+				(otherconst != NULL && !otherconst->constisnull &&
+				 otherconst->consttype != TEXTOID &&
+				 otherconst->consttype != UNKNOWNOID))
+				appendStringInfoString(buf, "text ");
+			simple_quote_literal(buf, extval);
+			break;
+
+		case UNKNOWNOID:
+			/* the parser coerces unknown literals away; not expected here */
+			simple_quote_literal(buf, extval);
+			break;
+
+		case INT4OID:
+			if (extval[0] != '-')
+				appendStringInfoString(buf, extval);
+			else
+			{
+				/* a signed integer is not a constant literal */
+				appendStringInfo(buf, "integer ");
+				simple_quote_literal(buf, extval);
+			}
+			break;
+
+		default:
+			if (constval->consttype == NUMERICOID &&
+				constval->consttypmod < 0 &&
+				isdigit((unsigned char) extval[0]) &&
+				strcspn(extval, "eE.") != strlen(extval))
+			{
+				/* a decimal or exponent literal is read back as numeric */
+				appendStringInfoString(buf, extval);
+			}
+			else
+			{
+				/* generic "type 'literal'" syntax */
+				append_cycle_typed_literal(buf, constval->consttype,
+										   constval->consttypmod, extval);
+			}
+			break;
+	}
+
+	pfree(extval);
 }
 
 /*
