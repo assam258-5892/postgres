@@ -4876,3 +4876,40 @@ drop publication pub1;
 drop schema alter1 cascade;
 drop schema alter2 cascade;
 NOTICE:  drop cascades to table alter2.t1
+-- ALTER COLUMN TYPE rebuilds statistics objects and indexes, which must keep
+-- the statistics targets that were set on them
+CREATE TABLE at_stat_tbl (a int, b int);
+CREATE STATISTICS at_stat_s ON a, b FROM at_stat_tbl;
+ALTER STATISTICS at_stat_s SET STATISTICS 300;
+CREATE INDEX at_stat_idx ON at_stat_tbl ((a + b), (a * b));
+ALTER INDEX at_stat_idx ALTER COLUMN 1 SET STATISTICS 200;
+SELECT stxstattarget FROM pg_statistic_ext WHERE stxname = 'at_stat_s';
+ stxstattarget 
+---------------
+           300
+(1 row)
+
+SELECT attnum, attstattarget FROM pg_attribute
+  WHERE attrelid = 'at_stat_idx'::regclass ORDER BY attnum;
+ attnum | attstattarget 
+--------+---------------
+      1 |           200
+      2 |              
+(2 rows)
+
+ALTER TABLE at_stat_tbl ALTER COLUMN a TYPE bigint;
+SELECT stxstattarget FROM pg_statistic_ext WHERE stxname = 'at_stat_s';
+ stxstattarget 
+---------------
+              
+(1 row)
+
+SELECT attnum, attstattarget FROM pg_attribute
+  WHERE attrelid = 'at_stat_idx'::regclass ORDER BY attnum;
+ attnum | attstattarget 
+--------+---------------
+      1 |              
+      2 |              
+(2 rows)
+
+DROP TABLE at_stat_tbl;
