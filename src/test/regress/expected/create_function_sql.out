@@ -892,9 +892,138 @@ SELECT pg_get_functiondef('functest_merge'::regproc);
  
 (1 row)
 
+-- An OUT parameter before the input parameters must not shift the parameter
+-- names: the body is bound by input position
+CREATE FUNCTION functest_out(OUT r int, a int, b int) RETURNS int
+  BEGIN ATOMIC SELECT a - b; END;
+SELECT functest_out(10, 3);
+ functest_out 
+--------------
+            7
+(1 row)
+
+SELECT pg_get_functiondef('functest_out'::regproc);
+                                     pg_get_functiondef                                      
+---------------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_out(OUT r integer, a integer, b integer)+
+  RETURNS integer                                                                           +
+  LANGUAGE sql                                                                              +
+ BEGIN ATOMIC                                                                               +
+  SELECT (a - b);                                                                           +
+ END                                                                                        +
+ 
+(1 row)
+
+SELECT pg_get_functiondef('functest_out'::regproc) AS def \gset
+:def ;
+SELECT functest_out(10, 3);
+ functest_out 
+--------------
+            7
+(1 row)
+
+CREATE FUNCTION functest_out1(OUT r int, a int, b int) RETURNS int
+  BEGIN ATOMIC SELECT a; END;
+SELECT functest_out1(10, 3);
+ functest_out1 
+---------------
+            10
+(1 row)
+
+CREATE FUNCTION functest_inout(INOUT a int, OUT r int, b int) RETURNS record
+  BEGIN ATOMIC SELECT a + 1, a * b; END;
+SELECT * FROM functest_inout(2, 5);
+ a | r  
+---+----
+ 3 | 10
+(1 row)
+
+SELECT pg_get_functiondef('functest_inout'::regproc);
+                                         pg_get_functiondef                                          
+-----------------------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_inout(INOUT a integer, OUT r integer, b integer)+
+  RETURNS record                                                                                    +
+  LANGUAGE sql                                                                                      +
+ BEGIN ATOMIC                                                                                       +
+  SELECT (a + 1),                                                                                   +
+      (a * b);                                                                                      +
+ END                                                                                                +
+ 
+(1 row)
+
+-- Likewise for a VARIADIC parameter and for a procedure with an OUT parameter
+CREATE FUNCTION functest_var(OUT r int, VARIADIC v int[]) RETURNS int
+  BEGIN ATOMIC SELECT v[1] + v[2]; END;
+SELECT functest_var(1, 2);
+ functest_var 
+--------------
+            3
+(1 row)
+
+SELECT pg_get_functiondef('functest_var'::regproc);
+                                     pg_get_functiondef                                      
+---------------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_var(OUT r integer, VARIADIC v integer[])+
+  RETURNS integer                                                                           +
+  LANGUAGE sql                                                                              +
+ BEGIN ATOMIC                                                                               +
+  SELECT ((v)[1] + (v)[2]);                                                                 +
+ END                                                                                        +
+ 
+(1 row)
+
+SELECT pg_get_functiondef('functest_var'::regproc) AS def \gset
+:def ;
+SELECT functest_var(1, 2);
+ functest_var 
+--------------
+            3
+(1 row)
+
+CREATE FUNCTION functest_var2(VARIADIC v int[]) RETURNS int
+  BEGIN ATOMIC SELECT v[1]; END;
+SELECT pg_get_functiondef('functest_var2'::regproc);
+                              pg_get_functiondef                               
+-------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_var2(VARIADIC v integer[])+
+  RETURNS integer                                                             +
+  LANGUAGE sql                                                                +
+ BEGIN ATOMIC                                                                 +
+  SELECT (v)[1] AS v;                                                         +
+ END                                                                          +
+ 
+(1 row)
+
+CREATE PROCEDURE functest_proc(OUT r int, a int)
+  BEGIN ATOMIC SELECT a * 2; END;
+CALL functest_proc(NULL, 5);
+ r  
+----
+ 10
+(1 row)
+
+SELECT pg_get_functiondef('functest_proc'::regproc);
+                                  pg_get_functiondef                                   
+---------------------------------------------------------------------------------------
+ CREATE OR REPLACE PROCEDURE temp_func_test.functest_proc(OUT r integer, IN a integer)+
+  LANGUAGE sql                                                                        +
+ BEGIN ATOMIC                                                                         +
+  SELECT (a * 2);                                                                     +
+ END                                                                                  +
+ 
+(1 row)
+
+SELECT pg_get_functiondef('functest_proc'::regproc) AS def \gset
+:def ;
+CALL functest_proc(NULL, 5);
+ r  
+----
+ 10
+(1 row)
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
-NOTICE:  drop cascades to 44 other objects
+NOTICE:  drop cascades to 50 other objects
 DETAIL:  drop cascades to function functest_a_1(text,date)
 drop cascades to function functest_a_2(text[])
 drop cascades to function functest_a_3()
@@ -939,5 +1068,11 @@ drop cascades to function functest_cap(integer)
 drop cascades to table functest_mtgt
 drop cascades to table functest_msrc
 drop cascades to function functest_merge()
+drop cascades to function functest_out(integer,integer)
+drop cascades to function functest_out1(integer,integer)
+drop cascades to function functest_inout(integer,integer)
+drop cascades to function functest_var(integer[])
+drop cascades to function functest_var2(integer[])
+drop cascades to function functest_proc(integer)
 DROP USER regress_unpriv_user;
 RESET search_path;
