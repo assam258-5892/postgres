@@ -3553,6 +3553,10 @@ typedef struct IndexStmt
 	bool		if_not_exists;	/* just do nothing if index already exists? */
 	bool		reset_default_tblspc;	/* reset default_tablespace prior to
 										 * executing */
+	List	   *attstattargets; /* statistics targets of the index columns
+								 * (Integer nodes, NULL for the default), or
+								 * NIL; set only when ALTER TABLE rebuilds the
+								 * index */
 } IndexStmt;
 
 /* ----------------------
@@ -3567,6 +3571,8 @@ typedef struct CreateStatsStmt
 	List	   *exprs;			/* expressions to build statistics on */
 	List	   *relations;		/* rels to build stats on (list of RangeVar) */
 	char	   *stxcomment;		/* comment to apply to stats, or NULL */
+	Node	   *stxstattarget;	/* statistics target (an Integer), or NULL for
+								 * the default; set only for rebuilding */
 	bool		transformed;	/* true when transformStatsStmt is finished */
 	bool		if_not_exists;	/* do nothing if stats name already exists */
 	Oid			owner;			/* OID of owner, or InvalidOid for default */
