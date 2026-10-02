@@ -926,9 +926,120 @@ SELECT pg_get_functiondef('functest_merge'::regproc);
  
 (1 row)
 
+-- An OUT parameter before the input parameters must not shift the parameter
+-- names: the body is bound by input position
+CREATE FUNCTION functest_out(OUT r int, a int, b int) RETURNS int
+  BEGIN ATOMIC SELECT a - b; END;
+ERROR:  column "b" does not exist
+LINE 2:   BEGIN ATOMIC SELECT a - b; END;
+                                  ^
+SELECT functest_out(10, 3);
+ERROR:  function functest_out(integer, integer) does not exist
+LINE 1: SELECT functest_out(10, 3);
+               ^
+DETAIL:  There is no function of that name.
+SELECT pg_get_functiondef('functest_out'::regproc);
+ERROR:  function "functest_out" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_out'::regproc);
+                                  ^
+SELECT pg_get_functiondef('functest_out'::regproc) AS def \gset
+ERROR:  function "functest_out" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_out'::regproc) AS def 
+                                  ^
+:def ;
+SELECT functest_out(10, 3);
+ERROR:  function functest_out(integer, integer) does not exist
+LINE 1: SELECT functest_out(10, 3);
+               ^
+DETAIL:  There is no function of that name.
+CREATE FUNCTION functest_out1(OUT r int, a int, b int) RETURNS int
+  BEGIN ATOMIC SELECT a; END;
+SELECT functest_out1(10, 3);
+ functest_out1 
+---------------
+             3
+(1 row)
+
+CREATE FUNCTION functest_inout(INOUT a int, OUT r int, b int) RETURNS record
+  BEGIN ATOMIC SELECT a + 1, a * b; END;
+ERROR:  column "b" does not exist
+LINE 2:   BEGIN ATOMIC SELECT a + 1, a * b; END;
+                                         ^
+SELECT * FROM functest_inout(2, 5);
+ERROR:  function functest_inout(integer, integer) does not exist
+LINE 1: SELECT * FROM functest_inout(2, 5);
+                      ^
+DETAIL:  There is no function of that name.
+SELECT pg_get_functiondef('functest_inout'::regproc);
+ERROR:  function "functest_inout" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_inout'::regproc);
+                                  ^
+-- Likewise for a VARIADIC parameter and for a procedure with an OUT parameter
+CREATE FUNCTION functest_var(OUT r int, VARIADIC v int[]) RETURNS int
+  BEGIN ATOMIC SELECT v[1] + v[2]; END;
+ERROR:  column "v" does not exist
+LINE 2:   BEGIN ATOMIC SELECT v[1] + v[2]; END;
+                              ^
+SELECT functest_var(1, 2);
+ERROR:  function functest_var(integer, integer) does not exist
+LINE 1: SELECT functest_var(1, 2);
+               ^
+DETAIL:  There is no function of that name.
+SELECT pg_get_functiondef('functest_var'::regproc);
+ERROR:  function "functest_var" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_var'::regproc);
+                                  ^
+SELECT pg_get_functiondef('functest_var'::regproc) AS def \gset
+ERROR:  function "functest_var" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_var'::regproc) AS def 
+                                  ^
+:def ;
+SELECT functest_var(1, 2);
+ERROR:  function functest_var(integer, integer) does not exist
+LINE 1: SELECT functest_var(1, 2);
+               ^
+DETAIL:  There is no function of that name.
+CREATE FUNCTION functest_var2(VARIADIC v int[]) RETURNS int
+  BEGIN ATOMIC SELECT v[1]; END;
+SELECT pg_get_functiondef('functest_var2'::regproc);
+                              pg_get_functiondef                               
+-------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_var2(VARIADIC v integer[])+
+  RETURNS integer                                                             +
+  LANGUAGE sql                                                                +
+ BEGIN ATOMIC                                                                 +
+  SELECT (v)[1] AS v;                                                         +
+ END                                                                          +
+ 
+(1 row)
+
+CREATE PROCEDURE functest_proc(OUT r int, a int)
+  BEGIN ATOMIC SELECT a * 2; END;
+ERROR:  column "a" does not exist
+LINE 2:   BEGIN ATOMIC SELECT a * 2; END;
+                              ^
+CALL functest_proc(NULL, 5);
+ERROR:  procedure functest_proc(unknown, integer) does not exist
+LINE 1: CALL functest_proc(NULL, 5);
+             ^
+DETAIL:  There is no procedure of that name.
+SELECT pg_get_functiondef('functest_proc'::regproc);
+ERROR:  function "functest_proc" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_proc'::regproc);
+                                  ^
+SELECT pg_get_functiondef('functest_proc'::regproc) AS def \gset
+ERROR:  function "functest_proc" does not exist
+LINE 1: SELECT pg_get_functiondef('functest_proc'::regproc) AS def 
+                                  ^
+:def ;
+CALL functest_proc(NULL, 5);
+ERROR:  procedure functest_proc(unknown, integer) does not exist
+LINE 1: CALL functest_proc(NULL, 5);
+             ^
+DETAIL:  There is no procedure of that name.
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
-NOTICE:  drop cascades to 46 other objects
+NOTICE:  drop cascades to 48 other objects
 DETAIL:  drop cascades to function functest_a_1(text,date)
 drop cascades to function functest_a_2(text[])
 drop cascades to function functest_a_3()
@@ -975,5 +1086,7 @@ drop cascades to function functest_ren(integer)
 drop cascades to table functest_mtgt
 drop cascades to table functest_msrc
 drop cascades to function functest_merge()
+drop cascades to function functest_out1(integer,integer)
+drop cascades to function functest_var2(integer[])
 DROP USER regress_unpriv_user;
 RESET search_path;
