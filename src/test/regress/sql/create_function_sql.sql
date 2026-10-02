@@ -487,6 +487,26 @@ CREATE FUNCTION test1 (anyelement) RETURNS anyarray LANGUAGE SQL
 SELECT test1(0);
 RESET check_function_bodies;
 
+-- unnamed parameters of an SQL-body function are printed as $N
+CREATE FUNCTION functest_unnamed(a int, int) RETURNS int
+  BEGIN ATOMIC SELECT a + $2; END;
+SELECT functest_unnamed(1, 2);
+SELECT pg_get_functiondef('functest_unnamed'::regproc);
+
+-- a parameter must not be qualified with the function name if a relation of
+-- that name is visible and has a column named like the parameter, since the
+-- qualified name would be taken as that column
+CREATE TABLE functest_cap (x int);
+INSERT INTO functest_cap VALUES (5);
+CREATE FUNCTION functest_cap(a int) RETURNS int
+  BEGIN ATOMIC SELECT a + x FROM functest_cap; END;
+SELECT functest_cap(10);
+ALTER TABLE functest_cap ADD COLUMN a int DEFAULT 100;
+SELECT pg_get_functiondef('functest_cap'::regproc);
+SELECT pg_get_functiondef('functest_cap'::regproc) AS def \gset
+:def ;
+SELECT functest_cap(10);
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
 DROP USER regress_unpriv_user;
