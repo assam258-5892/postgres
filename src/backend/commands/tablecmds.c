@@ -541,6 +541,8 @@ static ObjectAddress ATExecSetExpression(AlteredTableInfo *tab, Relation rel, co
 										 Node *newExpr, LOCKMODE lockmode);
 static void ATPrepDropExpression(Relation rel, AlterTableCmd *cmd, bool recurse, bool recursing, LOCKMODE lockmode);
 static ObjectAddress ATExecDropExpression(Relation rel, const char *colName, bool missing_ok, LOCKMODE lockmode);
+static Node *GetStatisticsTarget(Oid stxoid);
+static List *GetIndexStatisticsTargets(Oid indexoid);
 static ObjectAddress ATExecSetStatistics(Relation rel, const char *colName, int16 colNum,
 										 Node *newValue, LOCKMODE lockmode);
 static ObjectAddress ATExecSetOptions(Relation rel, const char *colName,
@@ -9742,6 +9744,25 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 		index_close(irel, NoLock);
 	}
 
+	/*
+	 * If the index being rebuilt had statistics targets on its columns, set
+	 * them again.
+	 */
+	if (stmt->attstattargets != NIL)
+	{
+		Relation	irel = index_open(address.objectId, ShareUpdateExclusiveLock);
+		int			colno = 0;
+
+		foreach_ptr(Node, target, stmt->attstattargets)
+		{
+			colno++;
+			if (target != NULL)
+				ATExecSetStatistics(irel, NULL, colno, target,
+									ShareUpdateExclusiveLock);
+		}
+		index_close(irel, NoLock);
+	}
+
 	return address;
 }
 
@@ -16045,6 +16066,72 @@ RememberIndexForRebuilding(Oid indoid, AlteredTableInfo *tab)
 }
 
 /*
+ * Get the statistics target of a statistics object, as an Integer node, or
+ * NULL if it has the default one.  (Used for rebuilding after ALTER COLUMN
+ * TYPE, which drops and creates the object again.)
+ */
+static Node *
+GetStatisticsTarget(Oid stxoid)
+{
+	HeapTuple	tup;
+	Datum		datum;
+	bool		isnull;
+	Node	   *result = NULL;
+
+	tup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(stxoid));
+	if (!HeapTupleIsValid(tup))
+		return NULL;
+	datum = SysCacheGetAttr(STATEXTOID, tup,
+							Anum_pg_statistic_ext_stxstattarget, &isnull);
+	if (!isnull)
+		result = (Node *) makeInteger(DatumGetInt16(datum));
+	ReleaseSysCache(tup);
+
+	return result;
+}
+
+/*
+ * Get the statistics targets of the columns of an index, as a list of Integer
+ * nodes, with NULLs for the default ones; or NIL if all are the default.
+ * (Only expression columns can have one.)
+ */
+static List *
+GetIndexStatisticsTargets(Oid indexoid)
+{
+	List	   *result = NIL;
+	bool		any = false;
+	Relation	irel = index_open(indexoid, AccessShareLock);
+	int			natts = RelationGetNumberOfAttributes(irel);
+
+	index_close(irel, AccessShareLock);
+
+	for (int attno = 1; attno <= natts; attno++)
+	{
+		HeapTuple	tup;
+		Datum		datum;
+		bool		isnull;
+		Node	   *target = NULL;
+
+		tup = SearchSysCache2(ATTNUM, ObjectIdGetDatum(indexoid),
+							  Int16GetDatum(attno));
+		if (HeapTupleIsValid(tup))
+		{
+			datum = SysCacheGetAttr(ATTNUM, tup,
+									Anum_pg_attribute_attstattarget, &isnull);
+			if (!isnull)
+			{
+				target = (Node *) makeInteger(DatumGetInt16(datum));
+				any = true;
+			}
+			ReleaseSysCache(tup);
+		}
+		result = lappend(result, target);
+	}
+
+	return any ? result : NIL;
+}
+
+/*
  * Subroutine for ATExecAlterColumnType: remember that a statistics object
  * needs to be rebuilt (which we might already know).
  */
@@ -16368,6 +16455,8 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, Oid ownerId,
 			stmt->reset_default_tblspc = true;
 			/* keep the index's comment */
 			stmt->idxcomment = GetComment(oldId, RelationRelationId, 0);
+			/* and the statistics targets of its columns */
+			stmt->attstattargets = GetIndexStatisticsTargets(oldId);
 
 			newcmd = makeNode(AlterTableCmd);
 			newcmd->subtype = AT_ReAddIndex;
@@ -16397,6 +16486,8 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, Oid ownerId,
 					/* keep any comment on the index */
 					indstmt->idxcomment = GetComment(indoid,
 													 RelationRelationId, 0);
+					/* and the statistics targets of its columns */
+					indstmt->attstattargets = GetIndexStatisticsTargets(indoid);
 					indstmt->reset_default_tblspc = true;
 
 					cmd->subtype = AT_ReAddIndex;
@@ -16479,6 +16570,9 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, Oid ownerId,
 
 			/* keep the statistics object's comment */
 			stmt->stxcomment = GetComment(oldId, StatisticExtRelationId, 0);
+
+			/* and its statistics target, if it has one */
+			stmt->stxstattarget = GetStatisticsTarget(oldId);
 
 			newcmd = makeNode(AlterTableCmd);
 			newcmd->subtype = AT_ReAddStatistics;
