@@ -4901,14 +4901,14 @@ ALTER TABLE at_stat_tbl ALTER COLUMN a TYPE bigint;
 SELECT stxstattarget FROM pg_statistic_ext WHERE stxname = 'at_stat_s';
  stxstattarget 
 ---------------
-              
+           300
 (1 row)
 
 SELECT attnum, attstattarget FROM pg_attribute
   WHERE attrelid = 'at_stat_idx'::regclass ORDER BY attnum;
  attnum | attstattarget 
 --------+---------------
-      1 |              
+      1 |           200
       2 |              
 (2 rows)
 
