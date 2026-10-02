@@ -798,9 +798,65 @@ ERROR:  return type mismatch in function declared to return integer[]
 DETAIL:  Function's final statement must be SELECT or INSERT/UPDATE/DELETE/MERGE RETURNING.
 CONTEXT:  SQL function "test1" during startup
 RESET check_function_bodies;
+-- unnamed parameters of an SQL-body function are printed as $N
+CREATE FUNCTION functest_unnamed(a int, int) RETURNS int
+  BEGIN ATOMIC SELECT a + $2; END;
+SELECT functest_unnamed(1, 2);
+ functest_unnamed 
+------------------
+                3
+(1 row)
+
+SELECT pg_get_functiondef('functest_unnamed'::regproc);
+                               pg_get_functiondef                               
+--------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_unnamed(a integer, integer)+
+  RETURNS integer                                                              +
+  LANGUAGE sql                                                                 +
+ BEGIN ATOMIC                                                                  +
+  SELECT (a + $2);                                                             +
+ END                                                                           +
+ 
+(1 row)
+
+-- a parameter must not be qualified with the function name if a relation of
+-- that name is visible and has a column named like the parameter, since the
+-- qualified name would be taken as that column
+CREATE TABLE functest_cap (x int);
+INSERT INTO functest_cap VALUES (5);
+CREATE FUNCTION functest_cap(a int) RETURNS int
+  BEGIN ATOMIC SELECT a + x FROM functest_cap; END;
+SELECT functest_cap(10);
+ functest_cap 
+--------------
+           15
+(1 row)
+
+ALTER TABLE functest_cap ADD COLUMN a int DEFAULT 100;
+SELECT pg_get_functiondef('functest_cap'::regproc);
+                        pg_get_functiondef                         
+-------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION temp_func_test.functest_cap(a integer)+
+  RETURNS integer                                                 +
+  LANGUAGE sql                                                    +
+ BEGIN ATOMIC                                                     +
+  SELECT ($1 + functest_cap.x)                                    +
+     FROM functest_cap;                                           +
+ END                                                              +
+ 
+(1 row)
+
+SELECT pg_get_functiondef('functest_cap'::regproc) AS def \gset
+:def ;
+SELECT functest_cap(10);
+ functest_cap 
+--------------
+           15
+(1 row)
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
-NOTICE:  drop cascades to 38 other objects
+NOTICE:  drop cascades to 41 other objects
 DETAIL:  drop cascades to function functest_a_1(text,date)
 drop cascades to function functest_a_2(text[])
 drop cascades to function functest_a_3()
@@ -839,5 +895,8 @@ drop cascades to function part_hashint4_error(integer,bigint)
 drop cascades to operator family part_test_int4_ops_bad for access method hash
 drop cascades to table pt
 drop cascades to function test1(anyelement)
+drop cascades to function functest_unnamed(integer,integer)
+drop cascades to table functest_cap
+drop cascades to function functest_cap(integer)
 DROP USER regress_unpriv_user;
 RESET search_path;
