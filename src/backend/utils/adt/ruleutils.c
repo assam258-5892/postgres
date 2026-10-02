@@ -3599,6 +3599,27 @@ print_function_sqlbody(StringInfo buf, HeapTuple proctup)
 	dpns.numargs = numargs;
 	dpns.argnames = argnames;
 
+	/*
+	 * Parameters in the body are numbered by input position, but argnames[]
+	 * has all the arguments, including OUT and TABLE ones.  Keep only the
+	 * names of the input arguments.
+	 */
+	if (argmodes != NULL && argnames != NULL)
+	{
+		char	  **inargnames = palloc_array(char *, numargs);
+		int			numin = 0;
+
+		for (int i = 0; i < numargs; i++)
+		{
+			if (argmodes[i] == PROARGMODE_IN ||
+				argmodes[i] == PROARGMODE_INOUT ||
+				argmodes[i] == PROARGMODE_VARIADIC)
+				inargnames[numin++] = argnames[i];
+		}
+		dpns.numargs = numin;
+		dpns.argnames = inargnames;
+	}
+
 	tmp = SysCacheGetAttrNotNull(PROCOID, proctup, Anum_pg_proc_prosqlbody);
 	n = stringToNode(TextDatumGetCString(tmp));
 

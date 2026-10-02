@@ -418,7 +418,12 @@ interpret_function_parameter_list(ParseState *pstate,
 			have_names = true;
 		}
 
-		if (inParameterNames_list)
+		/*
+		 * Keep the names parallel to parameterTypes_list: they are looked up
+		 * by input parameter position, so OUT and TABLE parameters must not
+		 * be in the list.
+		 */
+		if (isinput && inParameterNames_list)
 			*inParameterNames_list = lappend(*inParameterNames_list, makeString(fp->name ? fp->name : pstrdup("")));
 
 		if (fp->defexpr)
