@@ -1684,3 +1684,15 @@ select * from tuplesest_tab join
 
 drop table tuplesest_parted;
 drop table tuplesest_tab;
+
+-- Objects that are left in the regression database for the dump and restore
+-- tests: validated CHECK constraints below a NOT VALID one, at three levels,
+-- and a child that is ENFORCED below a NOT ENFORCED parent
+create table inhnv_p (a int);
+create table inhnv_c () inherits (inhnv_p);
+create table inhnv_g () inherits (inhnv_c);
+alter table inhnv_p add constraint inhnv_k check (a > 0) not valid;
+alter table inhnv_c validate constraint inhnv_k;
+create table inhne_p (a int, constraint inhne_k check (a > 0) not enforced);
+create table inhne_c () inherits (inhne_p);
+alter table inhne_c alter constraint inhne_k enforced;
