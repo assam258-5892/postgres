@@ -814,7 +814,7 @@ SELECT pg_get_functiondef('functest_unnamed'::regproc);
   RETURNS integer                                                              +
   LANGUAGE sql                                                                 +
  BEGIN ATOMIC                                                                  +
-  SELECT (a + "");                                                             +
+  SELECT (a + $2);                                                             +
  END                                                                           +
  
 (1 row)
@@ -840,7 +840,7 @@ SELECT pg_get_functiondef('functest_cap'::regproc);
   RETURNS integer                                                 +
   LANGUAGE sql                                                    +
  BEGIN ATOMIC                                                     +
-  SELECT (functest_cap.a + functest_cap.x)                        +
+  SELECT ($1 + functest_cap.x)                                    +
      FROM functest_cap;                                           +
  END                                                              +
  
@@ -851,7 +851,7 @@ SELECT pg_get_functiondef('functest_cap'::regproc) AS def \gset
 SELECT functest_cap(10);
  functest_cap 
 --------------
-          105
+           15
 (1 row)
 
 -- the same if a column is renamed to the name of a parameter that the body
@@ -874,7 +874,7 @@ SELECT pg_get_functiondef('functest_ren'::regproc);
   RETURNS integer                                                 +
   LANGUAGE sql                                                    +
  BEGIN ATOMIC                                                     +
-  SELECT (functest_ren.a + functest_ren.a)                        +
+  SELECT ($1 + functest_ren.a)                                    +
      FROM functest_ren;                                           +
  END                                                              +
  
@@ -885,7 +885,7 @@ SELECT pg_get_functiondef('functest_ren'::regproc) AS def \gset
 SELECT functest_ren(10);
  functest_ren 
 --------------
-           10
+           15
 (1 row)
 
 -- Cleanup
