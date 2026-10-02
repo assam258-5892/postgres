@@ -9619,14 +9619,16 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			if (tbinfo->attgenerated[adnum - 1])
 			{
 				/*
-				 * Column generation expressions cannot be dumped separately,
-				 * because there is no syntax for it.  By setting separate to
-				 * false here we prevent the "default" from being processed as
-				 * its own dumpable object.  Later, flagInhAttrs() will mark
-				 * it as not to be dumped at all, if possible (that is, if it
-				 * can be inherited from a parent).
+				 * Where the column is printed in the CREATE TABLE, its
+				 * generation expression is dumped as part of the column
+				 * definition, so that the "default" is not processed as its
+				 * own dumpable object.  For an inherited column that is not
+				 * printed there, flagInhAttrs() later marks the expression as
+				 * not to be dumped at all if it matches the parents'
+				 * expression (that is, if it can be inherited), and makes the
+				 * column print its own expression if it differs.
 				 */
-				attrdefs[j].separate = false;
+				attrdefs[j].separate = !shouldPrintColumn(dopt, tbinfo, adnum - 1);
 			}
 			else if (tbinfo->relkind == RELKIND_VIEW)
 			{
@@ -10062,6 +10064,9 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
  * Normally this is always true, but it's false for dropped columns, as well
  * as those that were inherited without any local definition.  (If we print
  * such a column it will mistakenly get pg_attribute.attislocal set to true.)
+ * The exception is an inherited generated column whose expression differs
+ * from that of a parent: flagInhAttrs() marks it as local, so that this
+ * function returns true and the column is printed with its own expression.
  * For partitions, it's always true, because we want the partitions to be
  * created independently and ATTACH PARTITION used afterwards.
  *
@@ -18105,7 +18110,8 @@ dumpTableAttach(Archive *fout, const TableAttachInfo *attachinfo)
 }
 
 /*
- * dumpAttrDef --- dump an attribute's default-value declaration
+ * dumpAttrDef --- dump an attribute's default-value declaration, or the
+ * generation expression of a generated column that is set separately
  */
 static void
 dumpAttrDef(Archive *fout, const AttrDefInfo *adinfo)
@@ -18134,14 +18140,31 @@ dumpAttrDef(Archive *fout, const AttrDefInfo *adinfo)
 
 	foreign = tbinfo->relkind == RELKIND_FOREIGN_TABLE ? "FOREIGN " : "";
 
-	appendPQExpBuffer(q,
-					  "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET DEFAULT %s;\n",
-					  foreign, qualrelname, fmtId(tbinfo->attnames[adnum - 1]),
-					  adinfo->adef_expr);
+	if (tbinfo->attgenerated[adnum - 1])
+	{
+		/*
+		 * A generation expression that the CREATE TABLE does not carry is set
+		 * with SET EXPRESSION.  There is no separate DROP, since dropping the
+		 * table drops the column.
+		 */
+		appendPQExpBuffer(q,
+						  "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET EXPRESSION AS (%s);\n",
+						  foreign, qualrelname,
+						  fmtId(tbinfo->attnames[adnum - 1]),
+						  adinfo->adef_expr);
+	}
+	else
+	{
+		appendPQExpBuffer(q,
+						  "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET DEFAULT %s;\n",
+						  foreign, qualrelname,
+						  fmtId(tbinfo->attnames[adnum - 1]),
+						  adinfo->adef_expr);
 
-	appendPQExpBuffer(delq, "ALTER %sTABLE %s ALTER COLUMN %s DROP DEFAULT;\n",
-					  foreign, qualrelname,
-					  fmtId(tbinfo->attnames[adnum - 1]));
+		appendPQExpBuffer(delq, "ALTER %sTABLE %s ALTER COLUMN %s DROP DEFAULT;\n",
+						  foreign, qualrelname,
+						  fmtId(tbinfo->attnames[adnum - 1]));
+	}
 
 	tag = psprintf("%s %s", tbinfo->dobj.name, tbinfo->attnames[adnum - 1]);
 
