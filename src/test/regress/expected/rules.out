@@ -4236,3 +4236,110 @@ drop function ruletest_setalias_f();
 drop table ruletest_setalias_src;
 drop table ruletest_setalias_m;
 drop table ruletest_setalias;
+--
+-- The columns of a relation that is not in the FROM clause (the target of
+-- UPDATE or DELETE, NEW and OLD) can't get a column alias list, so they must
+-- not be renamed to make the name of a USING column unique
+--
+create table ruletest_cu_a (x int);
+create table ruletest_cu_b (x int);
+insert into ruletest_cu_a values (7);
+create table ruletest_cu_t (x int, x_1 int, a int);
+insert into ruletest_cu_t values (5, 6, 0), (6, 5, 0);
+create function ruletest_cu_upd() returns void language sql
+begin atomic
+  update ruletest_cu_t set a = 1
+    from ruletest_cu_a ca full join ruletest_cu_b cb using (x)
+    where ruletest_cu_t.x = 5 and ca.x = 7;
+end;
+select ruletest_cu_upd();
+ ruletest_cu_upd 
+-----------------
+ 
+(1 row)
+
+select * from ruletest_cu_t order by x;
+ x | x_1 | a 
+---+-----+---
+ 5 |   6 | 1
+ 6 |   5 | 0
+(2 rows)
+
+update ruletest_cu_t set a = 0;
+select pg_get_functiondef('ruletest_cu_upd'::regproc);
+                 pg_get_functiondef                  
+-----------------------------------------------------
+ CREATE OR REPLACE FUNCTION public.ruletest_cu_upd()+
+  RETURNS void                                      +
+  LANGUAGE sql                                      +
+ BEGIN ATOMIC                                       +
+  UPDATE ruletest_cu_t SET a = 1                    +
+     FROM (ruletest_cu_a ca                         +
+       FULL JOIN ruletest_cu_b cb USING (x))        +
+    WHERE ((ruletest_cu_t.x = 5) AND (ca.x = 7));   +
+ END                                                +
+ 
+(1 row)
+
+select pg_get_functiondef('ruletest_cu_upd'::regproc) as def \gset
+:def ;
+select ruletest_cu_upd();
+ ruletest_cu_upd 
+-----------------
+ 
+(1 row)
+
+select * from ruletest_cu_t order by x;
+ x | x_1 | a 
+---+-----+---
+ 5 |   6 | 1
+ 6 |   5 | 0
+(2 rows)
+
+create table ruletest_cu_d (x int, a int);
+create function ruletest_cu_del() returns void language sql
+begin atomic
+  delete from ruletest_cu_d
+    using ruletest_cu_a ca full join ruletest_cu_b cb using (x)
+    where ruletest_cu_d.x = 5;
+end;
+select pg_get_functiondef('ruletest_cu_del'::regproc);
+                 pg_get_functiondef                  
+-----------------------------------------------------
+ CREATE OR REPLACE FUNCTION public.ruletest_cu_del()+
+  RETURNS void                                      +
+  LANGUAGE sql                                      +
+ BEGIN ATOMIC                                       +
+  DELETE FROM ruletest_cu_d                         +
+     USING (ruletest_cu_a ca                        +
+       FULL JOIN ruletest_cu_b cb USING (x))        +
+    WHERE (ruletest_cu_d.x = 5);                    +
+ END                                                +
+ 
+(1 row)
+
+select pg_get_functiondef('ruletest_cu_del'::regproc) as def \gset
+:def ;
+create table ruletest_cu_o (x int, a int);
+create rule ruletest_cu_r as on update to ruletest_cu_t
+  do also update ruletest_cu_o set a = 1
+    from ruletest_cu_a ca full join ruletest_cu_b cb using (x)
+    where new.x = ruletest_cu_o.x and old.x = ca.x;
+select pg_get_ruledef(oid) from pg_rewrite where rulename = 'ruletest_cu_r';
+                              pg_get_ruledef                              
+--------------------------------------------------------------------------
+ CREATE RULE ruletest_cu_r AS                                            +
+     ON UPDATE TO public.ruletest_cu_t DO  UPDATE ruletest_cu_o SET a = 1+
+    FROM (ruletest_cu_a ca                                               +
+      FULL JOIN ruletest_cu_b cb USING (x))                              +
+   WHERE ((new.x = ruletest_cu_o.x) AND (old.x = ca.x));
+(1 row)
+
+select pg_get_ruledef(oid) as def from pg_rewrite
+  where rulename = 'ruletest_cu_r' \gset
+drop rule ruletest_cu_r on ruletest_cu_t;
+:def
+drop function ruletest_cu_upd();
+drop function ruletest_cu_del();
+drop table ruletest_cu_a, ruletest_cu_b, ruletest_cu_t, ruletest_cu_d,
+  ruletest_cu_o;
