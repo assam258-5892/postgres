@@ -701,4 +701,4 @@ SELECT * FROM XMLTABLE(XMLNAMESPACES(('http://x.y' COLLATE "C") AS p),
 SELECT pg_get_viewdef('xmltableview_collate'::regclass, true);
 SELECT pg_get_viewdef('xmltableview_collate'::regclass, true) AS def \gset
 CREATE VIEW xmltableview_collate_re AS :def
-DROP VIEW xmltableview_collate;
+DROP VIEW xmltableview_collate, xmltableview_collate_re;
