@@ -903,9 +903,9 @@ SELECT tablespace FROM pg_indexes WHERE indexname = 'test_excl_a_excl';
 -- or the index ends up in the default tablespace
 ALTER TABLE testschema.test_excl ALTER a TYPE bigint;
 SELECT tablespace FROM pg_indexes WHERE indexname = 'test_excl_a_excl';
- tablespace 
-------------
- 
+    tablespace    
+------------------
+ regress_tblspace
 (1 row)
 
 DROP TABLE testschema.test_excl;
@@ -928,17 +928,20 @@ SELECT indexname, tablespace FROM pg_indexes
   WHERE tablename = 'test_reuse' ORDER BY indexname;
      indexname     |    tablespace    
 -------------------+------------------
- test_reuse_b_excl | 
+ test_reuse_b_excl | regress_tblspace
  test_reuse_pkey   | regress_tblspace
 (2 rows)
 
 -- a failure here would name a file by its number, so show only its SQLSTATE
 \set VERBOSITY sqlstate
 INSERT INTO testschema.test_reuse VALUES ('z', 'w');
-ERROR:  58P01
 SET enable_seqscan = off;
 SELECT a, b FROM testschema.test_reuse WHERE a = 'z' AND b = 'w';
-ERROR:  58P01
+ a | b 
+---+---
+ z | w
+(1 row)
+
 RESET enable_seqscan;
 \set VERBOSITY default
 DROP TABLE testschema.test_reuse;
