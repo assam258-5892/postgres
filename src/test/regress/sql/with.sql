@@ -826,9 +826,6 @@ select pg_get_viewdef('v_cycle2');
 select * from v_cycle1;
 select * from v_cycle2;
 
--- NB: the statements that deparse the views below and that depend on the
--- deparsed text are commented out in the commit that adds these tests,
--- because they crash the server before the deparse code is fixed.
 -- the CYCLE mark values must be deparsed as plain literals that read back as
 -- the same constants (a ::type cast, as in 'Y'::text, is not accepted there)
 select pg_get_viewdef('v_cycle2') as def \gset
@@ -841,11 +838,11 @@ create temp view v_cycle3 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to 1 default 1.5 using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle3');
+select pg_get_viewdef('v_cycle3');
 select * from v_cycle3;
--- select pg_get_viewdef('v_cycle3') as def \gset
--- create temp view v_cycle3_re as :def
--- select * from v_cycle3 except select * from v_cycle3_re;
+select pg_get_viewdef('v_cycle3') as def \gset
+create temp view v_cycle3_re as :def
+select * from v_cycle3 except select * from v_cycle3_re;
 
 -- a negative value needs a type label to be a literal
 create temp view v_cycle4 as
@@ -865,44 +862,44 @@ create temp view v_cycle5 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to text 'a' default name 'b' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle5') as def \gset
--- create temp view v_cycle5_re as :def
+select pg_get_viewdef('v_cycle5') as def \gset
+create temp view v_cycle5_re as :def
 create temp view v_cycle6 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to text 'a' default varchar 'b' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle6') as def \gset
--- create temp view v_cycle6_re as :def
+select pg_get_viewdef('v_cycle6') as def \gset
+create temp view v_cycle6_re as :def
 create temp view v_cycle7 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to text 'a' default char 'b' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle7') as def \gset
--- create temp view v_cycle7_re as :def
+select pg_get_viewdef('v_cycle7') as def \gset
+create temp view v_cycle7_re as :def
 create temp view v_cycle8 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to char(1) 'Y' default char(1) 'N' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle8') as def \gset
--- create temp view v_cycle8_re as :def
+select pg_get_viewdef('v_cycle8') as def \gset
+create temp view v_cycle8_re as :def
 create temp view v_cycle9 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to varchar(10) 'Y' default varchar(10) 'N' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle9') as def \gset
--- create temp view v_cycle9_re as :def
+select pg_get_viewdef('v_cycle9') as def \gset
+create temp view v_cycle9_re as :def
 create temp view v_cycle10 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to numeric(5,2) '1.5' default numeric(5,2) '2.5' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle10') as def \gset
--- create temp view v_cycle10_re as :def
+select pg_get_viewdef('v_cycle10') as def \gset
+create temp view v_cycle10_re as :def
 create temp view v_cycle11 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to timestamp(3) '2020-01-01' default timestamp(3) '2021-01-01' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle11') as def \gset
--- create temp view v_cycle11_re as :def
+select pg_get_viewdef('v_cycle11') as def \gset
+create temp view v_cycle11_re as :def
 create temp view v_cycle12 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to interval '1' day default interval '2' day using path
@@ -913,18 +910,17 @@ create temp view v_cycle13 as
 with recursive t(n) as (select 1 union all select n + 1 from t where n < 3)
 cycle n set m to cycle_dm 'Y' default cycle_dm 'N' using path
 select n, m from t;
--- select pg_get_viewdef('v_cycle13') as def \gset
--- create temp view v_cycle13_re as :def
--- select a.attrelid::regclass as view,
---        format_type(a.atttypid, a.atttypmod) as type,
---        format_type(b.atttypid, b.atttypmod) as type_re
---   from pg_attribute a join pg_attribute b
---     on b.attrelid = (a.attrelid::regclass::text || '_re')::regclass
---        and b.attname = a.attname
---  where a.attname = 'm' and a.attrelid::regclass::text ~ '^v_cycle[0-9]+$'
---  order by a.attrelid::regclass::text;
--- drop view v_cycle13, v_cycle13_re;
-drop view v_cycle13;
+select pg_get_viewdef('v_cycle13') as def \gset
+create temp view v_cycle13_re as :def
+select a.attrelid::regclass as view,
+       format_type(a.atttypid, a.atttypmod) as type,
+       format_type(b.atttypid, b.atttypmod) as type_re
+  from pg_attribute a join pg_attribute b
+    on b.attrelid = (a.attrelid::regclass::text || '_re')::regclass
+       and b.attname = a.attname
+ where a.attname = 'm' and a.attrelid::regclass::text ~ '^v_cycle[0-9]+$'
+ order by a.attrelid::regclass::text;
+drop view v_cycle13, v_cycle13_re;
 drop domain cycle_dm;
 
 --
