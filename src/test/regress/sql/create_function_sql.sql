@@ -520,6 +520,21 @@ SELECT pg_get_functiondef('functest_ren'::regproc) AS def \gset
 :def ;
 SELECT functest_ren(10);
 
+-- The target columns of the actions of a MERGE in a function body are
+-- dependencies, like those of INSERT and UPDATE: they can't be dropped
+CREATE TABLE functest_mtgt (k int, a int, b int, c int);
+CREATE TABLE functest_msrc (k int, v int);
+CREATE FUNCTION functest_merge() RETURNS void
+  BEGIN ATOMIC
+    MERGE INTO functest_mtgt t USING functest_msrc s ON t.k = s.k
+      WHEN MATCHED THEN UPDATE SET a = s.v
+      WHEN NOT MATCHED THEN INSERT (k, b) VALUES (s.k, s.v);
+  END;
+ALTER TABLE functest_mtgt DROP COLUMN a;
+ALTER TABLE functest_mtgt DROP COLUMN b;
+ALTER TABLE functest_mtgt DROP COLUMN c;
+SELECT pg_get_functiondef('functest_merge'::regproc);
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
 DROP USER regress_unpriv_user;
