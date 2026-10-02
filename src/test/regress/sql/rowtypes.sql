@@ -562,3 +562,14 @@ SELECT (NULL::compositetable).a;
 SELECT (NULL::compositetable).oid;
 
 DROP TABLE compositetable;
+
+-- A comparison of two ROW() constructors that is a record comparison, not a
+-- row comparison, needs its ::record casts to survive deparsing
+CREATE VIEW rowtypes_cmp_v AS
+SELECT (ROW(1, NULL::int)::record = ROW(1, NULL::int)::record) AS r;
+SELECT * FROM rowtypes_cmp_v;
+SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass);
+SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass) AS def \gset
+CREATE VIEW rowtypes_cmp_v_re AS :def
+SELECT * FROM rowtypes_cmp_v_re;
+DROP VIEW rowtypes_cmp_v, rowtypes_cmp_v_re;

@@ -876,6 +876,24 @@ select pg_get_indexdef('tt29v_idx'::regclass, 0, true) as def \gset
 drop index tt29v_idx;
 :def ;
 
+-- a function named like a visible type must be schema-qualified, or it would
+-- be reparsed as a cast
+create schema tt30s;
+create domain public.tt30d as int;
+create function tt30s.tt30d(anyelement) returns int
+  language sql as 'select 99';
+set search_path = tt30s, public, pg_catalog;
+create view tt30v as select tt30s.tt30d(1) as r;
+select pg_get_viewdef('tt30v'::regclass);
+select pg_get_viewdef('tt30v'::regclass) as def \gset
+create view tt30v_re as :def
+select * from tt30v, tt30v_re;
+SET search_path TO testviewschm2, public;
+drop schema tt30s cascade;
+drop domain public.tt30d;
+drop view tt28v_re, tt28v;
+drop table tt29v_tbl cascade;
+
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 DROP SCHEMA testviewschm2 CASCADE;
