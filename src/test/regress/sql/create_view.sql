@@ -1004,6 +1004,69 @@ select * from tt34v1 except select * from tt34v1_pre;
 select * from tt34v2 except select * from tt34v2_re;
 drop table tt34_a, tt34_b, tt34_c, tt34_d cascade;
 
+-- a whole-row reference to the alias of JOIN USING must keep its field names,
+-- not be turned into an anonymous ROW()
+create table tt31v_a (x int, p int);
+create table tt31v_b (x int, q int);
+insert into tt31v_a values (1, 10);
+insert into tt31v_b values (1, 20);
+create view tt31v as
+  select to_jsonb(ju) as j, (ju).x as fx, (select to_jsonb(ju)) as sub
+  from tt31v_a join tt31v_b using (x) as ju;
+select * from tt31v;
+select pg_get_viewdef('tt31v'::regclass);
+select pg_get_viewdef('tt31v'::regclass) as def \gset
+create view tt31v_re as :def
+select * from tt31v;
+select * from tt31v_re;
+drop table tt31v_a, tt31v_b cascade;
+
+-- a USING alias that an alias of the join itself hides is not visible, so it
+-- must not force a relation of the same name to be renamed, and a ROW() of the
+-- join columns must not be printed as a reference to it
+create table tt31w_a (f1 int, p int);
+create table tt31w_b (f1 int, q int);
+create table tt31w_u (d int);
+create view tt31w1 as
+  select to_jsonb(row(j.f1)) as j
+  from (tt31w_a join tt31w_b using (f1) as ju) as j;
+create view tt31w2 as
+  select j.f1, tt31w_u.d
+  from (tt31w_a join tt31w_b using (f1) as tt31w_u) as j
+       cross join tt31w_u;
+select pg_get_viewdef('tt31w1'::regclass);
+select pg_get_viewdef('tt31w2'::regclass);
+select pg_get_viewdef('tt31w1'::regclass) as def \gset
+create view tt31w1_re as :def
+select pg_get_viewdef('tt31w2'::regclass) as def \gset
+create view tt31w2_re as :def
+drop table tt31w_a, tt31w_b, tt31w_u cascade;
+
+-- a whole-row reference to the alias at the top of a select list, which is
+-- not the select list of the view, must not be expanded into columns when
+-- the query is read back
+create table tt31w_a (x int, y int);
+create table tt31w_b (x int, y int);
+insert into tt31w_a values (1, 2);
+insert into tt31w_b values (1, 2);
+create view tt31w as
+  select to_jsonb(s.ju) as j
+  from (select ju from tt31w_a join tt31w_b using (x, y) as ju) s;
+create view tt31w_c as
+  with c as (select ju from tt31w_a join tt31w_b using (x) as ju)
+  select to_jsonb(c.ju) as j from c;
+select pg_get_viewdef('tt31w'::regclass);
+select pg_get_viewdef('tt31w_c'::regclass);
+select pg_get_viewdef('tt31w'::regclass) as def \gset
+create view tt31w_re as :def
+select pg_get_viewdef('tt31w_c'::regclass) as def \gset
+create view tt31w_c_re as :def
+select * from tt31w;
+select * from tt31w_re;
+select * from tt31w_c;
+select * from tt31w_c_re;
+drop table tt31w_a, tt31w_b cascade;
+
 -- a function named like a visible type must be schema-qualified, or it would
 -- be reparsed as a cast
 create schema tt30s;
