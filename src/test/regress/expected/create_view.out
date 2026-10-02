@@ -2374,17 +2374,17 @@ create function tt30s.tt30d(anyelement) returns int
 set search_path = tt30s, public, pg_catalog;
 create view tt30v as select tt30s.tt30d(1) as r;
 select pg_get_viewdef('tt30v'::regclass);
-     pg_get_viewdef     
-------------------------
-  SELECT tt30d(1) AS r;
+        pg_get_viewdef        
+------------------------------
+  SELECT tt30s.tt30d(1) AS r;
 (1 row)
 
 select pg_get_viewdef('tt30v'::regclass) as def \gset
 create view tt30v_re as :def
 select * from tt30v, tt30v_re;
- r  | r 
-----+---
- 99 | 1
+ r  | r  
+----+----
+ 99 | 99
 (1 row)
 
 SET search_path TO testviewschm2, public;

@@ -1419,9 +1419,9 @@ SELECT * FROM rowtypes_cmp_v;
 (1 row)
 
 SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass);
-                        pg_get_viewdef                         
----------------------------------------------------------------
-  SELECT (ROW(1, NULL::integer) = ROW(1, NULL::integer)) AS r;
+                                pg_get_viewdef                                 
+-------------------------------------------------------------------------------
+  SELECT (ROW(1, NULL::integer)::record = ROW(1, NULL::integer)::record) AS r;
 (1 row)
 
 SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass) AS def \gset
@@ -1429,7 +1429,7 @@ CREATE VIEW rowtypes_cmp_v_re AS :def
 SELECT * FROM rowtypes_cmp_v_re;
  r 
 ---
- 
+ t
 (1 row)
 
 DROP VIEW rowtypes_cmp_v, rowtypes_cmp_v_re;

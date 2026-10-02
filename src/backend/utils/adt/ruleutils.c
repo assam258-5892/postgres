@@ -10817,13 +10817,27 @@ get_oper_expr(OpExpr *expr, deparse_context *context)
 		/* binary operator */
 		Node	   *arg1 = (Node *) linitial(args);
 		Node	   *arg2 = (Node *) lsecond(args);
+		bool		rowrow = IsA(arg1, RowExpr) && IsA(arg2, RowExpr);
 
+		/*
+		 * If both operands are row constructors, the parser would turn "ROW()
+		 * op ROW()" into a column-by-column row comparison rather than an
+		 * operator on two record values (see transformAExprOp).  Print an
+		 * explicit cast on each bare ROW() so that the raw parse tree has
+		 * TypeCast nodes, not RowExprs, as operands.
+		 */
 		get_rule_expr_paren(arg1, context, true, (Node *) expr);
+		if (rowrow && ((RowExpr *) arg1)->row_format != COERCE_EXPLICIT_CAST)
+			appendStringInfo(buf, "::%s",
+							 format_type_with_typemod(((RowExpr *) arg1)->row_typeid, -1));
 		appendStringInfo(buf, " %s ",
 						 generate_operator_name(opno,
 												exprType(arg1),
 												exprType(arg2)));
 		get_rule_expr_paren(arg2, context, true, (Node *) expr);
+		if (rowrow && ((RowExpr *) arg2)->row_format != COERCE_EXPLICIT_CAST)
+			appendStringInfo(buf, "::%s",
+							 format_type_with_typemod(((RowExpr *) arg2)->row_typeid, -1));
 	}
 	else
 	{
@@ -13549,13 +13563,28 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	 * find it.
 	 */
 	if (!force_qualify)
+	{
+		List	   *fargs = NIL;
+		int			i;
+
+		/*
+		 * func_get_detail() considers the "function name is really a type
+		 * name, so this is a cast" interpretation only when it is given an
+		 * actual argument list (it needs to inspect the first argument).  The
+		 * parser always gives it one, so to predict the parser's choice we
+		 * must too; dummy Consts of the right types suffice.
+		 */
+		for (i = 0; i < nargs; i++)
+			fargs = lappend(fargs, makeNullConst(argtypes[i], -1, InvalidOid));
+
 		p_result = func_get_detail(list_make1(makeString(proname)),
-								   NIL, argnames, nargs, argtypes,
+								   fargs, argnames, nargs, argtypes,
 								   !use_variadic, true, false,
 								   &fgc_flags,
 								   &p_funcid, &p_rettype,
 								   &p_retset, &p_nvargs, &p_vatype,
 								   &p_true_typeids, NULL);
+	}
 	else
 	{
 		p_result = FUNCDETAIL_NOTFOUND;
