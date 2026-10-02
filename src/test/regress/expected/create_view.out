@@ -2716,20 +2716,17 @@ select * from tt31v;
 (1 row)
 
 select pg_get_viewdef('tt31v'::regclass);
-                      pg_get_viewdef                       
------------------------------------------------------------
-  SELECT to_jsonb(ROW(tt31v_a.x)) AS j,                   +
-     (ROW(tt31v_a.x)).x AS fx,                            +
-     ( SELECT to_jsonb(ROW(tt31v_a.x)) AS to_jsonb) AS sub+
-    FROM (tt31v_a                                         +
+                 pg_get_viewdef                  
+-------------------------------------------------
+  SELECT to_jsonb(ju.*) AS j,                   +
+     (ju.*).x AS fx,                            +
+     ( SELECT to_jsonb(ju.*) AS to_jsonb) AS sub+
+    FROM (tt31v_a                               +
       JOIN tt31v_b USING (x) AS ju);
 (1 row)
 
 select pg_get_viewdef('tt31v'::regclass) as def \gset
 create view tt31v_re as :def
-ERROR:  could not identify column "x" in record data type
-LINE 2:     (ROW(tt31v_a.x)).x AS fx,
-             ^
 select * from tt31v;
     j     | fx |   sub    
 ----------+----+----------
@@ -2737,11 +2734,15 @@ select * from tt31v;
 (1 row)
 
 select * from tt31v_re;
-ERROR:  relation "tt31v_re" does not exist
-LINE 1: select * from tt31v_re;
-                      ^
+    j     | fx |   sub    
+----------+----+----------
+ {"x": 1} |  1 | {"x": 1}
+(1 row)
+
 drop table tt31v_a, tt31v_b cascade;
-NOTICE:  drop cascades to view tt31v
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view tt31v
+drop cascades to view tt31v_re
 -- a USING alias that an alias of the join itself hides is not visible, so it
 -- must not force a relation of the same name to be renamed, and a ROW() of the
 -- join columns must not be printed as a reference to it
@@ -2800,7 +2801,7 @@ select pg_get_viewdef('tt31w'::regclass);
                   pg_get_viewdef                   
 ---------------------------------------------------
   SELECT to_jsonb(ju) AS j                        +
-    FROM ( SELECT ROW(tt31w_a.x, tt31w_a.y) AS ju +
+    FROM ( SELECT ju.*::record AS ju              +
             FROM (tt31w_a                         +
               JOIN tt31w_b USING (x, y) AS ju)) s;
 (1 row)
@@ -2809,7 +2810,7 @@ select pg_get_viewdef('tt31w_c'::regclass);
                pg_get_viewdef               
 --------------------------------------------
   WITH c AS (                              +
-          SELECT ROW(tt31w_a.x) AS ju      +
+          SELECT ju.*::record AS ju        +
             FROM (tt31w_a                  +
               JOIN tt31w_b USING (x) AS ju)+
          )                                 +
@@ -2828,9 +2829,9 @@ select * from tt31w;
 (1 row)
 
 select * from tt31w_re;
-         j          
---------------------
- {"f1": 1, "f2": 2}
+        j         
+------------------
+ {"x": 1, "y": 2}
 (1 row)
 
 select * from tt31w_c;
@@ -2840,9 +2841,9 @@ select * from tt31w_c;
 (1 row)
 
 select * from tt31w_c_re;
-     j     
------------
- {"f1": 1}
+    j     
+----------
+ {"x": 1}
 (1 row)
 
 drop table tt31w_a, tt31w_b cascade;

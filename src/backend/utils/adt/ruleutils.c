@@ -489,6 +489,8 @@ static void get_rule_expr(Node *node, deparse_context *context,
 						  bool showimplicit);
 static void get_rule_expr_toplevel(Node *node, deparse_context *context,
 								   bool showimplicit);
+static const char *get_rowexpr_join_alias(RowExpr *rowexpr,
+										  deparse_context *context);
 static void get_rule_list_toplevel(List *lst, deparse_context *context,
 								   bool showimplicit);
 static void get_rule_expr_funccall(Node *node, deparse_context *context,
@@ -6610,7 +6612,12 @@ get_target_list(List *targetList, deparse_context *context)
 		}
 		else
 		{
-			get_rule_expr((Node *) tle->expr, context, true);
+			/*
+			 * Not get_rule_expr, so that a whole-row reference to a JOIN
+			 * USING alias is printed as "alias.*::record"; plain "alias.*"
+			 * would be expanded into columns by the parser.
+			 */
+			get_rule_expr_toplevel((Node *) tle->expr, context, true);
 
 			/*
 			 * When colNamesVisible is true, we should always show the
@@ -9363,7 +9370,7 @@ isSimpleNode(Node *node, Node *parentNode, int prettyFlags)
 		case T_FuncExpr:
 		case T_JsonConstructorExpr:
 		case T_JsonExpr:
-			/* function-like: name(..) or name[..] */
+			/* function-like: name(..), name[..], or join alias.* (RowExpr) */
 			return true;
 
 			/* CASE keywords act as parentheses */
@@ -10399,6 +10406,15 @@ get_rule_expr(Node *node, deparse_context *context,
 				ListCell   *arg;
 				int			i;
 				char	   *sep;
+				const char *joinalias;
+
+				/* whole-row reference to a JOIN USING alias? */
+				joinalias = get_rowexpr_join_alias(rowexpr, context);
+				if (joinalias != NULL)
+				{
+					appendStringInfo(buf, "%s.*", quote_identifier(joinalias));
+					break;
+				}
 
 				/*
 				 * If it's a named type and not RECORD, we may have to skip
@@ -11146,20 +11162,133 @@ get_rule_expr(Node *node, deparse_context *context,
  *
  * Same as get_rule_expr(), except that if the expr is just a Var, we pass
  * istoplevel = true not false to get_variable().  This causes whole-row Vars
- * to get printed with decoration that will prevent expansion of "*".
+ * to get printed with decoration that will prevent expansion of "*".  A
+ * RowExpr that is a whole-row reference to a JOIN USING alias is printed as
+ * "alias.*::record" for the same reason.
  * We need to use this in contexts such as ROW() and VALUES(), where the
- * parser would expand "foo.*" appearing at top level.  (In principle we'd
- * use this in get_target_list() too, but that has additional worries about
- * whether to print AS, so it needs to invoke get_variable() directly anyway.)
+ * parser would expand "foo.*" appearing at top level.  get_target_list() uses
+ * it for expressions other than a bare Var; a bare Var it handles by invoking
+ * get_variable() directly, because it has additional worries about whether to
+ * print AS.
  */
 static void
 get_rule_expr_toplevel(Node *node, deparse_context *context,
 					   bool showimplicit)
 {
+	const char *joinalias;
+
 	if (node && IsA(node, Var))
 		(void) get_variable((Var *) node, 0, true, context);
+	else if (node && IsA(node, RowExpr) &&
+			 (joinalias = get_rowexpr_join_alias((RowExpr *) node, context)) != NULL)
+	{
+		appendStringInfo(context->buf, "%s.*::record",
+						 quote_identifier(joinalias));
+	}
 	else
 		get_rule_expr(node, context, showimplicit);
+}
+
+/*
+ * get_rowexpr_join_alias
+ *		If a RowExpr is the whole-row reference to the alias of a JOIN USING
+ *		clause, return the alias name; else return NULL.
+ *
+ * The parser builds that RowExpr (see transformWholeRowRef) from the join's
+ * USING columns, copying the underlying Var where a join column is a simple
+ * Var.  Printing it as ROW(...) would lose the field names, so look for the
+ * join whose alias columns match and print its alias instead, provided that
+ * this reads back as that reference.  A join with a merged column that is not
+ * a simple Var (FULL JOIN, or a column needing coercion) is not recognized.
+ */
+static const char *
+get_rowexpr_join_alias(RowExpr *rowexpr, deparse_context *context)
+{
+	int			levelsup;
+	deparse_namespace *dpns;
+	const char *result = NULL;
+	ListCell   *lc;
+	int			i;
+
+	if (rowexpr->row_typeid != RECORDOID ||
+		rowexpr->row_format != COERCE_IMPLICIT_CAST ||
+		rowexpr->colnames == NIL ||
+		list_length(rowexpr->colnames) != list_length(rowexpr->args) ||
+		!IsA(linitial(rowexpr->args), Var))
+		return NULL;
+
+	levelsup = ((Var *) linitial(rowexpr->args))->varlevelsup;
+	if (levelsup >= list_length(context->namespaces))
+		return NULL;
+	dpns = (deparse_namespace *) list_nth(context->namespaces, levelsup);
+
+	/* join RTEs of a plan tree have lost joinaliasvars and join_using_alias */
+	if (dpns->plan != NULL)
+		return NULL;
+
+	foreach(lc, dpns->rtable)
+	{
+		RangeTblEntry *rte = lfirst_node(RangeTblEntry, lc);
+		Alias	   *ja = rte->join_using_alias;
+		bool		match = true;
+		ListCell   *lc1;
+		ListCell   *lc2;
+		ListCell   *lc3;
+
+		/* an alias of the join itself hides the USING alias */
+		if (rte->rtekind != RTE_JOIN || ja == NULL || rte->alias != NULL ||
+			list_length(ja->colnames) != list_length(rowexpr->args))
+			continue;
+
+		/* same field names, and each arg is the Var behind the join column */
+		forboth(lc1, rowexpr->colnames, lc2, ja->colnames)
+		{
+			if (strcmp(strVal(lfirst(lc1)), strVal(lfirst(lc2))) != 0)
+				match = false;
+		}
+		lc3 = list_head(rte->joinaliasvars);
+		foreach(lc1, rowexpr->args)
+		{
+			Node	   *jv = (Node *) lfirst(lc3);
+			Var		   *v = (Var *) lfirst(lc1);
+
+			if (!IsA(v, Var) || !IsA(jv, Var) ||
+				v->varlevelsup != levelsup ||
+				v->varno != ((Var *) jv)->varno ||
+				v->varattno != ((Var *) jv)->varattno)
+				match = false;
+			lc3 = lnext(rte->joinaliasvars, lc3);
+		}
+		if (!match)
+			continue;
+
+		/* give up if more than one join qualifies */
+		if (result != NULL)
+			return NULL;
+		result = ja->aliasname;
+	}
+
+	if (result == NULL)
+		return NULL;
+
+	/*
+	 * The alias must not be hidden by, or ambiguous with, a relation of the
+	 * same name in the join's query level or any level inside it.
+	 */
+	for (i = 0; i <= levelsup; i++)
+	{
+		deparse_namespace *d = (deparse_namespace *) list_nth(context->namespaces, i);
+
+		foreach(lc, d->rtable_names)
+		{
+			const char *rname = lfirst(lc);
+
+			if (rname && strcmp(rname, result) == 0)
+				return NULL;
+		}
+	}
+
+	return result;
 }
 
 /*
