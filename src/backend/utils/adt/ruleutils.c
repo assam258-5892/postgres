@@ -169,6 +169,7 @@ typedef struct
 	AppendRelInfo **appendrels; /* Array of AppendRelInfo nodes, or NULL */
 	char	   *ret_old_alias;	/* alias for OLD in RETURNING list */
 	char	   *ret_new_alias;	/* alias for NEW in RETURNING list */
+	int			excl_rtindex;	/* RT index of EXCLUDED in ON CONFLICT, or 0 */
 	/* Workspace for column alias assignment: */
 	bool		unique_using;	/* Are we making USING names globally unique */
 	List	   *using_names;	/* List of assigned names for USING columns */
@@ -3918,12 +3919,30 @@ select_rtable_names_for_explain(List *rtable, Bitmapset *rels_used)
 }
 
 /*
+ * Is this RTE the OLD or NEW of a rule action?  Those names are fixed: the
+ * rule's own syntax refers to them.
+ */
+static bool
+is_rule_old_new_rte(int rtindex, RangeTblEntry *rte)
+{
+	return (rtindex == PRS2_OLD_VARNO || rtindex == PRS2_NEW_VARNO) &&
+		rte->rtekind == RTE_RELATION &&
+		!rte->inFromCl &&
+		rte->alias != NULL &&
+		strcmp(rte->alias->aliasname,
+			   rtindex == PRS2_OLD_VARNO ? "old" : "new") == 0;
+}
+
+/*
  * set_rtable_names: select RTE aliases to be used in printing a query
  *
  * We fill in dpns->rtable_names with a list of names that is one-for-one with
  * the already-filled dpns->rtable list.  Each RTE name is unique among those
  * in the new namespace plus any ancestor namespaces listed in
- * parent_namespaces.
+ * parent_namespaces, with one exception: when rels_used is NULL, the EXCLUDED
+ * pseudo relation of ON CONFLICT and the OLD and NEW of a rule keep their
+ * fixed names even if an ancestor namespace uses the same name.  Other RTEs
+ * of the new namespace are renamed so as not to take those names.
  *
  * If rels_used isn't NULL, only RTE indexes listed in it are given aliases.
  *
@@ -3940,6 +3959,7 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 	bool		found;
 	int			rtindex;
 	ListCell   *lc;
+	List	   *returning_aliases;
 
 	dpns->rtable_names = NIL;
 	/* nothing more to do if empty rtable */
@@ -3979,12 +3999,82 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		}
 	}
 
+	/*
+	 * Some names cannot be changed or are not printed as an RTE name, so they
+	 * are not uniquified below, yet no other RTE may take them.  Reserve the
+	 * names of the EXCLUDED pseudo relation of ON CONFLICT, of JOIN USING
+	 * aliases, and of OLD and NEW of a rule, so that a relation of the same
+	 * name gets renamed instead.  (Not needed when rels_used is given, as for
+	 * a plan tree.)
+	 */
+	if (rels_used == NULL)
+	{
+		if (dpns->excl_rtindex > 0)
+		{
+			hentry = (NameHashEntry *) hash_search(names_hash, "excluded",
+												   HASH_ENTER, &found);
+			hentry->counter = 0;
+		}
+		rtindex = 1;
+		foreach(lc, dpns->rtable)
+		{
+			RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+
+			/* an alias of the join itself hides the USING alias */
+			if (rte->rtekind == RTE_JOIN && rte->join_using_alias != NULL &&
+				rte->alias == NULL)
+			{
+				hentry = (NameHashEntry *) hash_search(names_hash,
+													   rte->join_using_alias->aliasname,
+													   HASH_ENTER, &found);
+				hentry->counter = 0;
+			}
+			else if (is_rule_old_new_rte(rtindex, rte))
+			{
+				hentry = (NameHashEntry *) hash_search(names_hash,
+													   rte->alias->aliasname,
+													   HASH_ENTER, &found);
+				hentry->counter = 0;
+			}
+			rtindex++;
+		}
+	}
+
+	/*
+	 * The aliases for OLD and NEW in a RETURNING list are not RTEs either.
+	 * They are visible in the query level that has them and in the levels
+	 * below, where a relation of the same name would capture them.  So an RTE
+	 * that has no alias of its own must not take such a name.  An alias that
+	 * the user wrote is not checked: the parser rejects a clash at the same
+	 * level, and in a lower level the user's alias hides the RETURNING one,
+	 * as it did in the original query.
+	 */
+	returning_aliases = NIL;
+	if (rels_used == NULL)
+	{
+		if (dpns->ret_old_alias)
+			returning_aliases = lappend(returning_aliases, dpns->ret_old_alias);
+		if (dpns->ret_new_alias)
+			returning_aliases = lappend(returning_aliases, dpns->ret_new_alias);
+		foreach(lc, parent_namespaces)
+		{
+			deparse_namespace *olddpns = (deparse_namespace *) lfirst(lc);
+
+			if (olddpns->ret_old_alias)
+				returning_aliases = lappend(returning_aliases, olddpns->ret_old_alias);
+			if (olddpns->ret_new_alias)
+				returning_aliases = lappend(returning_aliases, olddpns->ret_new_alias);
+		}
+	}
+
 	/* Now we can scan the rtable */
 	rtindex = 1;
 	foreach(lc, dpns->rtable)
 	{
 		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
 		char	   *refname;
+		bool		reserved = false;
+		bool		fixed = false;
 
 		/* Just in case this takes an unreasonable amount of time ... */
 		CHECK_FOR_INTERRUPTS();
@@ -3993,6 +4083,23 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		{
 			/* Ignore unreferenced RTE */
 			refname = NULL;
+		}
+		else if (rtindex == dpns->excl_rtindex && rels_used == NULL)
+		{
+			/* The EXCLUDED pseudo relation has a fixed name */
+			refname = "excluded";
+			fixed = true;
+		}
+		else if (rels_used == NULL && is_rule_old_new_rte(rtindex, rte))
+		{
+			/*
+			 * OLD and NEW of a rule have fixed names too.  A relation of the
+			 * same name in a query level above does no harm, since it is not
+			 * in scope here (for example, the target of an INSERT ... SELECT
+			 * in a rule may be a relation named "new").
+			 */
+			refname = rte->alias->aliasname;
+			fixed = true;
 		}
 		else if (rte->alias)
 		{
@@ -4016,24 +4123,44 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		}
 
 		/*
-		 * If the selected name isn't unique, append digits to make it so, and
-		 * make a new hash entry for it once we've got a unique name.  For a
-		 * very long input name, we might have to truncate to stay within
-		 * NAMEDATALEN.
+		 * If the selected name isn't unique, or is reserved for a RETURNING
+		 * OLD/NEW alias, append digits to make it acceptable, and make a new
+		 * hash entry for it once we've got a usable name.  For a very long
+		 * input name, we might have to truncate to stay within NAMEDATALEN.
 		 */
-		if (refname)
+		if (refname && fixed)
 		{
+			/* fixed name, already in the hash table; nothing to choose */
+		}
+		else if (refname)
+		{
+			/* An RTE without an alias must not take an OLD/NEW alias name */
+			if (rte->alias == NULL)
+			{
+				foreach_ptr(char, retalias, returning_aliases)
+				{
+					if (strcmp(retalias, refname) == 0)
+						reserved = true;
+				}
+			}
+
 			hentry = (NameHashEntry *) hash_search(names_hash,
 												   refname,
 												   HASH_ENTER,
 												   &found);
-			if (found)
+			if (found || reserved)
 			{
-				/* Name already in use, must choose a new one */
+				/*
+				 * Name already in use or reserved, must choose a new one.  A
+				 * reserved name may not be in the hash table yet, in which
+				 * case its new entry has no counter value yet.
+				 */
 				int			refnamelen = strlen(refname);
 				char	   *modname = (char *) palloc(refnamelen + 16);
 				NameHashEntry *hentry2;
 
+				if (!found)
+					hentry->counter = 0;
 				do
 				{
 					hentry->counter++;
@@ -4051,8 +4178,15 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 															modname,
 															HASH_ENTER,
 															&found);
-				} while (found);
-				hentry2->counter = 0;	/* init new hash entry */
+					if (!found)
+						hentry2->counter = 0;	/* init new hash entry */
+					reserved = false;
+					foreach_ptr(char, retalias, returning_aliases)
+					{
+						if (strcmp(retalias, modname) == 0)
+							reserved = true;
+					}
+				} while (found || reserved);
 				refname = modname;
 			}
 			else
@@ -4090,6 +4224,7 @@ set_deparse_for_query(deparse_namespace *dpns, Query *query,
 	dpns->appendrels = NULL;
 	dpns->ret_old_alias = query->returningOldAlias;
 	dpns->ret_new_alias = query->returningNewAlias;
+	dpns->excl_rtindex = query->onConflict ? query->onConflict->exclRelIndex : 0;
 
 	/* Assign a unique relation alias to each RTE */
 	set_rtable_names(dpns, parent_namespaces, NULL);
