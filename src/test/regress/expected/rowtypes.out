@@ -1408,3 +1408,28 @@ ERROR:  column "oid" not found in data type compositetable
 LINE 1: SELECT (NULL::compositetable).oid;
                 ^
 DROP TABLE compositetable;
+-- A comparison of two ROW() constructors that is a record comparison, not a
+-- row comparison, needs its ::record casts to survive deparsing
+CREATE VIEW rowtypes_cmp_v AS
+SELECT (ROW(1, NULL::int)::record = ROW(1, NULL::int)::record) AS r;
+SELECT * FROM rowtypes_cmp_v;
+ r 
+---
+ t
+(1 row)
+
+SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass);
+                                pg_get_viewdef                                 
+-------------------------------------------------------------------------------
+  SELECT (ROW(1, NULL::integer)::record = ROW(1, NULL::integer)::record) AS r;
+(1 row)
+
+SELECT pg_get_viewdef('rowtypes_cmp_v'::regclass) AS def \gset
+CREATE VIEW rowtypes_cmp_v_re AS :def
+SELECT * FROM rowtypes_cmp_v_re;
+ r 
+---
+ t
+(1 row)
+
+DROP VIEW rowtypes_cmp_v, rowtypes_cmp_v_re;

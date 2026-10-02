@@ -2365,6 +2365,40 @@ select pg_get_indexdef('tt29v_idx'::regclass, 0, true);
 select pg_get_indexdef('tt29v_idx'::regclass, 0, true) as def \gset
 drop index tt29v_idx;
 :def ;
+-- a function named like a visible type must be schema-qualified, or it would
+-- be reparsed as a cast
+create schema tt30s;
+create domain public.tt30d as int;
+create function tt30s.tt30d(anyelement) returns int
+  language sql as 'select 99';
+set search_path = tt30s, public, pg_catalog;
+create view tt30v as select tt30s.tt30d(1) as r;
+select pg_get_viewdef('tt30v'::regclass);
+        pg_get_viewdef        
+------------------------------
+  SELECT tt30s.tt30d(1) AS r;
+(1 row)
+
+select pg_get_viewdef('tt30v'::regclass) as def \gset
+create view tt30v_re as :def
+select * from tt30v, tt30v_re;
+ r  | r  
+----+----
+ 99 | 99
+(1 row)
+
+SET search_path TO testviewschm2, public;
+drop schema tt30s cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function tt30s.tt30d(anyelement)
+drop cascades to view tt30s.tt30v
+drop cascades to view tt30s.tt30v_re
+drop domain public.tt30d;
+drop view tt28v_re, tt28v;
+drop table tt29v_tbl cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view tt29v
+drop cascades to view tt29v_re
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects
@@ -2396,7 +2430,7 @@ drop cascades to view aliased_view_2
 drop cascades to view aliased_view_3
 drop cascades to view aliased_view_4
 DROP SCHEMA testviewschm2 CASCADE;
-NOTICE:  drop cascades to 85 other objects
+NOTICE:  drop cascades to 80 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to view temporal1
 drop cascades to view temporal2
@@ -2477,8 +2511,3 @@ drop cascades to view tt25v
 drop cascades to view tt26v
 drop cascades to table tt27v_tbl
 drop cascades to view tt27v
-drop cascades to view tt28v
-drop cascades to view tt28v_re
-drop cascades to table tt29v_tbl
-drop cascades to view tt29v
-drop cascades to view tt29v_re
