@@ -4355,24 +4355,22 @@ create table ruletest_src (a int);
 create rule ruletest_new_r as on insert to ruletest_src
   do also insert into new select new.a;
 select pg_get_ruledef(oid) from pg_rewrite where rulename = 'ruletest_new_r';
-                                   pg_get_ruledef                                   
-------------------------------------------------------------------------------------
- CREATE RULE ruletest_new_r AS                                                     +
-     ON INSERT TO ruletest_ns.ruletest_src DO  INSERT INTO new (a)  SELECT new_1.a;
+                                  pg_get_ruledef                                  
+----------------------------------------------------------------------------------
+ CREATE RULE ruletest_new_r AS                                                   +
+     ON INSERT TO ruletest_ns.ruletest_src DO  INSERT INTO new (a)  SELECT new.a;
 (1 row)
 
 select pg_get_ruledef(oid) as def from pg_rewrite
   where rulename = 'ruletest_new_r' \gset
 drop rule ruletest_new_r on ruletest_src;
 :def
-ERROR:  missing FROM-clause entry for table "new_1"
-LINE 2: ...est_ns.ruletest_src DO  INSERT INTO new (a)  SELECT new_1.a;
-                                                               ^
 insert into ruletest_src values (7);
 select * from new;
  a 
 ---
-(0 rows)
+ 7
+(1 row)
 
 reset search_path;
 drop schema ruletest_ns cascade;

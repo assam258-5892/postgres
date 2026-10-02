@@ -2411,15 +2411,14 @@ alter table tt32v_a rename to ju;
 select pg_get_viewdef('tt32v'::regclass);
            pg_get_viewdef            
 -------------------------------------
-  SELECT ju.y,                      +
+  SELECT ju_1.y,                    +
      tt32v_b.z                      +
-    FROM (ju                        +
+    FROM (ju ju_1                   +
       JOIN tt32v_b USING (x) AS ju);
 (1 row)
 
 select pg_get_viewdef('tt32v'::regclass) as def \gset
 create view tt32v_re as :def
-ERROR:  table name "ju" specified more than once
 select * from tt32v;
  y  | z  
 ----+----
@@ -2427,11 +2426,15 @@ select * from tt32v;
 (1 row)
 
 select * from tt32v_re;
-ERROR:  relation "tt32v_re" does not exist
-LINE 1: select * from tt32v_re;
-                      ^
+ y  | z  
+----+----
+ 10 | 20
+(1 row)
+
 drop table ju, tt32v_b cascade;
-NOTICE:  drop cascades to view tt32v
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view tt32v
+drop cascades to view tt32v_re
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects
