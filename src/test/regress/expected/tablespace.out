@@ -886,6 +886,47 @@ Tablespace: "regress_tblspace"
 btree, for table "testschema.test_tab"
 
 DROP TABLE testschema.test_tab;
+-- check that an EXCLUDE constraint keeps its index tablespace across a
+-- rebuild by ALTER COLUMN TYPE
+CREATE TABLE testschema.test_excl (a int, b int,
+  EXCLUDE USING btree (a WITH =) USING INDEX TABLESPACE regress_tblspace);
+SELECT tablespace FROM pg_indexes WHERE indexname = 'test_excl_a_excl';
+    tablespace    
+------------------
+ regress_tblspace
+(1 row)
+
+ALTER TABLE testschema.test_excl ALTER a TYPE bigint;
+SELECT tablespace FROM pg_indexes WHERE indexname = 'test_excl_a_excl';
+ tablespace 
+------------
+ 
+(1 row)
+
+DROP TABLE testschema.test_excl;
+-- also check ALTER COLUMN TYPE without a rewrite, which reuses the index
+-- files: the catalog must keep their tablespace as well
+CREATE TABLE testschema.test_reuse (a varchar(5), b varchar(5),
+  PRIMARY KEY (a) USING INDEX TABLESPACE regress_tblspace,
+  EXCLUDE USING btree (b WITH =) USING INDEX TABLESPACE regress_tblspace);
+INSERT INTO testschema.test_reuse VALUES ('x', 'y');
+ALTER TABLE testschema.test_reuse ALTER a TYPE varchar(10),
+  ALTER b TYPE varchar(10);
+SELECT indexname, tablespace FROM pg_indexes
+  WHERE tablename = 'test_reuse' ORDER BY indexname;
+     indexname     |    tablespace    
+-------------------+------------------
+ test_reuse_b_excl | 
+ test_reuse_pkey   | regress_tblspace
+(2 rows)
+
+INSERT INTO testschema.test_reuse VALUES ('z', 'w');
+ERROR:  could not open file "base/16384/51089": No such file or directory
+SET enable_seqscan = off;
+SELECT a, b FROM testschema.test_reuse WHERE a = 'z' AND b = 'w';
+ERROR:  could not open file "base/16384/51089": No such file or directory
+RESET enable_seqscan;
+DROP TABLE testschema.test_reuse;
 -- let's try moving a table from one place to another
 CREATE TABLE testschema.atable AS VALUES (1), (2);
 CREATE UNIQUE INDEX anindex ON testschema.atable(column1);
