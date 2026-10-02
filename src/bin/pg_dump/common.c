@@ -86,6 +86,7 @@ static void flagInhTables(Archive *fout, TableInfo *tblinfo, int numTables,
 static void flagInhIndexes(Archive *fout, TableInfo *tblinfo, int numTables);
 static void flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo,
 						 int numTables);
+static bool addNotValidCheckDeps(ConstraintInfo *constr, TableInfo *parent);
 static int	strInArray(const char *pattern, char **arr, int arr_size);
 static IndxInfo *findIndexByOid(Oid oid);
 
@@ -450,6 +451,61 @@ flagInhIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 }
 
 /*
+ * addNotValidCheckDeps -
+ *	 make "constr" depend on the dumped NOT VALID CHECK constraint of the same
+ *	 name that "parent" or one of its ancestors defines; return true if there
+ *	 is one
+ *
+ * A NOT VALID constraint that the parent merely inherited is not dumped as
+ * such (its own ADD CONSTRAINT is not emitted), so a dependency on it would
+ * not order anything.  Look through it to the ancestor that does define the
+ * constraint.
+ */
+static bool
+addNotValidCheckDeps(ConstraintInfo *constr, TableInfo *parent)
+{
+	bool		found = false;
+
+	if (parent->checkexprs == NULL)
+		return false;
+
+	for (int m = 0; m < parent->ncheck; m++)
+	{
+		ConstraintInfo *pconstr = &parent->checkexprs[m];
+
+		if (!pconstr->separate ||
+			strcmp(pconstr->dobj.name, constr->dobj.name) != 0)
+			continue;
+
+		/*
+		 * A NOT ENFORCED constraint cannot be validated.  ConstraintInfo has
+		 * no field for it, so look for the suffix that pg_get_constraintdef()
+		 * adds to condef.
+		 */
+		if (strlen(pconstr->condef) >= 13 &&
+			strcmp(pconstr->condef + strlen(pconstr->condef) - 13,
+				   " NOT ENFORCED") == 0)
+			continue;
+
+		if (pconstr->conislocal)
+		{
+			addObjectDependency(&constr->dobj, pconstr->dobj.dumpId);
+			found = true;
+		}
+		else
+		{
+			for (int p = 0; p < parent->numParents; p++)
+			{
+				if (addNotValidCheckDeps(constr, parent->parents[p]))
+					found = true;
+			}
+		}
+	}
+
+	return found;
+}
+
+/*
  * flagInhAttrs -
  *	 for each dumpable table in tblinfo, flag its inherited attributes
  *
@@ -689,6 +745,49 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				tbinfo->attrdefs[j]->separate = false;
 				addObjectDependency(&tbinfo->dobj,
 									tbinfo->attrdefs[j]->dobj.dumpId);
+			}
+		}
+
+		/*
+		 * A validated CHECK constraint inherited from a parent where the
+		 * constraint of that name is NOT VALID is not printed in the CREATE
+		 * TABLE, and the parent's ADD CONSTRAINT then creates it in the child
+		 * as NOT VALID.  Arrange to validate it afterwards.  This is not
+		 * needed for partitions, which print their inherited constraints in
+		 * their own CREATE TABLE, nor in binary-upgrade mode, which adds the
+		 * inherited constraints one by one.
+		 *
+		 * Like the DEFAULT NULL case above, this changes state that other
+		 * iterations might inspect, namely constr->separate.  That is safe:
+		 * addNotValidCheckDeps() looks through such constraints to the one
+		 * that is actually dumped, and a table that misses the flag because
+		 * of the scan order still gets validated, since VALIDATE CONSTRAINT
+		 * without ONLY recurses to the children.
+		 */
+		if (dopt->dumpSchema && !tbinfo->ispartition && !dopt->binary_upgrade &&
+			tbinfo->checkexprs != NULL)
+		{
+			for (j = 0; j < tbinfo->ncheck; j++)
+			{
+				ConstraintInfo *constr = &tbinfo->checkexprs[j];
+				bool		found = false;
+
+				if (constr->conislocal || constr->separate)
+					continue;
+
+				for (k = 0; k < numParents; k++)
+				{
+					if (addNotValidCheckDeps(constr, parents[k]))
+						found = true;
+				}
+
+				if (found)
+				{
+					/* it is no longer part of the table definition */
+					removeObjectDependency(&tbinfo->dobj, constr->dobj.dumpId);
+					constr->separate = true;
+					constr->revalidate = true;
+				}
 			}
 		}
 	}
