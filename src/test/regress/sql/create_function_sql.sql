@@ -535,6 +535,42 @@ ALTER TABLE functest_mtgt DROP COLUMN b;
 ALTER TABLE functest_mtgt DROP COLUMN c;
 SELECT pg_get_functiondef('functest_merge'::regproc);
 
+-- An OUT parameter before the input parameters must not shift the parameter
+-- names: the body is bound by input position
+CREATE FUNCTION functest_out(OUT r int, a int, b int) RETURNS int
+  BEGIN ATOMIC SELECT a - b; END;
+SELECT functest_out(10, 3);
+SELECT pg_get_functiondef('functest_out'::regproc);
+SELECT pg_get_functiondef('functest_out'::regproc) AS def \gset
+:def ;
+SELECT functest_out(10, 3);
+CREATE FUNCTION functest_out1(OUT r int, a int, b int) RETURNS int
+  BEGIN ATOMIC SELECT a; END;
+SELECT functest_out1(10, 3);
+CREATE FUNCTION functest_inout(INOUT a int, OUT r int, b int) RETURNS record
+  BEGIN ATOMIC SELECT a + 1, a * b; END;
+SELECT * FROM functest_inout(2, 5);
+SELECT pg_get_functiondef('functest_inout'::regproc);
+
+-- Likewise for a VARIADIC parameter and for a procedure with an OUT parameter
+CREATE FUNCTION functest_var(OUT r int, VARIADIC v int[]) RETURNS int
+  BEGIN ATOMIC SELECT v[1] + v[2]; END;
+SELECT functest_var(1, 2);
+SELECT pg_get_functiondef('functest_var'::regproc);
+SELECT pg_get_functiondef('functest_var'::regproc) AS def \gset
+:def ;
+SELECT functest_var(1, 2);
+CREATE FUNCTION functest_var2(VARIADIC v int[]) RETURNS int
+  BEGIN ATOMIC SELECT v[1]; END;
+SELECT pg_get_functiondef('functest_var2'::regproc);
+CREATE PROCEDURE functest_proc(OUT r int, a int)
+  BEGIN ATOMIC SELECT a * 2; END;
+CALL functest_proc(NULL, 5);
+SELECT pg_get_functiondef('functest_proc'::regproc);
+SELECT pg_get_functiondef('functest_proc'::regproc) AS def \gset
+:def ;
+CALL functest_proc(NULL, 5);
+
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE;
 DROP USER regress_unpriv_user;
