@@ -828,7 +828,7 @@ select * from int8_tbl, coalesce(row(1)) as (a int, b int);  -- fail
 
 -- Columns added to the composite types that functions return show up in the
 -- middle of the columns of the RTE, so the column alias list has to make room
--- for them
+-- for them; leave the objects around for the pg_upgrade test
 create type rngfunc_t0 as ();
 create type rngfunc_t1 as (a int);
 create function rngfunc_f0() returns rngfunc_t0
@@ -840,4 +840,3 @@ create view rngfunc_grown_v as
 alter type rngfunc_t0 add attribute x int;
 alter type rngfunc_t1 add attribute b int;
 select pg_get_viewdef('rngfunc_grown_v'::regclass);
-drop view rngfunc_grown_v;
