@@ -1942,7 +1942,7 @@ CREATE OR REPLACE VIEW public.json_table_view_alias AS
                 a integer PATH '$."a"',
                 b integer PATH '$."b"'
             )
-        ) t
+        ) t(p, q)
 SELECT * FROM json_table_view_alias;
  p | q 
 ---+---
@@ -1951,13 +1951,12 @@ SELECT * FROM json_table_view_alias;
 
 SELECT pg_get_viewdef('json_table_view_alias'::regclass) AS def \gset
 CREATE VIEW json_table_view_alias_re AS :def
-ERROR:  column "p" does not exist
-LINE 1: CREATE VIEW json_table_view_alias_re AS  SELECT p,
-                                                        ^
 SELECT * FROM json_table_view_alias_re;
-ERROR:  relation "json_table_view_alias_re" does not exist
-LINE 1: SELECT * FROM json_table_view_alias_re;
-                      ^
+ p | q 
+---+---
+ 1 | 2
+(1 row)
+
 -- A JSON_TABLE() that has to be renamed to avoid a conflict with another one
 -- in an outer query level must get an explicit alias
 CREATE VIEW json_table_view_conflict AS
@@ -1973,7 +1972,7 @@ CREATE OR REPLACE VIEW public.json_table_view_conflict AS
                     COLUMNS (
                         b integer PATH '$."b"'
                     )
-                )) AS m
+                ) json_table_1) AS m
    FROM JSON_TABLE(
             '[{"a": 1}]'::jsonb, '$[*]' AS json_table_path_0
             COLUMNS (
@@ -1988,13 +1987,11 @@ SELECT * FROM json_table_view_conflict;
 
 SELECT pg_get_viewdef('json_table_view_conflict'::regclass) AS def \gset
 CREATE VIEW json_table_view_conflict_re AS :def
-ERROR:  missing FROM-clause entry for table "json_table_1"
-LINE 2:     ( SELECT max(json_table_1.b) AS max
-                         ^
 SELECT * FROM json_table_view_conflict_re;
-ERROR:  relation "json_table_view_conflict_re" does not exist
-LINE 1: SELECT * FROM json_table_view_conflict_re;
-                      ^
+ a | m 
+---+---
+ 1 | 2
+(1 row)
+
 DROP VIEW json_table_view_alias, json_table_view_alias_re,
 	json_table_view_conflict, json_table_view_conflict_re;
-ERROR:  view "json_table_view_alias_re" does not exist
