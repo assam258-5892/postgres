@@ -3807,6 +3807,7 @@ my %tests = (
 						ADD CONSTRAINT test_gen_k CHECK (g < 1000);',
 		regexp => qr/^
 			\QCREATE TABLE dump_test.test_gen_child (\E\n
+			\s+\Qg integer GENERATED ALWAYS AS ((a * 3)) STORED\E\n
 			\Q)\E\n
 			\QINHERITS (dump_test.test_gen_parent);\E
 			.*

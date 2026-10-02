@@ -16246,6 +16246,10 @@ ATPostAlterTypeCleanup(List **wqueue, AlteredTableInfo *tab, LOCKMODE lockmode)
 		 * ATAddCheckNNConstraint recurses from adding the parent table's
 		 * constraint.  But we had to carry the info this far so that we can
 		 * drop the constraint below.
+		 *
+		 * XXX Nothing recurses from the parent when SET EXPRESSION is applied
+		 * directly to a child table, so the inherited constraints that depend
+		 * on the column are dropped and not recreated.
 		 */
 		if (!conislocal)
 			continue;
