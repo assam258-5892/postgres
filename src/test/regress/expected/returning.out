@@ -1076,7 +1076,7 @@ SELECT pg_get_functiondef('returning_capture_f'::regproc);
   RETURNS TABLE(o integer, n integer)                   +
   LANGUAGE sql                                          +
  BEGIN ATOMIC                                           +
-  UPDATE old SET c = (old.c + 1)                        +
+  UPDATE old old_1 SET c = (old_1.c + 1)                +
     RETURNING old.c,                                    +
       new.c;                                            +
  END                                                    +
@@ -1088,7 +1088,7 @@ SELECT pg_get_functiondef('returning_capture_f'::regproc) AS def \gset
 SELECT * FROM returning_capture_f();
  o  | n  
 ----+----
- 12 | 12
+ 11 | 12
 (1 row)
 
 DROP FUNCTION returning_capture_f();
@@ -1114,7 +1114,7 @@ SELECT pg_get_functiondef('returning_t_f'::regproc);
  BEGIN ATOMIC                                                       +
   UPDATE returning_t SET c = (returning_t.c + 1)                    +
     RETURNING WITH (OLD AS returning_t_1) ( SELECT count(*) AS count+
-             FROM returning_t returning_t_1,                        +
+             FROM returning_t returning_t_2,                        +
               returning_u returning_t_1_1) AS count;                +
  END                                                                +
  
