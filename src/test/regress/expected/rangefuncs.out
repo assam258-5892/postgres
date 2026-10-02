@@ -2542,61 +2542,56 @@ select * from rngfunc_addcol_v3;
 (1 row)
 
 select pg_get_viewdef('rngfunc_addcol_v1'::regclass);
-                               pg_get_viewdef                               
-----------------------------------------------------------------------------
-  SELECT a,                                                                +
-     b,                                                                    +
-     ordinality                                                            +
-    FROM rngfunc_addcol() WITH ORDINALITY rngfunc_addcol(a, b, ordinality);
+                                pg_get_viewdef                                 
+-------------------------------------------------------------------------------
+  SELECT a,                                                                   +
+     b,                                                                       +
+     ordinality                                                               +
+    FROM rngfunc_addcol() WITH ORDINALITY rngfunc_addcol(a, b, c, ordinality);
 (1 row)
 
 select pg_get_viewdef('rngfunc_addcol_v2'::regclass);
-                                                         pg_get_viewdef                                                          
----------------------------------------------------------------------------------------------------------------------------------
-  SELECT a,                                                                                                                     +
-     generate_series,                                                                                                           +
-     ordinality                                                                                                                 +
-    FROM ROWS FROM(rngfunc_addcol(), generate_series(10, 11)) WITH ORDINALITY rngfunc_addcol(a, b, generate_series, ordinality);
+                                                           pg_get_viewdef                                                           
+------------------------------------------------------------------------------------------------------------------------------------
+  SELECT a,                                                                                                                        +
+     generate_series,                                                                                                              +
+     ordinality                                                                                                                    +
+    FROM ROWS FROM(rngfunc_addcol(), generate_series(10, 11)) WITH ORDINALITY rngfunc_addcol(a, b, c, generate_series, ordinality);
 (1 row)
 
 select pg_get_viewdef('rngfunc_addcol_v3'::regclass);
-                        pg_get_viewdef                         
----------------------------------------------------------------
-  SELECT f.a,                                                 +
-     f.b,                                                     +
-     f.ordinality                                             +
-    FROM (rngfunc_addcol() WITH ORDINALITY f(a, b, ordinality)+
+                          pg_get_viewdef                          
+------------------------------------------------------------------
+  SELECT f.a,                                                    +
+     f.b,                                                        +
+     f.ordinality                                                +
+    FROM (rngfunc_addcol() WITH ORDINALITY f(a, b, c, ordinality)+
       JOIN ( SELECT 1 AS a) s USING (a));
 (1 row)
 
 select pg_get_viewdef('rngfunc_addcol_v1'::regclass) as def \gset
 create view rngfunc_addcol_v1_re as :def
-ERROR:  column reference "ordinality" is ambiguous
-LINE 3:     ordinality
-            ^
 select pg_get_viewdef('rngfunc_addcol_v2'::regclass) as def \gset
 create view rngfunc_addcol_v2_re as :def
-ERROR:  column reference "ordinality" is ambiguous
-LINE 3:     ordinality
-            ^
 select pg_get_viewdef('rngfunc_addcol_v3'::regclass) as def \gset
 create view rngfunc_addcol_v3_re as :def
-ERROR:  column reference "ordinality" is ambiguous
-LINE 3:     f.ordinality
-            ^
 select * from rngfunc_addcol_v1 except select * from rngfunc_addcol_v1_re;
-ERROR:  relation "rngfunc_addcol_v1_re" does not exist
-LINE 1: ...ect * from rngfunc_addcol_v1 except select * from rngfunc_ad...
-                                                             ^
+ a | b | ordinality 
+---+---+------------
+(0 rows)
+
 select * from rngfunc_addcol_v2 except select * from rngfunc_addcol_v2_re;
-ERROR:  relation "rngfunc_addcol_v2_re" does not exist
-LINE 1: ...ect * from rngfunc_addcol_v2 except select * from rngfunc_ad...
-                                                             ^
+ a | generate_series | ordinality 
+---+-----------------+------------
+(0 rows)
+
 select * from rngfunc_addcol_v3 except select * from rngfunc_addcol_v3_re;
-ERROR:  relation "rngfunc_addcol_v3_re" does not exist
-LINE 1: ...ect * from rngfunc_addcol_v3 except select * from rngfunc_ad...
-                                                             ^
-drop view rngfunc_addcol_v1, rngfunc_addcol_v2, rngfunc_addcol_v3;
+ a | b | ordinality 
+---+---+------------
+(0 rows)
+
+drop view rngfunc_addcol_v1, rngfunc_addcol_v2, rngfunc_addcol_v3,
+  rngfunc_addcol_v1_re, rngfunc_addcol_v2_re, rngfunc_addcol_v3_re;
 drop function rngfunc_addcol();
 drop type rngfunc_addcol_t;
 -- the same if the function had no columns at all when the query was parsed
@@ -2625,38 +2620,35 @@ select * from rngfunc_zerocol_v2;
 (2 rows)
 
 select pg_get_viewdef('rngfunc_zerocol_v1'::regclass);
-                             pg_get_viewdef                             
-------------------------------------------------------------------------
-  SELECT ordinality                                                    +
-    FROM rngfunc_zerocol() WITH ORDINALITY rngfunc_zerocol(ordinality);
+                              pg_get_viewdef                               
+---------------------------------------------------------------------------
+  SELECT ordinality                                                       +
+    FROM rngfunc_zerocol() WITH ORDINALITY rngfunc_zerocol(a, ordinality);
 (1 row)
 
 select pg_get_viewdef('rngfunc_zerocol_v2'::regclass);
-                                                       pg_get_viewdef                                                        
------------------------------------------------------------------------------------------------------------------------------
-  SELECT generate_series,                                                                                                   +
-     ordinality                                                                                                             +
-    FROM ROWS FROM(rngfunc_zerocol(), generate_series(10, 11)) WITH ORDINALITY rngfunc_zerocol(generate_series, ordinality);
+                                                         pg_get_viewdef                                                         
+--------------------------------------------------------------------------------------------------------------------------------
+  SELECT generate_series,                                                                                                      +
+     ordinality                                                                                                                +
+    FROM ROWS FROM(rngfunc_zerocol(), generate_series(10, 11)) WITH ORDINALITY rngfunc_zerocol(a, generate_series, ordinality);
 (1 row)
 
 select pg_get_viewdef('rngfunc_zerocol_v1'::regclass) as def \gset
 create view rngfunc_zerocol_v1_re as :def
-ERROR:  column reference "ordinality" is ambiguous
-LINE 1: create view rngfunc_zerocol_v1_re as  SELECT ordinality
-                                                     ^
 select pg_get_viewdef('rngfunc_zerocol_v2'::regclass) as def \gset
 create view rngfunc_zerocol_v2_re as :def
-ERROR:  column reference "ordinality" is ambiguous
-LINE 2:     ordinality
-            ^
 select * from rngfunc_zerocol_v1 except select * from rngfunc_zerocol_v1_re;
-ERROR:  relation "rngfunc_zerocol_v1_re" does not exist
-LINE 1: ...ct * from rngfunc_zerocol_v1 except select * from rngfunc_ze...
-                                                             ^
+ ordinality 
+------------
+(0 rows)
+
 select * from rngfunc_zerocol_v2 except select * from rngfunc_zerocol_v2_re;
-ERROR:  relation "rngfunc_zerocol_v2_re" does not exist
-LINE 1: ...ct * from rngfunc_zerocol_v2 except select * from rngfunc_ze...
-                                                             ^
-drop view rngfunc_zerocol_v1, rngfunc_zerocol_v2;
+ generate_series | ordinality 
+-----------------+------------
+(0 rows)
+
+drop view rngfunc_zerocol_v1, rngfunc_zerocol_v2,
+  rngfunc_zerocol_v1_re, rngfunc_zerocol_v2_re;
 drop function rngfunc_zerocol();
 drop type rngfunc_zerocol_t;

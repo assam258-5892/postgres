@@ -858,7 +858,8 @@ create view rngfunc_addcol_v3_re as :def
 select * from rngfunc_addcol_v1 except select * from rngfunc_addcol_v1_re;
 select * from rngfunc_addcol_v2 except select * from rngfunc_addcol_v2_re;
 select * from rngfunc_addcol_v3 except select * from rngfunc_addcol_v3_re;
-drop view rngfunc_addcol_v1, rngfunc_addcol_v2, rngfunc_addcol_v3;
+drop view rngfunc_addcol_v1, rngfunc_addcol_v2, rngfunc_addcol_v3,
+  rngfunc_addcol_v1_re, rngfunc_addcol_v2_re, rngfunc_addcol_v3_re;
 drop function rngfunc_addcol();
 drop type rngfunc_addcol_t;
 
@@ -884,6 +885,7 @@ select pg_get_viewdef('rngfunc_zerocol_v2'::regclass) as def \gset
 create view rngfunc_zerocol_v2_re as :def
 select * from rngfunc_zerocol_v1 except select * from rngfunc_zerocol_v1_re;
 select * from rngfunc_zerocol_v2 except select * from rngfunc_zerocol_v2_re;
-drop view rngfunc_zerocol_v1, rngfunc_zerocol_v2;
+drop view rngfunc_zerocol_v1, rngfunc_zerocol_v2,
+  rngfunc_zerocol_v1_re, rngfunc_zerocol_v2_re;
 drop function rngfunc_zerocol();
 drop type rngfunc_zerocol_t;
