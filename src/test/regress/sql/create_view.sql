@@ -852,6 +852,22 @@ insert into tt27v values (1); -- Error
 select viewname from pg_views where viewname = 'tt27v'; -- Ok to access a system view.
 reset restrict_nonsystem_relation_kind;
 
+-- the alias of JOIN USING is a name of its own in the query, so a relation of
+-- that name has to be renamed when the query is deparsed
+create table tt32v_a (x int, y int);
+create table tt32v_b (x int, z int);
+insert into tt32v_a values (1, 10);
+insert into tt32v_b values (1, 20);
+create view tt32v as
+  select tt32v_a.y, tt32v_b.z from tt32v_a join tt32v_b using (x) as ju;
+alter table tt32v_a rename to ju;
+select pg_get_viewdef('tt32v'::regclass);
+select pg_get_viewdef('tt32v'::regclass) as def \gset
+create view tt32v_re as :def
+select * from tt32v;
+select * from tt32v_re;
+drop table ju, tt32v_b cascade;
+
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 DROP SCHEMA testviewschm2 CASCADE;
