@@ -13642,13 +13642,28 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	 * find it.
 	 */
 	if (!force_qualify)
+	{
+		List	   *fargs = NIL;
+		int			i;
+
+		/*
+		 * func_get_detail() considers the "function name is really a type
+		 * name, so this is a cast" interpretation only when it is given an
+		 * actual argument list (it needs to inspect the first argument).  The
+		 * parser always gives it one, so to predict the parser's choice we
+		 * must too; dummy Consts of the right types suffice.
+		 */
+		for (i = 0; i < nargs; i++)
+			fargs = lappend(fargs, makeNullConst(argtypes[i], -1, InvalidOid));
+
 		p_result = func_get_detail(list_make1(makeString(proname)),
-								   NIL, argnames, nargs, argtypes,
+								   fargs, argnames, nargs, argtypes,
 								   !use_variadic, true, false,
 								   &fgc_flags,
 								   &p_funcid, &p_rettype,
 								   &p_retset, &p_nvargs, &p_vatype,
 								   &p_true_typeids, NULL);
+	}
 	else
 	{
 		p_result = FUNCDETAIL_NOTFOUND;
