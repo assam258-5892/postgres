@@ -8809,10 +8809,14 @@ get_parameter(Param *param, deparse_context *context)
 		{
 			char	   *argname = dpns->argnames[param->paramid - 1];
 
-			if (argname)
+			/* unnamed arguments are stored as empty strings, not NULLs */
+			if (argname && argname[0] != '\0')
 			{
 				bool		should_qualify = false;
+				bool		funcname_clash = false;
 				ListCell   *lc;
+				int			rtindex;
+				int			i;
 
 				/*
 				 * Qualify the parameter name if there are any other deparse
@@ -8823,21 +8827,48 @@ get_parameter(Param *param, deparse_context *context)
 				foreach(lc, context->namespaces)
 				{
 					deparse_namespace *depns = lfirst(lc);
+					ListCell   *lc2;
 
 					if (depns->rtable_names != NIL)
-					{
 						should_qualify = true;
-						break;
+
+					/*
+					 * The parser resolves "funcname.argname" as a column
+					 * reference first (sql_fn_post_column_ref never overrides
+					 * a table column), so if a visible RTE is named like the
+					 * function and has a column named like the parameter, the
+					 * qualified form would be captured by that column: fall
+					 * back to $N below.
+					 */
+					rtindex = 0;
+					foreach(lc2, depns->rtable_names)
+					{
+						const char *rname = lfirst(lc2);
+
+						rtindex++;
+						if (rname && strcmp(rname, dpns->funcname) == 0)
+						{
+							deparse_columns *colinfo = deparse_columns_fetch(rtindex, depns);
+
+							for (i = 0; i < colinfo->num_cols; i++)
+							{
+								if (colinfo->colnames[i] &&
+									strcmp(colinfo->colnames[i], argname) == 0)
+									funcname_clash = true;
+							}
+						}
 					}
 				}
-				if (should_qualify)
+				if (!(should_qualify && funcname_clash))
 				{
-					appendStringInfoString(context->buf, quote_identifier(dpns->funcname));
-					appendStringInfoChar(context->buf, '.');
+					if (should_qualify)
+					{
+						appendStringInfoString(context->buf, quote_identifier(dpns->funcname));
+						appendStringInfoChar(context->buf, '.');
+					}
+					appendStringInfoString(context->buf, quote_identifier(argname));
+					return;
 				}
-
-				appendStringInfoString(context->buf, quote_identifier(argname));
-				return;
 			}
 		}
 	}
