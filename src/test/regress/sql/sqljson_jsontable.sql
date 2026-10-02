@@ -1077,4 +1077,5 @@ SELECT pg_get_viewdef('json_table_view_conflict'::regclass) AS def \gset
 CREATE VIEW json_table_view_conflict_re AS :def
 SELECT * FROM json_table_view_conflict_re;
 
-DROP VIEW json_table_view_alias, json_table_view_conflict;
+DROP VIEW json_table_view_alias, json_table_view_alias_re,
+	json_table_view_conflict, json_table_view_conflict_re;
