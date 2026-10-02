@@ -876,6 +876,22 @@ select pg_get_indexdef('tt29v_idx'::regclass, 0, true) as def \gset
 drop index tt29v_idx;
 :def ;
 
+-- the alias of JOIN USING is a name of its own in the query, so a relation of
+-- that name has to be renamed when the query is deparsed
+create table tt32v_a (x int, y int);
+create table tt32v_b (x int, z int);
+insert into tt32v_a values (1, 10);
+insert into tt32v_b values (1, 20);
+create view tt32v as
+  select tt32v_a.y, tt32v_b.z from tt32v_a join tt32v_b using (x) as ju;
+alter table tt32v_a rename to ju;
+select pg_get_viewdef('tt32v'::regclass);
+select pg_get_viewdef('tt32v'::regclass) as def \gset
+create view tt32v_re as :def
+select * from tt32v;
+select * from tt32v_re;
+drop table ju, tt32v_b cascade;
+
 -- a function named like a visible type must be schema-qualified, or it would
 -- be reparsed as a cast
 create schema tt30s;
