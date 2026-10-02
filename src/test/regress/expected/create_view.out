@@ -2308,6 +2308,35 @@ select viewname from pg_views where viewname = 'tt27v'; -- Ok to access a system
 (1 row)
 
 reset restrict_nonsystem_relation_kind;
+-- a function named like a visible type must be schema-qualified, or it would
+-- be reparsed as a cast
+create schema tt30s;
+create domain public.tt30d as int;
+create function tt30s.tt30d(anyelement) returns int
+  language sql as 'select 99';
+set search_path = tt30s, public, pg_catalog;
+create view tt30v as select tt30s.tt30d(1) as r;
+select pg_get_viewdef('tt30v'::regclass);
+     pg_get_viewdef     
+------------------------
+  SELECT tt30d(1) AS r;
+(1 row)
+
+select pg_get_viewdef('tt30v'::regclass) as def \gset
+create view tt30v_re as :def
+select * from tt30v, tt30v_re;
+ r  | r 
+----+---
+ 99 | 1
+(1 row)
+
+SET search_path TO testviewschm2, public;
+drop schema tt30s cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function tt30s.tt30d(anyelement)
+drop cascades to view tt30s.tt30v
+drop cascades to view tt30s.tt30v_re
+drop domain public.tt30d;
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects

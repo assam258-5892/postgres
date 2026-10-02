@@ -851,6 +851,22 @@ insert into tt27v values (1); -- Error
 select viewname from pg_views where viewname = 'tt27v'; -- Ok to access a system view.
 reset restrict_nonsystem_relation_kind;
 
+-- a function named like a visible type must be schema-qualified, or it would
+-- be reparsed as a cast
+create schema tt30s;
+create domain public.tt30d as int;
+create function tt30s.tt30d(anyelement) returns int
+  language sql as 'select 99';
+set search_path = tt30s, public, pg_catalog;
+create view tt30v as select tt30s.tt30d(1) as r;
+select pg_get_viewdef('tt30v'::regclass);
+select pg_get_viewdef('tt30v'::regclass) as def \gset
+create view tt30v_re as :def
+select * from tt30v, tt30v_re;
+SET search_path TO testviewschm2, public;
+drop schema tt30s cascade;
+drop domain public.tt30d;
+
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 DROP SCHEMA testviewschm2 CASCADE;
