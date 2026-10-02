@@ -3832,6 +3832,92 @@ my %tests = (
 		like => {},
 	},
 
+	'ALTER TABLE ... VALIDATE CONSTRAINT for a validated inherited CHECK' => {
+		create_order => 95,
+		create_sql => 'CREATE TABLE dump_test.test_nv_parent (a int);
+					ALTER TABLE dump_test.test_nv_parent
+						ADD CONSTRAINT nv_k CHECK (a > 0) NOT VALID;
+					CREATE TABLE dump_test.test_nv_child ()
+						INHERITS (dump_test.test_nv_parent);',
+		regexp => qr/^
+			\QALTER TABLE dump_test.test_nv_parent\E\n
+			\s+\QADD CONSTRAINT nv_k CHECK ((a > 0)) NOT VALID;\E
+			.*
+			\QALTER TABLE dump_test.test_nv_child\E\n
+			\s+\QVALIDATE CONSTRAINT nv_k;\E
+			/xms,
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_post_data => 1, },
+		unlike => {
+			binary_upgrade => 1,
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
+	# The constraint of the intermediate table is inherited and NOT VALID, so
+	# it is not dumped itself.  The VALIDATE for the leaf must still come after
+	# the ADD CONSTRAINT of the root, although the leaf is named to sort before
+	# the root.
+	'VALIDATE CONSTRAINT for a leaf of a three-level inheritance tree' => {
+		create_order => 95,
+		create_sql => 'CREATE TABLE dump_test.test_nv3_zroot (a int);
+					CREATE TABLE dump_test.test_nv3_mid ()
+						INHERITS (dump_test.test_nv3_zroot);
+					CREATE TABLE dump_test.test_nv3_aleaf ()
+						INHERITS (dump_test.test_nv3_mid);
+					ALTER TABLE dump_test.test_nv3_zroot
+						ADD CONSTRAINT nv3_k CHECK (a > 0) NOT VALID;
+					ALTER TABLE dump_test.test_nv3_aleaf
+						VALIDATE CONSTRAINT nv3_k;',
+		regexp => qr/^
+			\QALTER TABLE dump_test.test_nv3_zroot\E\n
+			\s+\QADD CONSTRAINT nv3_k CHECK ((a > 0)) NOT VALID;\E
+			.*
+			\QALTER TABLE dump_test.test_nv3_aleaf\E\n
+			\s+\QVALIDATE CONSTRAINT nv3_k;\E
+			/xms,
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_post_data => 1, },
+		unlike => {
+			binary_upgrade => 1,
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
+	# A child that stays NOT VALID must not be validated
+	'no VALIDATE CONSTRAINT for an inherited NOT VALID CHECK' => {
+		create_order => 95,
+		create_sql => 'CREATE TABLE dump_test.test_nvs_parent (a int);
+					CREATE TABLE dump_test.test_nvs_child ()
+						INHERITS (dump_test.test_nvs_parent);
+					ALTER TABLE dump_test.test_nvs_parent
+						ADD CONSTRAINT nvs_k CHECK (a > 0) NOT VALID;',
+		regexp => qr/^
+			\QALTER TABLE dump_test.test_nvs_child\E\n
+			\s+\QVALIDATE CONSTRAINT nvs_k;\E
+			/xms,
+		like => {},
+	},
+
+	# VALIDATE CONSTRAINT cannot be applied to a NOT ENFORCED constraint, which
+	# is what the parent's ADD CONSTRAINT creates in the child as well
+	'no VALIDATE CONSTRAINT for a child of a NOT ENFORCED CHECK' => {
+		create_order => 95,
+		create_sql => 'CREATE TABLE dump_test.test_ne_parent (a int,
+						CONSTRAINT ne_k CHECK (a > 0) NOT ENFORCED);
+					CREATE TABLE dump_test.test_ne_child ()
+						INHERITS (dump_test.test_ne_parent);
+					ALTER TABLE dump_test.test_ne_child
+						ALTER CONSTRAINT ne_k ENFORCED;',
+		regexp => qr/^
+			\QALTER TABLE dump_test.test_ne_child\E\n
+			\s+\QVALIDATE CONSTRAINT ne_k;\E
+			/xms,
+		like => {},
+	},
+
 	'CREATE TABLE test_fourth_table_zero_col' => {
 		create_order => 6,
 		create_sql => 'CREATE TABLE dump_test.test_fourth_table (
