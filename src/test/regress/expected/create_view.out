@@ -2285,6 +2285,41 @@ select viewname from pg_views where viewname = 'tt27v'; -- Ok to access a system
 (1 row)
 
 reset restrict_nonsystem_relation_kind;
+-- pretty-printed sublink test expressions must keep their parentheses
+create view tt28v as
+  select ((a or b) in (select false)) as r1,
+         ((c < d) in (select true)) as r2,
+         ((c + 1) in (select 2)) as r3
+  from (select true as a, false as b, 1 as c, 2 as d) t;
+select * from tt28v;
+ r1 | r2 | r3 
+----+----+----
+ f  | t  | t
+(1 row)
+
+select pg_get_viewdef('tt28v'::regclass, true);
+               pg_get_viewdef               
+--------------------------------------------
+  SELECT (a OR b IN ( SELECT false)) AS r1,+
+     (c < d IN ( SELECT true)) AS r2,      +
+     (c + 1 IN ( SELECT 2)) AS r3          +
+    FROM ( SELECT true AS a,               +
+             false AS b,                   +
+             1 AS c,                       +
+             2 AS d) t;
+(1 row)
+
+select pg_get_viewdef('tt28v'::regclass, true) as def \gset
+create view tt28v_re as :def
+ERROR:  operator does not exist: integer = boolean
+LINE 2:     (c < d IN ( SELECT true)) AS r2,
+                   ^
+DETAIL:  No operator of that name accepts the given argument types.
+HINT:  You might need to add explicit type casts.
+select * from tt28v_re;
+ERROR:  relation "tt28v_re" does not exist
+LINE 1: select * from tt28v_re;
+                      ^
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects
@@ -2316,7 +2351,7 @@ drop cascades to view aliased_view_2
 drop cascades to view aliased_view_3
 drop cascades to view aliased_view_4
 DROP SCHEMA testviewschm2 CASCADE;
-NOTICE:  drop cascades to 80 other objects
+NOTICE:  drop cascades to 81 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to view temporal1
 drop cascades to view temporal2
@@ -2397,3 +2432,4 @@ drop cascades to view tt25v
 drop cascades to view tt26v
 drop cascades to table tt27v_tbl
 drop cascades to view tt27v
+drop cascades to view tt28v

@@ -838,6 +838,18 @@ insert into tt27v values (1); -- Error
 select viewname from pg_views where viewname = 'tt27v'; -- Ok to access a system view.
 reset restrict_nonsystem_relation_kind;
 
+-- pretty-printed sublink test expressions must keep their parentheses
+create view tt28v as
+  select ((a or b) in (select false)) as r1,
+         ((c < d) in (select true)) as r2,
+         ((c + 1) in (select 2)) as r3
+  from (select true as a, false as b, 1 as c, 2 as d) t;
+select * from tt28v;
+select pg_get_viewdef('tt28v'::regclass, true);
+select pg_get_viewdef('tt28v'::regclass, true) as def \gset
+create view tt28v_re as :def
+select * from tt28v_re;
+
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 DROP SCHEMA testviewschm2 CASCADE;
