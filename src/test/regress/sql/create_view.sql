@@ -856,6 +856,18 @@ do $$ begin
 end $$;
 select pg_get_viewdef('tt28v_copy', true) = pg_get_viewdef('tt28v', true),
        pg_get_viewdef('tt29v_copy', true) = pg_get_viewdef('tt29v', true);
+-- a user-defined prefix "-" that the search path finds ahead of pg_catalog
+-- must not be lost by folding when the printed definition is read back
+create function tt30f(int) returns int language sql immutable return 42;
+create operator - (rightarg = int4, function = tt30f);
+set search_path to testviewschm2, pg_catalog, public;
+create view tt30v as select -(1::int) as x;
+select x from tt30v;
+select pg_get_viewdef('tt30v', true);
+select pg_get_viewdef('tt30v', true) as def \gset
+create view tt30v_re as :def
+select x from tt30v_re;
+set search_path to testviewschm2, public;
 
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;

@@ -2292,7 +2292,7 @@ select distinct on (- (- '1'::int4)) x, y
 from (values (1, 2)) v(x, y)
 order by - (- '1'::int4), y, - 3.5::numeric;
 select pg_get_viewdef('tt28v', true);
-                   pg_get_viewdef
+                   pg_get_viewdef                    
 -----------------------------------------------------
   SELECT DISTINCT ON ((- (- 1::integer))) x,        +
      y                                              +
@@ -2304,7 +2304,7 @@ create view tt29v as
 select count(*) from (values (1)) v(x)
 group by - '3'::int4, rollup(- '3'::int4);
 select pg_get_viewdef('tt29v', true);
-                   pg_get_viewdef
+                   pg_get_viewdef                   
 ----------------------------------------------------
   SELECT count(*) AS count                         +
     FROM ( VALUES (1)) v(x)                        +
@@ -2318,11 +2318,38 @@ do $$ begin
 end $$;
 select pg_get_viewdef('tt28v_copy', true) = pg_get_viewdef('tt28v', true),
        pg_get_viewdef('tt29v_copy', true) = pg_get_viewdef('tt29v', true);
- ?column? | ?column?
+ ?column? | ?column? 
 ----------+----------
  t        | t
 (1 row)
 
+-- a user-defined prefix "-" that the search path finds ahead of pg_catalog
+-- must not be lost by folding when the printed definition is read back
+create function tt30f(int) returns int language sql immutable return 42;
+create operator - (rightarg = int4, function = tt30f);
+set search_path to testviewschm2, pg_catalog, public;
+create view tt30v as select -(1::int) as x;
+select x from tt30v;
+ x  
+----
+ 42
+(1 row)
+
+select pg_get_viewdef('tt30v', true);
+       pg_get_viewdef       
+----------------------------
+  SELECT - 1::integer AS x;
+(1 row)
+
+select pg_get_viewdef('tt30v', true) as def \gset
+create view tt30v_re as :def
+select x from tt30v_re;
+ x  
+----
+ 42
+(1 row)
+
+set search_path to testviewschm2, public;
 -- clean up all the random objects we made above
 DROP SCHEMA temp_view_test CASCADE;
 NOTICE:  drop cascades to 27 other objects
@@ -2354,7 +2381,7 @@ drop cascades to view aliased_view_2
 drop cascades to view aliased_view_3
 drop cascades to view aliased_view_4
 DROP SCHEMA testviewschm2 CASCADE;
-NOTICE:  drop cascades to 84 other objects
+NOTICE:  drop cascades to 88 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to view temporal1
 drop cascades to view temporal2
@@ -2439,3 +2466,7 @@ drop cascades to view tt28v
 drop cascades to view tt29v
 drop cascades to view tt28v_copy
 drop cascades to view tt29v_copy
+drop cascades to function tt30f(integer)
+drop cascades to operator testviewschm2.-(NONE,integer)
+drop cascades to view tt30v
+drop cascades to view tt30v_re
