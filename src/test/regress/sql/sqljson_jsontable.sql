@@ -1074,3 +1074,18 @@ FROM JSON_TABLE(jsonb '[{"a": 1, "b": 2}]', '$[*]'
 NATURAL JOIN JSON_TABLE(jsonb '[{"a": 2, "b": 1}]', '$[*]'
 	COLUMNS (a int PATH '$.a', b int PATH '$.b')) t2(y, x);
 \sv json_table_view_natural;
+
+-- A JSON_TABLE() column that is renamed to keep the name of a merged USING
+-- column unique gets a column alias list, as a subquery column does.  The
+-- view made from the deparsed text then keeps the new name, which shows in
+-- a whole-row reference.
+CREATE VIEW json_table_view_using AS
+SELECT a.y, jt.x, to_jsonb(jt) AS jt, to_jsonb(s) AS s
+FROM (VALUES (1, 2)) a(x, y) FULL JOIN (VALUES (1)) b(x) USING (x),
+	JSON_TABLE(jsonb '[{"x": 7}]', '$[*]' COLUMNS (x int PATH '$.x')) jt,
+	(SELECT 7 AS x) s;
+\sv json_table_view_using;
+SELECT * FROM json_table_view_using;
+SELECT pg_get_viewdef('json_table_view_using'::regclass) AS def \gset
+CREATE VIEW json_table_view_using_re AS :def
+SELECT * FROM json_table_view_using_re;
