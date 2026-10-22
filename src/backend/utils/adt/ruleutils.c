@@ -401,7 +401,6 @@ static void mark_define_column(deparse_namespace *dpns, Var *var);
 static char *preset_input_colname(deparse_namespace *dpns, int varno,
 								  AttrNumber attno);
 static void reserve_colname(deparse_namespace *dpns, char *colname);
-static List *function_rte_late_colnames(RangeTblEntry *rte);
 static void collapse_define_join_vars(Query *query);
 static Node *collapse_define_join_vars_mutator(Node *node,
 											   collapse_define_context *context);
@@ -4732,62 +4731,6 @@ reserve_colname(deparse_namespace *dpns, char *colname)
 }
 
 /*
- * function_rte_late_colnames: the names of the columns a function RTE's result
- * type has grown since the query was parsed
- *
- * expandRTE() stops at the column count recorded at parse time, so a column
- * the type has gained since then is not in the list the deparser works from.
- * Yet it is a column the RTE has now: a name that has to resolve exactly as
- * printed -- a globally unique USING name, or one a DEFINE clause reads --
- * must be kept off it, and the column alias list being positional, an
- * aliased join above lays its own list over this one end to end, so the
- * grown columns have to be counted in.
- *
- * Returns NIL unless there is one function and no WITH ORDINALITY, those being
- * the cases where the grown columns land at the end of the RTE.  Anywhere else
- * they land in the middle, shifting the attnos this query was parsed with.
- */
-static List *
-function_rte_late_colnames(RangeTblEntry *rte)
-{
-	RangeTblFunction *rtfunc;
-	TypeFuncClass functypclass;
-	Oid			funcrettype;
-	TupleDesc	tupdesc;
-	List	   *result = NIL;
-	int			i;
-
-	if (rte->funcordinality || list_length(rte->functions) != 1)
-		return NIL;
-
-	rtfunc = (RangeTblFunction *) linitial(rte->functions);
-
-	/* A coldeflist fixes the column set, and pins the return type at RECORD */
-	if (rtfunc->funccolnames != NIL)
-		return NIL;
-
-	functypclass = get_expr_result_type(rtfunc->funcexpr, &funcrettype,
-										&tupdesc);
-	if (functypclass != TYPEFUNC_COMPOSITE &&
-		functypclass != TYPEFUNC_COMPOSITE_DOMAIN)
-		return NIL;
-
-	for (i = rtfunc->funccolcount; i < tupdesc->natts; i++)
-	{
-		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
-
-		/* Spell a dropped column the way expandRTE() does */
-		if (attr->attisdropped)
-			result = lappend(result, makeString(pstrdup("")));
-		else
-			result = lappend(result,
-							 makeString(pstrdup(NameStr(attr->attname))));
-	}
-
-	return result;
-}
-
-/*
  * set_relation_column_names: select column aliases for a non-join RTE
  *
  * Column alias info is saved in *colinfo, which is assumed to be pre-zeroed.
@@ -4859,15 +4802,6 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			/* Since we're not creating Vars, rtindex etc. don't matter */
 			expandRTE(rte, 1, 0, VAR_RETURNING_DEFAULT, -1,
 					  true /* include dropped */ , &colnames, NULL);
-
-			/*
-			 * Take the columns the result type has grown since parse time as
-			 * well: they are columns the RTE has now, so a name that has to
-			 * resolve exactly as printed must be kept off of them too, and
-			 * the alias list is positional, so they are printed in full.
-			 */
-			colnames = list_concat(colnames,
-								   function_rte_late_colnames(rte));
 		}
 		else
 			colnames = rte->eref->colnames;
