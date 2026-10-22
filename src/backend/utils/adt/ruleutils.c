@@ -396,7 +396,6 @@ static void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
-static bool colname_is_fixed(RangeTblEntry *rte);
 static void mark_define_columns(deparse_namespace *dpns, Query *query);
 static void mark_define_column(deparse_namespace *dpns, Var *var);
 static char *preset_input_colname(deparse_namespace *dpns, int varno,
@@ -4546,21 +4545,6 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 }
 
 /*
- * colname_is_fixed: is this a column that no rename can reach?
- *
- * A relation RTE outside the FROM clause -- a rule's NEW or OLD, or the
- * target of an UPDATE or DELETE -- has nowhere to print a column alias list,
- * so a renamed column of one would reach the output only where it is
- * referenced, naming a column that does not exist.
- * set_relation_column_names() leaves such columns alone.
- */
-static bool
-colname_is_fixed(RangeTblEntry *rte)
-{
-	return rte->rtekind == RTE_RELATION && !rte->inFromCl;
-}
-
-/*
  * mark_define_columns: settle the names of the columns DEFINE clauses read
  *
  * Within a DEFINE clause a column can only be named without a qualifier,
@@ -4670,7 +4654,7 @@ mark_define_column(deparse_namespace *dpns, Var *var)
 	 * cannot name a column of a relation outside the FROM clause: the
 	 * qualifier slot is taken by the pattern variables.
 	 */
-	Assert(!colname_is_fixed(rte));
+	Assert(rte->rtekind != RTE_RELATION || rte->inFromCl);
 
 	/*
 	 * Choose the name unique within the RTE and against what is reserved,
@@ -4962,17 +4946,8 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
 			else
 				colname = real_colname;
 
-			/*
-			 * Unique-ify and insert into colinfo, unless this is a column no
-			 * rename can reach: a relation RTE outside the FROM clause has
-			 * nowhere to carry a column alias list, so a renamed column would
-			 * reach the output only where it is referenced, naming a column
-			 * that does not exist.  Other kinds reach here with inFromCl
-			 * clear and still get printed, the subquery an INSERT ... SELECT
-			 * reads from among them, so those are renamed as before.
-			 */
-			if (!colname_is_fixed(rte))
-				colname = make_colname_unique(colname, dpns, colinfo);
+			/* Unique-ify and insert into colinfo */
+			colname = make_colname_unique(colname, dpns, colinfo);
 
 			colinfo->colnames[i] = colname;
 			add_to_names_hash(colinfo, colname);
@@ -5357,9 +5332,20 @@ colname_is_unique(const char *colname, deparse_namespace *dpns,
 	}
 
 	/*
+	 * XXX dpns->using_names also holds the names DEFINE clauses read (see
+	 * reserve_colname()).  Once the fix that keeps the real column names of an
+	 * RTE not printed in FROM is in, replace the comment below with:
+	 *
 	 * Also check against the names reserved across the query level: USING
 	 * column names that must be globally unique, and the names DEFINE clauses
-	 * read.  These are not hashed, as they are expected to be few.
+	 * read.  These are not hashed, as they are expected to be few.  Skip this
+	 * check for an RTE that is not printed in FROM: it cannot have a column
+	 * alias list, so its column names must stay the real ones.
+	 */
+
+	/*
+	 * Also check against USING-column names that must be globally unique.
+	 * These are not hashed, but there should be few of them.
 	 */
 	foreach(lc, dpns->using_names)
 	{

@@ -2553,8 +2553,7 @@ every query, with a DEFINE clause or not.  For a function RTE it appends the
 columns the composite result type has gained since parse time
 (function_rte_late_colnames(); only for a single function without WITH
 ORDINALITY or a column definition list), so a reserved name is kept off
-them and the positional column alias list counts them.  The columns
-colname_is_fixed() reports are never renamed there.
+them and the positional column alias list counts them.
 
 XIII-6. Navigation Names Shadow User Functions
 
