@@ -1052,3 +1052,40 @@ SELECT * FROM JSON_TABLE(jsonb '{}', '$' AS p0
 \sv json_table_view_on_empty;
 
 DROP VIEW json_table_view_on_empty;
+
+-- Test JSON_TABLE() column alias list deparsing, and the alias of a
+-- JSON_TABLE() that is renamed to avoid a conflict with another one in an
+-- outer query level; leave the views around for the pg_upgrade test
+CREATE VIEW json_table_view_alias AS
+SELECT t.p, t.q
+FROM JSON_TABLE(jsonb '[{"a": 1, "b": 2}]', '$[*]'
+	COLUMNS (a int PATH '$.a', b int PATH '$.b')) AS t(p, q);
+\sv json_table_view_alias;
+CREATE VIEW json_table_view_conflict AS
+SELECT a, (SELECT max(b) FROM JSON_TABLE(jsonb '[{"b": 2}]', '$[*]'
+	COLUMNS (b int PATH '$.b'))) AS m
+FROM JSON_TABLE(jsonb '[{"a": 1}]', '$[*]' COLUMNS (a int PATH '$.a'));
+\sv json_table_view_conflict;
+-- NATURAL JOIN matches the columns by the names in the alias lists
+CREATE VIEW json_table_view_natural AS
+SELECT x, y
+FROM JSON_TABLE(jsonb '[{"a": 1, "b": 2}]', '$[*]'
+	COLUMNS (a int PATH '$.a', b int PATH '$.b')) t1(x, y)
+NATURAL JOIN JSON_TABLE(jsonb '[{"a": 2, "b": 1}]', '$[*]'
+	COLUMNS (a int PATH '$.a', b int PATH '$.b')) t2(y, x);
+\sv json_table_view_natural;
+
+-- A JSON_TABLE() column that is renamed to keep the name of a merged USING
+-- column unique gets a column alias list, as a subquery column does.  The
+-- view made from the deparsed text then keeps the new name, which shows in
+-- a whole-row reference.
+CREATE VIEW json_table_view_using AS
+SELECT a.y, jt.x, to_jsonb(jt) AS jt, to_jsonb(s) AS s
+FROM (VALUES (1, 2)) a(x, y) FULL JOIN (VALUES (1)) b(x) USING (x),
+	JSON_TABLE(jsonb '[{"x": 7}]', '$[*]' COLUMNS (x int PATH '$.x')) jt,
+	(SELECT 7 AS x) s;
+\sv json_table_view_using;
+SELECT * FROM json_table_view_using;
+SELECT pg_get_viewdef('json_table_view_using'::regclass) AS def \gset
+CREATE VIEW json_table_view_using_re AS :def
+SELECT * FROM json_table_view_using_re;
