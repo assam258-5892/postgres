@@ -1583,3 +1583,13 @@ SELECT JSON_VALUE(jsonb '1234', '$' RETURNING bit(3)  DEFAULT 1::bit(3) ON ERROR
 SELECT JSON_VALUE(jsonb '"111"', '$.a'  RETURNING bit(3) DEFAULT '1111' ON EMPTY);
 ERROR:  bit string length 4 does not match type bit(3)
 DROP DOMAIN queryfuncs_d_varbit3;
+-- Test deparsing of a DEFAULT expression coerced to a length-limited
+-- RETURNING type: printed as an explicit cast, it would truncate a too long
+-- value instead of raising an error; leave the view around for the
+-- pg_upgrade test
+CREATE VIEW queryfuncs_view_default AS
+SELECT JSON_VALUE(jsonb '{}', '$.a' RETURNING varchar(3)
+				  DEFAULT lower('ABCDEF'::text) ON EMPTY) AS r;
+\sv queryfuncs_view_default;
+CREATE OR REPLACE VIEW public.queryfuncs_view_default AS
+ SELECT JSON_VALUE('{}'::jsonb, '$."a"' RETURNING character varying(3) DEFAULT lower('ABCDEF'::text)::character varying(3) ON EMPTY) AS r
