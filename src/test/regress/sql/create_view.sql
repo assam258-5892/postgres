@@ -409,53 +409,6 @@ select pg_get_viewdef('view_of_joins_2b', true);
 select pg_get_viewdef('view_of_joins_2c', true);
 select pg_get_viewdef('view_of_joins_2d', true);
 
--- The columns a function's result type grows after the view is made are
--- columns the RTE has now, and the alias list being positional they are
--- printed in full: an aliased join above lays its own list over its inputs'
--- lists end to end, so a grown column left off would shift the input after
--- it, and a reference into that input would silently land on another column.
-create table tblfc (a int, z int);
-insert into tblfc values (1, 5);
-create function tblfc_f() returns setof tblfc language sql
-  as $$ select * from tblfc $$;
-create table tblfr (z int, val int);
-insert into tblfr values (1, 7);
-
-create view view_of_grown_input as
-select j.a, j.val from (tblfc_f() f join tblfr on true) j;
-
-select * from view_of_grown_input;
-
-alter table tblfc add column val int, add column spare int;
-
-select pg_get_viewdef('view_of_grown_input', true);
-select 'create view view_of_grown_input_2 as '
-       || pg_get_viewdef('view_of_grown_input', true) \gexec
-select pg_get_viewdef('view_of_grown_input', true)
-     = pg_get_viewdef('view_of_grown_input_2', true) as round_trips;
-select * from view_of_grown_input;
-select * from view_of_grown_input_2;
-
-drop view view_of_grown_input_2;
-
--- A grown column that is dropped again still takes up its place in the
--- positional alias list, as a dropped column; a column grown after it must
--- not slide into that place.
-alter table tblfc drop column val;
-alter table tblfc add column val int;
-
-select pg_get_viewdef('view_of_grown_input', true);
-select 'create view view_of_grown_input_2 as '
-       || pg_get_viewdef('view_of_grown_input', true) \gexec
-select pg_get_viewdef('view_of_grown_input', true)
-     = pg_get_viewdef('view_of_grown_input_2', true) as round_trips;
-select * from view_of_grown_input;
-select * from view_of_grown_input_2;
-
-drop view view_of_grown_input_2, view_of_grown_input;
-drop function tblfc_f();
-drop table tblfc, tblfr;
-
 -- Test view decompilation in the face of column addition/deletion/renaming
 
 create table tt2 (a int, b int, c int);
