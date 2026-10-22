@@ -600,3 +600,12 @@ SELECT JSON_VALUE(x, '$' RETURNING json) FROM (VALUES ('1'::json), ('null'), ('2
 SELECT JSON_VALUE(x, '$.a' RETURNING jsonb) FROM (VALUES ('{"a": 1}'::jsonb), ('{}'), ('{"a": 2}')) v(x);
 SELECT JSON_VALUE(x, 'strict $.a' RETURNING jsonb) FROM (VALUES ('{"a": 1}'::jsonb), ('[]'), ('{"a": 2}')) v(x);
 SELECT JSON_VALUE(x, '$' RETURNING jsonb) FROM (VALUES ('1'::jsonb), (NULL), ('2')) v(x);
+
+-- Test deparsing of a DEFAULT expression coerced to a length-limited
+-- RETURNING type: printed as an explicit cast, it would truncate a too long
+-- value instead of raising an error; leave the view around for the
+-- pg_upgrade test
+CREATE VIEW queryfuncs_view_default AS
+SELECT JSON_VALUE(jsonb '{}', '$.a' RETURNING varchar(3)
+				  DEFAULT lower('ABCDEF'::text) ON EMPTY) AS r;
+\sv queryfuncs_view_default;
