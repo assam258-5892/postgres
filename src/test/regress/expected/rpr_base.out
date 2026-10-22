@@ -4822,30 +4822,29 @@ DROP TABLE rpr_res_fn, rpr_res_cfg;
 -- A system column is named from the catalog, not from the deparser's own
 -- choice, so there is no alias to pick for it and nothing to exempt from
 -- renaming.  Its name still has to be held against the rest of the query, or a
--- column that turns up later answers to it as well.  The function builds its
--- row from the type as it stands when called, so it still returns one after
--- the type grows, with NULL in the grown column; a DEFINE clause that read
--- that column instead of rpr_res_sys.ctid would match no row.
+-- column that turns up later answers to it as well.  No table can have a
+-- column of that name, but a view can, and here one is renamed to it after the
+-- view that reads the system column is made.  Printed bare, ctid would then be
+-- ambiguous between the two, and the view could not be made again from its own
+-- definition.
 CREATE TABLE rpr_res_sys (id INT, v INT);
 INSERT INTO rpr_res_sys VALUES (1, 1), (2, 2);
-CREATE TYPE rpr_res_ct AS (a INT);
-CREATE FUNCTION rpr_res_fct() RETURNS SETOF rpr_res_ct LANGUAGE sql
-  AS $$ SELECT * FROM json_populate_record(NULL::rpr_res_ct, '{"a": 1}') $$;
+CREATE VIEW rpr_res_sysc AS SELECT NULL::INT AS a;
 CREATE VIEW rpr_res_sys_v AS
 SELECT rpr_res_sys.id, count(*) OVER w AS cnt
-FROM rpr_res_sys, rpr_res_fct() f
+FROM rpr_res_sys, rpr_res_sysc
 WINDOW w AS (ORDER BY rpr_res_sys.id
              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+)
              DEFINE A AS ctid IS NOT NULL);
-ALTER TYPE rpr_res_ct ADD ATTRIBUTE ctid INT;
+ALTER VIEW rpr_res_sysc RENAME COLUMN a TO ctid;
 SELECT pg_get_viewdef('rpr_res_sys_v'::regclass, true);
                                      pg_get_viewdef                                      
 -----------------------------------------------------------------------------------------
   SELECT rpr_res_sys.id,                                                                +
      count(*) OVER w AS cnt                                                             +
     FROM rpr_res_sys,                                                                   +
-     rpr_res_fct() f(a, ctid_1)                                                         +
+     rpr_res_sysc rpr_res_sysc(ctid_1)                                                  +
    WINDOW w AS (ORDER BY rpr_res_sys.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING+
    AFTER MATCH SKIP PAST LAST ROW                                                       +
    INITIAL                                                                              +
@@ -4859,7 +4858,7 @@ SELECT 'CREATE VIEW rpr_res_sys_rt AS '
 CREATE VIEW rpr_res_sys_rt AS  SELECT rpr_res_sys.id,
     count(*) OVER w AS cnt
    FROM rpr_res_sys,
-    rpr_res_fct() f(a, ctid_1)
+    rpr_res_sysc rpr_res_sysc(ctid_1)
   WINDOW w AS (ORDER BY rpr_res_sys.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   AFTER MATCH SKIP PAST LAST ROW
   INITIAL
@@ -4888,8 +4887,7 @@ SELECT * FROM rpr_res_sys_rt;
 (2 rows)
 
 DROP VIEW rpr_res_sys_rt, rpr_res_sys_v;
-DROP FUNCTION rpr_res_fct();
-DROP TYPE rpr_res_ct;
+DROP VIEW rpr_res_sysc;
 DROP TABLE rpr_res_sys;
 -- Four more corners of the same deparse handling.
 --
