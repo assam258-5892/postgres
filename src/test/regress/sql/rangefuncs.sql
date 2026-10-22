@@ -825,3 +825,19 @@ select * from a, coalesce(b) as c(d int, e int, f int, g int);  -- fail
 with a(b) as (values (row(1,2,3)))
 select * from a, coalesce(b) as c(d int, e int, f float);  -- fail
 select * from int8_tbl, coalesce(row(1)) as (a int, b int);  -- fail
+
+-- Columns added to the composite types that functions return show up in the
+-- middle of the columns of the RTE, so the column alias list has to make room
+-- for them
+create type rngfunc_t0 as ();
+create type rngfunc_t1 as (a int);
+create function rngfunc_f0() returns rngfunc_t0
+  language sql as 'select row()::rngfunc_t0';
+create function rngfunc_f1() returns rngfunc_t1
+  language sql as 'select 1';
+create view rngfunc_grown_v as
+  select * from rows from (rngfunc_f0(), rngfunc_f1()) with ordinality;
+alter type rngfunc_t0 add attribute x int;
+alter type rngfunc_t1 add attribute b int;
+select pg_get_viewdef('rngfunc_grown_v'::regclass);
+drop view rngfunc_grown_v;
