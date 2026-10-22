@@ -5281,22 +5281,11 @@ colname_is_unique(const char *colname, deparse_namespace *dpns,
 	}
 
 	/*
-	 * XXX dpns->using_names also holds the names DEFINE clauses read (see
-	 * reserve_colname()).  Once the fix that keeps the real column names of an
-	 * RTE not printed in FROM is in, replace the comment below with:
-	 *
 	 * Also check against the names reserved across the query level: USING
 	 * column names that must be globally unique, and the names DEFINE clauses
 	 * read.  These are not hashed, as they are expected to be few.  Skip this
 	 * check for an RTE that is not printed in FROM: it cannot have a column
 	 * alias list, so its column names must stay the real ones.
-	 */
-
-	/*
-	 * Also check against USING-column names that must be globally unique.
-	 * These are not hashed, but there should be few of them.  Skip this check
-	 * for an RTE that is not printed in FROM: it cannot have a column alias
-	 * list, so its column names must stay the real ones.
 	 */
 	if (!colinfo->keep_real_names)
 	{
