@@ -672,8 +672,7 @@ FROM stock
     (e.g., <literal>(A | B | A)</literal> becomes <literal>(A | B)</literal>),
     and simplifying nested quantifiers
     (e.g., <literal>(A*)*</literal> becomes <literal>A*</literal>).
-    These optimizations reduce pattern complexity and also decrease
-    nesting depth, making the 254-level depth limit rarely encountered.
+    These optimizations reduce pattern complexity.
     They are applied transparently and can be observed
     in <command>EXPLAIN</command> output.
    </para>

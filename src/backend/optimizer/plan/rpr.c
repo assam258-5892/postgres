@@ -58,7 +58,7 @@ pg_nodiscard static List *mergeConsecutiveAlts(List *children);
 pg_nodiscard static List *mergeGroupPrefixSuffix(List *children);
 static RPRPatternNode *optimizeSeqPattern(RPRPatternNode *pattern);
 
-pg_nodiscard static List *flattenAltChildren(List *children);
+pg_nodiscard static List *flattenAltChildren(List *flattened, List *children);
 pg_nodiscard static List *removeDuplicateAlternatives(List *children);
 static RPRPatternNode *optimizeAltPattern(RPRPatternNode *pattern);
 
@@ -290,8 +290,10 @@ flattenSeqChildren(List *children)
 
 		if (opt->nodeType == RPR_PATTERN_SEQ)
 		{
-			newChildren = list_concat(newChildren,
-									  list_copy(opt->children));
+			/* Splice its children in; the nested list is not needed again */
+			newChildren = list_concat(newChildren, opt->children);
+			list_free(opt->children);
+			opt->children = NIL;
 		}
 		else
 		{
@@ -689,24 +691,40 @@ optimizeSeqPattern(RPRPatternNode *pattern)
  *   (A | (B | C)) -> (A | B | C)
  *
  * Splices each nested ALT's children into the parent list at the position the
- * ALT occupied, so the flattened alternatives keep their place.  Like
+ * ALT occupied, so the flattened alternatives keep their place.  A nested
+ * alternation (which can only sit inside parentheses) is descended into
+ * rather than optimized on its own, so the caller removes duplicates once
+ * over the whole flattened list instead of once per nesting level.  Like
  * flattenSeqChildren(), this pass can end up longer than what it started
- * with, so it builds a new list rather than compacting the cells it has; the
- * caller must assign the result.
+ * with, so it builds a new list; the caller passes NIL as flattened and must
+ * assign the result.
  */
 static List *
-flattenAltChildren(List *children)
+flattenAltChildren(List *flattened, List *children)
 {
-	List	   *flattened = NIL;
+	check_stack_depth();
 
 	foreach_node(RPRPatternNode, child, children)
 	{
-		RPRPatternNode *optimized = optimizeRPRPattern(child);
+		RPRPatternNode *inner = child;
+		RPRPatternNode *opt;
 
-		if (optimized->nodeType == RPR_PATTERN_ALT)
-			flattened = list_concat(flattened, optimized->children);
-		else
-			flattened = lappend(flattened, optimized);
+		/* GROUP{1,1} is always unwrapped, so look through it */
+		while (inner->nodeType == RPR_PATTERN_GROUP &&
+			   inner->min == 1 && inner->max == 1)
+			inner = linitial_node(RPRPatternNode, inner->children);
+
+		if (inner->nodeType == RPR_PATTERN_ALT)
+		{
+			flattened = flattenAltChildren(flattened, inner->children);
+			continue;
+		}
+
+		opt = optimizeRPRPattern(child);
+
+		/* Only a nested ALT optimizes to an ALT; those are handled above */
+		Assert(opt->nodeType != RPR_PATTERN_ALT);
+		flattened = lappend(flattened, opt);
 	}
 
 	return flattened;
@@ -732,6 +750,9 @@ removeDuplicateAlternatives(List *children)
 	{
 		RPRPatternNode *node = list_nth_node(RPRPatternNode, children, readpos);
 		bool		isDuplicate = false;
+
+		/* Each branch is compared with every survivor before it */
+		CHECK_FOR_INTERRUPTS();
 
 		/*
 		 * Survivors are compacted towards the front, so those already kept
@@ -768,7 +789,7 @@ static RPRPatternNode *
 optimizeAltPattern(RPRPatternNode *pattern)
 {
 	/* Recursively optimize children and flatten nested ALT */
-	pattern->children = flattenAltChildren(pattern->children);
+	pattern->children = flattenAltChildren(NIL, pattern->children);
 
 	/* Remove duplicate alternatives */
 	pattern->children = removeDuplicateAlternatives(pattern->children);
@@ -1005,6 +1026,7 @@ optimizeRPRPattern(RPRPatternNode *pattern)
 	Assert(pattern != NULL);
 
 	check_stack_depth();
+	CHECK_FOR_INTERRUPTS();
 
 	/*
 	 * A fixed count leaves reluctance nothing to decide.  Drop it here: the
@@ -1028,6 +1050,9 @@ optimizeRPRPattern(RPRPatternNode *pattern)
 			result = optimizeGroupPattern(pattern);
 			break;
 	}
+
+	/* The post-passes above rescan the whole subtree on the way back up */
+	CHECK_FOR_INTERRUPTS();
 
 	/* Again: a rewrite may have produced a fixed count of its own */
 	if (result->min == result->max)
@@ -1054,14 +1079,16 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 	Assert(node != NULL);
 
 	check_stack_depth();
+	CHECK_FOR_INTERRUPTS();
 
-	/* Check recursion depth limit before overflow occurs */
+	/*
+	 * Parse analysis made this test on the pattern as written and
+	 * optimization never deepens one, so this only keeps RPRDepth from
+	 * wrapping.
+	 */
 	if (depth >= RPR_DEPTH_MAX)
-		ereport(ERROR,
-				errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				errmsg("pattern nesting too deep"),
-				errdetail("Pattern nesting depth %d exceeds maximum %d.",
-						  depth, RPR_DEPTH_MAX - 1));
+		elog(ERROR, "pattern nesting depth %d exceeds maximum %d",
+			 depth, RPR_DEPTH_MAX - 1);
 
 	/* Track maximum depth */
 	*maxDepth = Max(*maxDepth, depth);
