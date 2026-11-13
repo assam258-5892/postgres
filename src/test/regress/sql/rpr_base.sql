@@ -4136,6 +4136,24 @@ WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTE
        w6 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A*|B)+) DEFINE A AS val > 0, B AS val <= 0);
 SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_struct'), E'\n')) AS line WHERE line ~ 'PATTERN';
 DROP VIEW rpr_dp_struct;
+-- Glued and spaced spellings build one tree, so each pair shares a WindowAgg.
+EXPLAIN (COSTS OFF)
+SELECT
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A*|B*|C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A* | B* | C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A | B*|C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A | B* | C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN ((A*|B*|C)+) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN ((A* | B* | C)+) DEFINE A AS id > 1, B AS id > 2, C AS id > 3)
+FROM (VALUES
+  (1),
+  (2)) AS t(id);
 -- Execution semantics (deparse cannot show reluctant shortest-match).  The
 -- rpr_glue rows -- A rows 1-3 and 5, B rows 4 and 6 -- show when the '|B'
 -- alternative is reachable.  With "*" the first branch always succeeds, so B
@@ -4164,6 +4182,8 @@ SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRE
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*||B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A||B) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B|) DEFINE A AS val > 0, B AS val <= 0);
+-- a dangling '|' after glued branches is blamed on the last one
+SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B*|) DEFINE A AS val > 0, B AS val <= 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (|A) DEFINE A AS val > 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN ((A*|)) DEFINE A AS val > 0);
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A* *|B) DEFINE A AS val > 0, B AS val <= 0);
@@ -4738,6 +4758,15 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP TO NEXT ROW
              PATTERN (A ((B) (C))) DEFINE A AS val <= 30, B AS val <= 60, C AS val > 60);
 
+-- A parenthesized subsequence is merged before its surroundings
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (B (B A (B A)+)) DEFINE A AS id > 0, B AS id > 0);
+
 -- ALT flatten: (A | (B | C))+ -> (a | b | c)+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
@@ -4756,6 +4785,33 @@ FROM rpr_plan
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              AFTER MATCH SKIP PAST LAST ROW
              PATTERN ((A | B | A)+) DEFINE A AS val <= 50, B AS val > 50);
+
+-- Nested alternations flatten and deduplicate across levels
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A | (B | (A | (C | B)))) DEFINE A AS id > 0);
+
+-- A quantified group stops the flattening
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A | (B | A)+ | ((B | A))) DEFINE A AS id > 0);
+
+-- Nested duplicates collapse to a single variable
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A | ((A | (A)))) DEFINE A AS id > 0);
 
 -- Quantifier multiply: (A{2}){3} -> a{6}
 EXPLAIN (COSTS OFF)
@@ -7244,8 +7300,8 @@ SELECT format($$SELECT COUNT(*) OVER w FROM rpr_errors
 \set ECHO all
 
 -- Pattern nesting-depth boundary: 254 levels are accepted, 255 rejected.
--- Reluctant quantifiers are not subject to quantifier multiplication, so the
--- nesting survives optimization and still reaches the depth check.
+-- The depth is checked at parse time on the pattern as written, before any
+-- optimization.
 -- ECHO is silenced so the generated deeply nested patterns do not flood the
 -- expected output.
 --   254 nested GROUP{3,7}? -> depth 254 = maximum, accepted.
@@ -7259,6 +7315,42 @@ SELECT format($$SELECT id, val, COUNT(*) OVER w FROM rpr_errors
   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   PATTERN (%sA{3,7}?%s) DEFINE A AS val > 0)$$,
   repeat('(', 255), repeat('){3,7}?', 255)) \gexec
+\set ECHO all
+
+-- Redundant parentheses count: 254 are accepted, a view with 255 is rejected.
+\set ECHO none
+SELECT format($$EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+  FROM (VALUES
+    (1),
+    (2)) AS t(id)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (%sA%s) DEFINE A AS id > 0)$$,
+  repeat('(', 254), repeat(')', 254)) \gexec
+SELECT format($$CREATE VIEW rpr_deep_v AS SELECT count(*) OVER w
+  FROM (VALUES
+    (1),
+    (2)) AS t(id)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (%sA%s) DEFINE A AS id > 0)$$,
+  repeat('(', 255), repeat(')', 255)) \gexec
+\set ECHO all
+
+-- A parenthesized alternation costs two levels: 127 nested pass, 128 fail.
+\set ECHO none
+SELECT format($$EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+  FROM (VALUES
+    (1),
+    (2)) AS t(id)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (%sA%s) DEFINE A AS id > 0)$$,
+  repeat('A | (', 127), repeat(')', 127)) \gexec
+SELECT format($$EXPLAIN (COSTS OFF) SELECT count(*) OVER w
+  FROM (VALUES
+    (1),
+    (2)) AS t(id)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (%sA%s) DEFINE A AS id > 0)$$,
+  repeat('A | (', 128), repeat(')', 128)) \gexec
 \set ECHO all
 
 DROP TABLE rpr_errors;

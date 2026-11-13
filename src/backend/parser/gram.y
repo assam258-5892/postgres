@@ -17107,11 +17107,23 @@ row_pattern_alt:
 					RPRPatternNode *lhs = castNode(RPRPatternNode, $1);
 					RPRPatternNode *rhs = splitRPRTrailingAlt(castNode(RPRPatternNode, $3),
 															 yyscanner);
+					List	   *rhsitems;
+
+					/*
+					 * A glued "B*|C" on the right comes back as an ALT of its
+					 * own; splice its branches in so that the tree is the same
+					 * as for the spaced spelling.  A parenthesized alternation
+					 * is a GROUP, so it is never flattened here.
+					 */
+					if (rhs->nodeType == RPR_PATTERN_ALT)
+						rhsitems = rhs->children;
+					else
+						rhsitems = list_make1(rhs);
 
 					/* If left side is already ALT, append to it */
 					if (lhs->nodeType == RPR_PATTERN_ALT)
 					{
-						lhs->children = lappend(lhs->children, rhs);
+						lhs->children = list_concat(lhs->children, rhsitems);
 						$$ = (Node *) lhs;
 					}
 					else
@@ -17119,7 +17131,7 @@ row_pattern_alt:
 						RPRPatternNode *n = makeNode(RPRPatternNode);
 
 						n->nodeType = RPR_PATTERN_ALT;
-						n->children = list_make2(lhs, rhs);
+						n->children = lcons(lhs, rhsitems);
 						n->min = 1;
 						n->max = 1;
 						n->reluctant = false;
@@ -20714,15 +20726,22 @@ makeRPRSeqOrSingle(List *children, int location)
 
 /*
  * A glued quantifier such as "A*|" leaves trailing_alt set on its term while
- * the enclosing sequence is built.  Once the sequence is complete, split it at
- * the flagged term into alt(left, right), where the right operand is the whole
- * remaining sequence -- this keeps "|" as the lowest-precedence operator, so
- * "A*|B C" parses as "A* | (B C)", identical to the spaced form.  A flag with
- * nothing to its right is a dangling "|" and is rejected.
+ * the enclosing sequence is built.  Once the sequence is complete, cut it
+ * after every flagged term and return one alternation whose branches are the
+ * segments -- this keeps "|" as the lowest-precedence operator, so "A*|B C"
+ * parses as "A* | (B C)" and "A*|B*|C" as "A* | B* | C", identical to the
+ * spaced forms.  A flag with nothing to its right is a dangling "|" and is
+ * rejected.  The sequence is walked once, without recursion, so the cost
+ * stays linear in the number of terms.
  */
 static RPRPatternNode *
 splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 {
+	List	   *branches = NIL;
+	List	   *segment = NIL;
+	RPRPatternNode *first;
+	RPRPatternNode *altn;
+
 	if (node->nodeType != RPR_PATTERN_SEQ)
 	{
 		if (node->trailing_alt)
@@ -20738,37 +20757,43 @@ splitRPRTrailingAlt(RPRPatternNode *node, core_yyscan_t yyscanner)
 
 	foreach_node(RPRPatternNode, child, node->children)
 	{
-		if (child->trailing_alt)
-		{
-			int			splitIdx = foreach_current_index(child);
-			List	   *lefthalf = list_copy_head(node->children, splitIdx + 1);
-			List	   *righthalf = list_copy_tail(node->children, splitIdx + 1);
-			RPRPatternNode *altn;
-			RPRPatternNode *rightnode;
+		segment = lappend(segment, child);
+		if (!child->trailing_alt)
+			continue;
 
-			child->trailing_alt = false;
-			if (righthalf == NIL)
-				ereport(ERROR,
-						errcode(ERRCODE_SYNTAX_ERROR),
-						errmsg("alternation operator \"|\" requires a pattern on both sides"),
-						parser_errposition(child->location));
+		child->trailing_alt = false;
+		if (foreach_current_index(child) == list_length(node->children) - 1)
+			ereport(ERROR,
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("alternation operator \"|\" requires a pattern on both sides"),
+					parser_errposition(child->location));
 
-			/* the right branch starts at its own first element, not the seq start */
-			rightnode = splitRPRTrailingAlt(makeRPRSeqOrSingle(righthalf,
-															   ((RPRPatternNode *) linitial(righthalf))->location),
-											yyscanner);
-			altn = makeNode(RPRPatternNode);
-			altn->nodeType = RPR_PATTERN_ALT;
-			altn->children = list_make2(makeRPRSeqOrSingle(lefthalf, node->location),
-										rightnode);
-			altn->min = 1;
-			altn->max = 1;
-			altn->reluctant = false;
-			altn->location = node->location;
-			return altn;
-		}
+		/* each branch starts at its own first element */
+		first = linitial_node(RPRPatternNode, segment);
+		branches = lappend(branches,
+						   makeRPRSeqOrSingle(segment, first->location));
+		segment = NIL;
 	}
-	return node;
+
+	/* no glued "|" in this sequence */
+	if (branches == NIL)
+	{
+		list_free(segment);
+		return node;
+	}
+
+	first = linitial_node(RPRPatternNode, segment);
+	branches = lappend(branches,
+					   makeRPRSeqOrSingle(segment, first->location));
+
+	altn = makeNode(RPRPatternNode);
+	altn->nodeType = RPR_PATTERN_ALT;
+	altn->children = branches;
+	altn->min = 1;
+	altn->max = 1;
+	altn->reluctant = false;
+	altn->location = node->location;
+	return altn;
 }
 
 /*

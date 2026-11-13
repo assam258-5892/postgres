@@ -7,7 +7,8 @@
  * structures during query analysis:
  *   - Validates frame options (ROWS only, must start at CURRENT ROW, no
  *     EXCLUDE, and CURRENT ROW is not accepted as the frame end)
- *   - Validates PATTERN variable count (max RPR_VARID_MAX + 1)
+ *   - Validates PATTERN variable count (max RPR_VARID_MAX + 1) and nesting
+ *     depth (max RPR_DEPTH_MAX - 1)
  *   - Transforms DEFINE clause
  *   - Stores the PATTERN parse tree and the AFTER MATCH SKIP TO flag
  *
@@ -49,8 +50,8 @@ typedef struct
 } DefineWalkCtx;
 
 /* Forward declarations */
-static void validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
-									   List **varNames);
+static void validateRPRPattern(ParseState *pstate, RPRPatternNode *node,
+							   int depth, List **varNames);
 static List *transformDefineClause(ParseState *pstate, WindowDef *windef);
 static bool define_walker(Node *node, void *context);
 static bool rpr_frame_is_supported(int frameOptions);
@@ -147,12 +148,18 @@ rpr_frame_is_supported(int frameOptions)
 }
 
 /*
- * validateRPRPatternVarCount
- *		Validate that PATTERN variable count fits the varId range.
+ * validateRPRPattern
+ *		Check PATTERN variable count and nesting depth against their limits.
  *
  * Recursively traverses the pattern tree, collecting unique variable names.
  * Throws an error if the number of unique variables would require a varId
  * greater than RPR_VARID_MAX.
+ *
+ * depth is counted as the planner counts it, but on the pattern as written.
+ * Optimization never deepens a pattern, so a pattern accepted here cannot
+ * fail the planner's depth test, and a view or rule is never stored with a
+ * pattern too deep to run.  The counting rule must stay in step with
+ * scanRPRPatternRecursive() and fillRPRPatternAlt() in rpr.c.
  *
  * varNames collects the unique PATTERN variable names, which is what
  * transformColumnRef checks via p_rpr_pattern_vars to identify pattern
@@ -160,8 +167,8 @@ rpr_frame_is_supported(int frameOptions)
  * list is the caller's responsibility, since it only needs to run once.
  */
 static void
-validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
-						   List **varNames)
+validateRPRPattern(ParseState *pstate, RPRPatternNode *node, int depth,
+				   List **varNames)
 {
 	/* Pattern node must exist - parser always provides non-NULL root */
 	Assert(node != NULL);
@@ -173,6 +180,15 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 	Assert(!node->trailing_alt);
 
 	check_stack_depth();
+
+	/* Same test as the planner's scanRPRPatternRecursive(), on the raw tree */
+	if (depth >= RPR_DEPTH_MAX)
+		ereport(ERROR,
+				errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				errmsg("pattern nesting too deep"),
+				errdetail("Pattern nesting depth %d exceeds maximum %d.",
+						  depth, RPR_DEPTH_MAX - 1),
+				parser_errposition(pstate, exprLocation((Node *) node)));
 
 	switch (node->nodeType)
 	{
@@ -211,12 +227,19 @@ validateRPRPatternVarCount(ParseState *pstate, RPRPatternNode *node,
 			break;
 
 		case RPR_PATTERN_SEQ:
-		case RPR_PATTERN_ALT:
-		case RPR_PATTERN_GROUP:
-			/* Recurse into children */
+			/* A sequence adds no level */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
-				validateRPRPatternVarCount(pstate, child, varNames);
+				validateRPRPattern(pstate, child, depth, varNames);
+			}
+			break;
+
+		case RPR_PATTERN_ALT:
+		case RPR_PATTERN_GROUP:
+			/* An alternation and a group each add one */
+			foreach_node(RPRPatternNode, child, node->children)
+			{
+				validateRPRPattern(pstate, child, depth + 1, varNames);
 			}
 			break;
 	}
@@ -246,11 +269,11 @@ transformDefineClause(ParseState *pstate, WindowDef *windef)
 	Assert(windef->rpCommonSyntax->rpDefs != NULL);
 
 	/*
-	 * Validate PATTERN variable count and collect the PATTERN variable names
-	 * for transformColumnRef.
+	 * Validate PATTERN variable count and nesting depth, and collect the
+	 * PATTERN variable names for transformColumnRef.
 	 */
-	validateRPRPatternVarCount(pstate, windef->rpCommonSyntax->rpPattern,
-							   &patternVarNames);
+	validateRPRPattern(pstate, windef->rpCommonSyntax->rpPattern, 0,
+					   &patternVarNames);
 	pstate->p_rpr_pattern_vars = patternVarNames;
 
 	/*
@@ -265,7 +288,7 @@ transformDefineClause(ParseState *pstate, WindowDef *windef)
 	/*
 	 * Reject any DEFINE variable whose name does not appear in PATTERN.  This
 	 * cross-check only needs to run once, so it lives here in the caller
-	 * rather than in the recursive validateRPRPatternVarCount().
+	 * rather than in the recursive validateRPRPattern().
 	 */
 	foreach_node(ResTarget, rt, windef->rpCommonSyntax->rpDefs)
 	{

@@ -1181,11 +1181,11 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     (parentheses) is 254 levels.  An alternation costs a level of its own,
     so a pattern that nests alternations reaches the limit at about half
     as many parentheses.
-    However, pattern optimizations such as flattening nested sequences
-    and simplifying nested quantifiers may reduce the effective depth,
-    so this limit is rarely reached in practice.
-    The pattern is also limited to 32767 elements, counted after these
-    optimizations: one for each occurrence of a pattern variable, two for
+    The depth is that of the pattern as written, so parentheses count
+    even where they are redundant.
+    The pattern is also limited to 32767 elements, counted after pattern
+    optimizations such as flattening nested sequences and simplifying
+    nested quantifiers: one for each occurrence of a pattern variable, two for
     each group with a quantifier other than <literal>{1}</literal>, one
     for each alternation plus one for each of its alternatives, and one
     more for the pattern as a whole.  A larger pattern is rejected with

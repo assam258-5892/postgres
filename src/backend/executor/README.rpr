@@ -270,12 +270,14 @@ self, so they no longer match scan.l.
 row_pattern_quantifier_opt therefore accepts each glued spelling, takes the
 quantifier it half spells, and sets RPRPatternNode.trailing_alt on the term
 to record that an alternation operator came with it.  The flag stays on the
-term while the sequence keeps growing; splitRPRTrailingAlt() then splits the
-finished sequence at the flagged term into ALT(left, right), where the right
-branch is the whole remaining sequence.  That is what keeps '|' the
-lowest-precedence operator of the pattern language: "A*|B C" parses as
-"A* | (B C)", identical to the spaced form.  A flagged term with nothing to
-its right is a dangling '|' and is rejected.
+term while the sequence keeps growing; splitRPRTrailingAlt() then cuts the
+finished sequence after every flagged term and returns one ALT whose
+branches are the pieces.  That is what keeps '|' the lowest-precedence
+operator of the pattern language: "A*|B C" parses as "A* | (B C)" and
+"A*|B*|C" as "A* | B* | C".  The '|' rule splices such an ALT into the
+alternation it is building, so a glued spelling gives the same tree as the
+spaced one.  The sequence is walked once, with no recursion.  A flagged
+term with nothing to its right is a dangling '|' and is rejected.
 
 trailing_alt is transient.  splitRPRTrailingAlt() clears it on every path,
 the error paths included, so a finalized tree never carries it and it
@@ -283,9 +285,11 @@ reaches neither the plan nor the query id.
 
 III-3. DEFINE Clause Transformation
 
-transformDefineClause() first validates the PATTERN variable count and
-collects the names, then rejects any DEFINE variable that PATTERN does not
-use.  After that it processes each DEFINE variable as follows:
+transformDefineClause() first walks the PATTERN tree with
+validateRPRPattern(), which enforces the variable-count and nesting-depth
+limits and collects the names, then rejects any DEFINE variable that
+PATTERN does not use.  After that it processes each DEFINE variable as
+follows:
 
   (1) Checks for duplicate variable names -- this one in a pass of its
       own over the whole list, before any expression is transformed
@@ -293,6 +297,12 @@ use.  After that it processes each DEFINE variable as follows:
       through transformWhereClause() as for WHERE and HAVING, so that the
       steps below see the final expression form
   (3) Wraps in a TargetEntry with the variable name set in resname
+
+The depth limit is the planner's (V-2), counted the same way (a GROUP and
+an ALT one level each, a SEQ none) but on the tree as written.  Phase 1
+never deepens a pattern, so nothing stored can fail the depth test later;
+parentheses that Phase 1 would remove count too.  The element limit stays
+in the planner, because it is defined on the optimized pattern.
 
 Parse analysis puts nothing in the query targetlist for a DEFINE clause.
 Getting what it reads to the WindowAgg is the planner's job, and it is done
@@ -729,6 +739,10 @@ Phase 2 also rejects a pattern too large for the element array or nested too
 deep.  The depth test is made on entry to each node, before the children
 raise the counter, so the one-byte RPRDepth can never wrap.  Neither limit
 depends on the input rows: a pattern that compiles once compiles every time.
+Parse analysis has already applied the depth test (III-3), so only the
+element limit can still fail here.  V-3 (d) wraps a run of alternations in a
+group, but each of them arrived inside parentheses that V-3 (h) removed, so
+the result is never deeper than the pattern as written.
 
 V-3. Phase 1: Parse Tree Optimization
 
@@ -756,6 +770,9 @@ error.
 
   (a) SEQ flattening: Unwrap nested SEQ nodes
       SEQ(A, SEQ(B, C)) -> SEQ(A, B, C)
+      A parenthesized subsequence is optimized on its own before it is
+      spliced in, so its merges come first: B (B A (B A)+) becomes
+      B (B A){2,}, not B{2} A (B A)+.
 
   (b) Consecutive variable merging: Merge consecutive occurrences of the
       same variable into a single quantifier
@@ -780,6 +797,8 @@ error.
   (f) ALT flattening and deduplication
       (A | (B | C)) -> (A | B | C)
       (A | B | A) -> (A | B)
+      Nested alternations are flattened all the way down first, and
+      duplicates are then removed once over the whole list.
 
   (g) Quantifier multiplication: Collapse nested quantifiers when the
       achievable counts are contiguous and the preferred match does not

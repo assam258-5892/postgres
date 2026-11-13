@@ -7407,6 +7407,40 @@ SELECT line FROM unnest(string_to_array(pg_get_viewdef('rpr_dp_struct'), E'\n'))
 (6 rows)
 
 DROP VIEW rpr_dp_struct;
+-- Glued and spaced spellings build one tree, so each pair shares a WindowAgg.
+EXPLAIN (COSTS OFF)
+SELECT
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A*|B*|C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A* | B* | C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A | B*|C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN (A | B* | C) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN ((A*|B*|C)+) DEFINE A AS id > 1, B AS id > 2, C AS id > 3),
+       count(*) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                      PATTERN ((A* | B* | C)+) DEFINE A AS id > 1, B AS id > 2, C AS id > 3)
+FROM (VALUES
+  (1),
+  (2)) AS t(id);
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w3 AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a*# | b*# | c)+
+   ->  WindowAgg
+         Window: w2 AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+         Pattern: (a | b*# | c)
+         ->  WindowAgg
+               Window: w1 AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+               Pattern: (a*# | b*# | c)
+               ->  Sort
+                     Sort Key: "*VALUES*".column1
+                     ->  Values Scan on "*VALUES*"
+(12 rows)
+
 -- Execution semantics (deparse cannot show reluctant shortest-match).  The
 -- rpr_glue rows -- A rows 1-3 and 5, B rows 4 and 6 -- show when the '|B'
 -- alternative is reachable.  With "*" the first branch always succeeds, so B
@@ -7468,6 +7502,11 @@ HINT:  Valid quantifiers are: *, +, ?, {n}, {n,}, {,m}, {n,m}, each optionally f
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B|) DEFINE A AS val > 0, B AS val <= 0);
 ERROR:  syntax error at or near ")"
 LINE 1: ...CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B|) DEFINE A...
+                                                             ^
+-- a dangling '|' after glued branches is blamed on the last one
+SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B*|) DEFINE A AS val > 0, B AS val <= 0);
+ERROR:  alternation operator "|" requires a pattern on both sides
+LINE 1: ...N CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A*|B*|) DEFIN...
                                                              ^
 SELECT count(*) OVER w FROM rpr_glue WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (|A) DEFINE A AS val > 0);
 ERROR:  syntax error at or near "|"
@@ -8425,6 +8464,24 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
  10 | 100 |   0
 (10 rows)
 
+-- A parenthesized subsequence is merged before its surroundings
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (B (B A (B A)+)) DEFINE A AS id > 0, B AS id > 0);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: b (b a){2,}
+   ->  Sort
+         Sort Key: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+(6 rows)
+
 -- ALT flatten: (A | (B | C))+ -> (a | b | c)+
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan
@@ -8474,6 +8531,60 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   9 |  90 |   0
  10 | 100 |   0
 (10 rows)
+
+-- Nested alternations flatten and deduplicate across levels
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A | (B | (A | (C | B)))) DEFINE A AS id > 0);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a | b | c)
+   ->  Sort
+         Sort Key: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+(6 rows)
+
+-- A quantified group stops the flattening
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A | (B | A)+ | ((B | A))) DEFINE A AS id > 0);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (a | (b | a)+ | b)
+   ->  Sort
+         Sort Key: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+(6 rows)
+
+-- Nested duplicates collapse to a single variable
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM (VALUES
+  (1),
+  (2)) AS t(id)
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A | ((A | (A)))) DEFINE A AS id > 0);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a
+   ->  Sort
+         Sort Key: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+(6 rows)
 
 -- Quantifier multiply: (A{2}){3} -> a{6}
 EXPLAIN (COSTS OFF)
@@ -12723,8 +12834,8 @@ LINE 3: ...V231 V232 V233 V234 V235 V236 V237 V238 V239 V240 V241) DEFI...
                                                              ^
 DETAIL:  The maximum number of row pattern variables is 240.
 -- Pattern nesting-depth boundary: 254 levels are accepted, 255 rejected.
--- Reluctant quantifiers are not subject to quantifier multiplication, so the
--- nesting survives optimization and still reaches the depth check.
+-- The depth is checked at parse time on the pattern as written, before any
+-- optimization.
 -- ECHO is silenced so the generated deeply nested patterns do not flood the
 -- expected output.
 --   254 nested GROUP{3,7}? -> depth 254 = maximum, accepted.
@@ -12737,6 +12848,40 @@ DETAIL:  The maximum number of row pattern variables is 240.
 (2 rows)
 
 ERROR:  pattern nesting too deep
+LINE 3: ...((((((((((((((((((((((((((((((((((((((((((((((((((A{3,7}?){3...
+                                                             ^
+DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
+-- Redundant parentheses count: 254 are accepted, a view with 255 is rejected.
+\set ECHO none
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a
+   ->  Sort
+         Sort Key: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+(6 rows)
+
+ERROR:  pattern nesting too deep
+LINE 6: ...((((((((((((((((((((((((((((((((((((((((((((((((((A)))))))))...
+                                                             ^
+DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
+-- A parenthesized alternation costs two levels: 127 nested pass, 128 fail.
+\set ECHO none
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY "*VALUES*".column1 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: a
+   ->  Sort
+         Sort Key: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+(6 rows)
+
+ERROR:  pattern nesting too deep
+LINE 6: ...A | (A | (A | (A | (A | (A | (A | (A | (A | (A | (A | (A))))...
+                                                             ^
 DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
 DROP TABLE rpr_errors;
 -- ============================================================
