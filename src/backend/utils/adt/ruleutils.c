@@ -7210,6 +7210,8 @@ get_rule_pattern_node(RPRPatternNode *node, deparse_context *context)
 
 	Assert(node != NULL);
 
+	check_stack_depth();
+
 	switch (node->nodeType)
 	{
 		case RPR_PATTERN_VAR:
