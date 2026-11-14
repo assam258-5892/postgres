@@ -438,15 +438,8 @@ SELECT id, c FROM (
         DEFINE B AS uval > PREV(uval))
 ) s ORDER BY id;
 
--- A flattened subquery output that an outer join makes nullable reaches the
--- DEFINE clause as a PlaceHolderVar rather than a Var.
--- build_base_rel_tlists() marks it needed and
--- make_window_input_target() asks for it, so it reaches the
--- WindowAgg's input: the trailing "(COALESCE(rpr_integ_u.uval, 0))" is the
--- assertion.  coalesce() is deliberate and must not be simplified away: a
--- strict expression such as "uval + 1" goes to NULL on its own when the join
--- finds no match, so pullup does not wrap it and the case degenerates into an
--- ordinary Var.
+-- The subquery is pulled up even though a navigation argument reads uv1; the
+-- outer join makes uv1 a PlaceHolderVar computed below it.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT t.id, count(*) OVER w AS c
 FROM rpr_integ t
@@ -1410,11 +1403,10 @@ SELECT cnt FROM (
 ) s;
 DROP TABLE rpr_over1, rpr_over2;
 
--- A DEFINE clause can come to hold a Var, or a PlaceHolderVar, of an outer
--- query level, although none may be written in one: inlining a SQL function
--- substitutes the call's actual arguments into the body and raises the level
--- of what it plants there, and subquery pull-up may wrap that in a
--- PlaceHolderVar.  Each query below leaves the function's output x unread,
+-- A DEFINE clause can come to hold a Var of an outer query level, although
+-- none may be written in one: inlining a SQL function substitutes the call's
+-- actual arguments into the body and raises the level of what it plants
+-- there.  Each query below leaves the function's output x unread,
 -- so its entry is replaced with a NULL, and is followed by the same query
 -- reading x, which prunes nothing; the counts must agree.
 CREATE TABLE rpr_up (p int, x int);
@@ -1451,8 +1443,8 @@ GROUP BY d.k ORDER BY 1;
 SELECT max(cnt) FROM rpr_up_h(2);
 SELECT max(cnt) FROM rpr_up_h(4);
 
--- an outer PlaceHolderVar, which pulling up the subquery that supplies the
--- argument puts there in place of the Var:
+-- an outer Var in a navigation argument, which pulling up the subquery that
+-- supplies it replaces with a constant:
 CREATE FUNCTION rpr_up_n(int) RETURNS TABLE (cnt bigint, x int)
 LANGUAGE sql STABLE AS $$
   SELECT count(*) OVER w, x FROM rpr_up
@@ -1466,6 +1458,122 @@ SELECT s.k, max(g.cnt), max(g.x) FROM (SELECT 3 AS k FROM rpr_drv) s,
 
 DROP FUNCTION rpr_up_f(int), rpr_up_h(int), rpr_up_n(int);
 DROP TABLE rpr_up, rpr_drv;
+
+-- A merged JOIN USING column passed to an inlined function and read inside
+-- a navigation argument.  The join alias is expanded one level below its
+-- join, inside the function body.
+CREATE TABLE rpr_ja_t (id int, val int);
+INSERT INTO rpr_ja_t SELECT g, g * 2 FROM generate_series(1, 6) g;
+CREATE TABLE rpr_ja_u (id int);
+INSERT INTO rpr_ja_u SELECT generate_series(1, 5);
+CREATE TABLE rpr_ja_v (id int);
+INSERT INTO rpr_ja_v SELECT generate_series(4, 8);
+CREATE TABLE rpr_ja_w (id int);
+INSERT INTO rpr_ja_w SELECT generate_series(6, 9);
+CREATE TABLE rpr_ja_s (id int);
+INSERT INTO rpr_ja_s SELECT generate_series(2, 5);
+CREATE TABLE rpr_ja_b (id bigint);
+INSERT INTO rpr_ja_b VALUES (1), (2), (-10);
+CREATE TABLE rpr_ja_k (k int, y int);
+INSERT INTO rpr_ja_k SELECT g, g * 10 FROM generate_series(1, 8) g;
+CREATE TABLE rpr_ja_k2 (k int);
+INSERT INTO rpr_ja_k2 SELECT generate_series(1, 8);
+CREATE TABLE rpr_ja_one (o int);
+INSERT INTO rpr_ja_one VALUES (1);
+CREATE FUNCTION rpr_ja_f(int) RETURNS TABLE (cnt bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w FROM rpr_ja_t
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               INITIAL PATTERN (A+) DEFINE A AS PREV(val + $1) > 5)
+$$;
+CREATE FUNCTION rpr_ja_g(p bigint) RETURNS TABLE (id int, cnt bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT id, count(*) OVER w FROM rpr_ja_t
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+) DEFINE B AS PREV(val + p) > 0)
+$$;
+CREATE FUNCTION rpr_ja_j(p bigint) RETURNS TABLE (cnt bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w FROM rpr_ja_t JOIN rpr_ja_s USING (id)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+) DEFINE B AS PREV(id + p) > 0)
+$$;
+CREATE FUNCTION rpr_ja_a(p int) RETURNS TABLE (cnt bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w FROM rpr_ja_t
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A B+)
+               DEFINE B AS PREV(val) + p > 0 AND NEXT(val + p) > 0)
+$$;
+
+-- FULL JOIN, with and without GROUP BY
+SELECT j.id, max(g.cnt)
+FROM (rpr_ja_u FULL JOIN rpr_ja_v USING (id)) j, LATERAL rpr_ja_f(j.id) g
+GROUP BY j.id ORDER BY 1;
+SELECT j.id, g.cnt
+FROM (rpr_ja_u FULL JOIN rpr_ja_v USING (id)) j, LATERAL rpr_ja_f(j.id) g
+ORDER BY 1, 2 LIMIT 3;
+-- INNER JOIN, whose merged column is a plain Var
+SELECT j.id, max(g.cnt)
+FROM (rpr_ja_u JOIN rpr_ja_v USING (id)) j, LATERAL rpr_ja_f(j.id) g
+GROUP BY j.id ORDER BY 1;
+-- USING columns of different types, FULL and LEFT
+SELECT k.id, sum(g.cnt)
+FROM (rpr_ja_u FULL JOIN rpr_ja_b USING (id)) k, LATERAL rpr_ja_g(k.id) g
+GROUP BY k.id ORDER BY 1;
+SELECT k.id, sum(g.cnt)
+FROM (rpr_ja_u LEFT JOIN rpr_ja_b USING (id)) k, LATERAL rpr_ja_g(k.id) g
+GROUP BY k.id ORDER BY 1;
+-- a Var-free merged column into a function body with its own join
+SELECT id, max(g.cnt)
+FROM (SELECT 10 AS id) a LEFT JOIN rpr_ja_b USING (id),
+     LATERAL rpr_ja_j(id) g
+GROUP BY id;
+-- nested join aliases
+SELECT count(g.cnt)
+FROM ((rpr_ja_u LEFT JOIN rpr_ja_v USING (id))
+      FULL JOIN rpr_ja_w USING (id)) j,
+     LATERAL rpr_ja_j(j.id) g;
+SELECT count(g.cnt)
+FROM ((rpr_ja_u FULL JOIN rpr_ja_v USING (id))
+      FULL JOIN rpr_ja_w USING (id)) j,
+     LATERAL rpr_ja_a(j.id) g;
+-- the alias combined with another relation's column
+SELECT count(g.cnt)
+FROM (rpr_ja_u FULL JOIN rpr_ja_v USING (id)) j, rpr_ja_w w,
+     LATERAL rpr_ja_f(j.id + w.id) g;
+SELECT count(g.cnt)
+FROM (rpr_ja_u FULL JOIN rpr_ja_v USING (id)) j, LATERAL (SELECT 1 AS c) g0,
+     LATERAL rpr_ja_f(j.id + g0.c) g;
+-- a SubLink reading the alias, without a function
+SELECT id, count(*) OVER w AS c
+FROM rpr_ja_u FULL JOIN rpr_ja_v USING (id),
+     LATERAL (SELECT (SELECT y FROM rpr_ja_k WHERE k = id) AS m
+              FROM rpr_ja_one) s
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(m) > 0)
+ORDER BY id;
+SELECT id, count(*) OVER w AS c
+FROM rpr_ja_one p1, rpr_ja_one p2, rpr_ja_one p3,
+     rpr_ja_u FULL JOIN rpr_ja_v USING (id),
+     LATERAL (SELECT (SELECT y FROM rpr_ja_k JOIN rpr_ja_k2 USING (k)
+                      WHERE k = id) AS m
+              FROM rpr_ja_one) s
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(m) > 0)
+ORDER BY id;
+
+-- Two inlined levels between the alias and the navigation: the same rows as
+-- the single level above.
+CREATE FUNCTION rpr_ja_f2(int) RETURNS TABLE (cnt bigint)
+LANGUAGE sql STABLE AS $$ SELECT cnt FROM rpr_ja_f($1) $$;
+SELECT j.id, max(g.cnt)
+FROM (rpr_ja_u FULL JOIN rpr_ja_v USING (id)) j, LATERAL rpr_ja_f2(j.id) g
+GROUP BY j.id ORDER BY 1;
+DROP FUNCTION rpr_ja_f2(int);
+DROP FUNCTION rpr_ja_f(int), rpr_ja_g(bigint), rpr_ja_j(bigint), rpr_ja_a(int);
+DROP TABLE rpr_ja_t, rpr_ja_u, rpr_ja_v, rpr_ja_w, rpr_ja_s, rpr_ja_b,
+  rpr_ja_k, rpr_ja_k2, rpr_ja_one;
 
 -- ============================================================
 -- B12. RPR + Correlated navigation offsets

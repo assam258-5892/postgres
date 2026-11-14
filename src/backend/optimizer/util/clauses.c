@@ -71,6 +71,8 @@ typedef struct
 	List	   *active_fns;
 	Node	   *case_val;
 	bool		estimate;
+	bool		in_nav_arg;		/* below an RPRNavExpr argument? */
+	bool		no_inline;		/* do not inline SQL functions */
 } eval_const_expressions_context;
 
 typedef struct
@@ -137,6 +139,7 @@ static bool grouping_check_operands(Oid opno, Oid inputcollid,
 									List *args, grouping_walker_ctx *ctx);
 static bool grouping_check_operand(Node *arg, Oid opno, Oid inputcollid,
 								   grouping_walker_ctx *ctx);
+static Node *eval_const_nav_args_mutator(Node *node, void *root);
 static Node *eval_const_expressions_mutator(Node *node,
 											eval_const_expressions_context *context);
 static bool contain_non_const_walker(Node *node, void *context);
@@ -2652,7 +2655,50 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
+	context.in_nav_arg = false;
+	context.no_inline = false;
 	return eval_const_expressions_mutator(node, &context);
+}
+
+/*
+ * eval_const_navigation_arguments
+ *
+ * Fold the arguments of the row pattern navigations in node as written,
+ * before preprocessing replaces any of their columns.  Later passes do not
+ * evaluate anything in a navigation argument, so this is where constants
+ * written there, bound parameters included, are folded.  It must not drop
+ * a column reference, so it neither inlines SQL functions nor uses not-null
+ * proofs.
+ */
+Node *
+eval_const_navigation_arguments(PlannerInfo *root, Node *node)
+{
+	return eval_const_nav_args_mutator(node, root);
+}
+
+static Node *
+eval_const_nav_args_mutator(Node *node, void *root)
+{
+	if (node == NULL)
+		return NULL;
+	if (IsA(node, RPRNavExpr))
+	{
+		RPRNavExpr *newnav = (RPRNavExpr *) palloc(sizeof(RPRNavExpr));
+		eval_const_expressions_context context;
+
+		memcpy(newnav, node, sizeof(RPRNavExpr));
+		context.boundParams = ((PlannerInfo *) root)->glob->boundParams;
+		context.root = NULL;	/* no not-null proofs */
+		context.active_fns = NIL;
+		context.case_val = NULL;
+		context.estimate = false;
+		context.in_nav_arg = false;
+		context.no_inline = true;
+		newnav->arg = (Expr *)
+			eval_const_expressions_mutator((Node *) newnav->arg, &context);
+		return (Node *) newnav;
+	}
+	return expression_tree_mutator(node, eval_const_nav_args_mutator, root);
 }
 
 #define MIN_ARRAY_SIZE_FOR_HASHED_SAOP 9
@@ -2794,6 +2840,8 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = true;	/* unsafe transformations OK */
+	context.in_nav_arg = false;
+	context.no_inline = false;
 	return eval_const_expressions_mutator(node, &context);
 }
 
@@ -2818,9 +2866,16 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 #define ece_all_arguments_const(node) \
 	(!expression_tree_walker((Node *) (node), contain_non_const_walker, NULL))
 
-/* Generic macro for applying evaluate_expr */
+/*
+ * Generic macro for applying evaluate_expr.  Below a navigation argument the
+ * node is returned as is: the argument is evaluated only at the row the
+ * navigation lands on.  This and evaluate_function() are the only places
+ * that evaluate there outside estimation; any new one must check
+ * in_nav_arg as well.
+ */
 #define ece_evaluate_expr(node) \
-	((Node *) evaluate_expr((Expr *) (node), \
+	(context->in_nav_arg ? (Node *) (node) : \
+	 (Node *) evaluate_expr((Expr *) (node), \
 							exprType((Node *) (node)), \
 							exprTypmod((Node *) (node)), \
 							exprCollation((Node *) (node))))
@@ -4312,6 +4367,33 @@ eval_const_expressions_mutator(Node *node,
 														  context);
 			}
 			break;
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *nav = (RPRNavExpr *) node;
+				RPRNavExpr *newnav;
+				bool		save_in_nav_arg = context->in_nav_arg;
+
+				/*
+				 * The argument is evaluated only at the row the navigation
+				 * lands on, so nothing in it is evaluated here; constants
+				 * written in it were folded by
+				 * eval_const_navigation_arguments().  The offsets are
+				 * run-time constants.
+				 */
+				newnav = (RPRNavExpr *) palloc(sizeof(RPRNavExpr));
+				memcpy(newnav, nav, sizeof(RPRNavExpr));
+				context->in_nav_arg = true;
+				newnav->arg = (Expr *)
+					eval_const_expressions_mutator((Node *) nav->arg, context);
+				context->in_nav_arg = save_in_nav_arg;
+				newnav->offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) nav->offset_arg,
+												   context);
+				newnav->compound_offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) nav->compound_offset_arg,
+												   context);
+				return (Node *) newnav;
+			}
 		case T_ConvertRowtypeExpr:
 			{
 				ConvertRowtypeExpr *cre = castNode(ConvertRowtypeExpr, node);
@@ -4790,7 +4872,7 @@ simplify_function(Oid funcid, Oid result_type, int32 result_typmod,
 		Assert(newexpr != (Expr *) &fexpr);
 	}
 
-	if (!newexpr && allow_non_const)
+	if (!newexpr && allow_non_const && !context->no_inline)
 		newexpr = inline_function(funcid, result_type, result_collid,
 								  input_collid, args, funcvariadic,
 								  func_tuple, context);
@@ -5451,6 +5533,10 @@ evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
 	 * constant non-NULL inputs.)
 	 */
 	if (has_nonconst_input)
+		return NULL;
+
+	/* A navigation argument is evaluated only at the row it lands on */
+	if (context->in_nav_arg)
 		return NULL;
 
 	/*

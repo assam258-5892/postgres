@@ -1488,12 +1488,22 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is null) is null);
 
--- Skipping the argument is data-dependent: restricted to the row PREV misses
--- on, a division by zero in it never runs; over the whole table NEXT reaches
--- a row for all but the last and it does.
+-- Skipping the argument is data-dependent: on a single row PREV misses and a
+-- division by zero in it never runs, while LAST on the same row plans and then
+-- raises it at execution; over the whole table NEXT reaches a row for all but
+-- the last.
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t WHERE id = 1
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val / 0) > 0);
+
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val / 0) > 0);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val / 0) > 0);
 
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
@@ -1506,6 +1516,18 @@ FROM rpr_nav
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(val + 2 * 3) > 0);
 
+-- An argument that folds to a constant still navigates:
+-- PREV(COALESCE(1, val)) is null on the first row, like PREV(val).
+SELECT id,
+       count(*) OVER w1 AS folded,
+       count(*) OVER w2 AS plain
+FROM rpr_nav
+WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A+) DEFINE A AS PREV(COALESCE(1, val)) IS NULL),
+       w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A+) DEFINE A AS PREV(val) IS NULL)
+ORDER BY id;
+
 -- Folding a constant subexpression can raise where the whole argument would
 -- not have: unlike val / 0 above, 1 / 0 does not depend on the row, so it is
 -- reached at plan time even on the row PREV misses on.
@@ -1513,6 +1535,66 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WHERE id = 1
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val + 1 / 0) > 0);
+
+-- Hidden in a SQL function that drops its argument, 1 / 0 is not folded.
+CREATE FUNCTION rpr_nav_drop(x int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT 1 / 0';
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(rpr_nav_drop(val)) > 0);
+
+-- Outside a navigation it is inlined and folded, raising at plan time.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS rpr_nav_drop(val) > 0);
+DROP FUNCTION rpr_nav_drop(int);
+
+-- A parameter is a constant to the function body, so a constant argument
+-- reaching the body's navigation argument is folded, raising at plan time.
+CREATE FUNCTION rpr_nav_param(x int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w FROM rpr_nav WHERE id = 1
+  WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A) DEFINE A AS PREV(val + x / 0) > 0) $$;
+SELECT f FROM rpr_nav_param(10) f;
+DROP FUNCTION rpr_nav_param(int);
+
+-- A custom plan folds a bound parameter the same way; a generic plan keeps it.
+PREPARE rpr_nav_prep(int) AS
+  SELECT count(*) OVER w FROM rpr_nav WHERE id = 1
+  WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A) DEFINE A AS PREV(val + $1 / 0) > 0);
+SET plan_cache_mode = force_custom_plan;
+EXECUTE rpr_nav_prep(10);
+SET plan_cache_mode = force_generic_plan;
+EXECUTE rpr_nav_prep(10);
+RESET plan_cache_mode;
+DEALLOCATE rpr_nav_prep;
+
+-- A null test on a NOT NULL column folds to a constant, but the division
+-- over it is not evaluated either.
+CREATE TABLE rpr_nav_nn (id int, v int NOT NULL, b bool NOT NULL);
+INSERT INTO rpr_nav_nn VALUES (1, 10, true);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (v IS NULL)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (b IS UNKNOWN)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (ROW(v, id) IS NULL)::int) > 0);
+
+-- Outside a navigation it is folded, raising at plan time.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS 1 / (v IS NULL)::int > 0);
+DROP TABLE rpr_nav_nn;
 
 -- Here the null reaches the DEFINE predicate itself instead of an IS NULL
 -- An all-NULL target row would have made v IS NULL true and matched the
@@ -1522,25 +1604,21 @@ SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
 
--- Pulling up the VALUES substitutes 10 for v, which is not what the column
--- stood for under a navigation: the argument reads the row the navigation
--- lands on, not this one.  The replacement is wrapped in a PlaceHolderVar
--- rather than folded through.
+-- The VALUES is pulled up and v becomes a constant in the argument, which
+-- is not evaluated; PREV yields NULL where there is no row to land on.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
 
--- That wrapping is what keeps this one from raising: the divisor is constant
--- but the dividend is not folded through, so the division stands until
--- execution, where PREV has no row to navigate to and never reaches it.
+-- Nor is the division by that constant, so it stands until execution,
+-- where PREV has no row to land on.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
 
--- A pulled-up subquery and a function RTE that folded to a constant reach a
--- navigation argument the same way, so both are wrapped as well.
+-- The same for a subquery and a function RTE that folds to a constant.
 SELECT id, count(*) OVER w AS cnt
 FROM (SELECT 1 AS id, 10 AS v) t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
@@ -1549,24 +1627,88 @@ SELECT count(*) OVER w AS cnt
 FROM abs(-10) AS v
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
 
--- Only the argument is protected.  One level outside the navigation the same
--- column is replaced and folded as it is anywhere else, and the division
--- raises at plan time -- as it does for the same WHERE clause over the same
--- one-row VALUES, with no pattern in sight.
+-- A virtual generated column with a constant expression reaches the
+-- argument as that constant, and is not evaluated either.
+CREATE TABLE rpr_nav_gen (id int, g int GENERATED ALWAYS AS (10) VIRTUAL,
+                          h int GENERATED ALWAYS AS (COALESCE(10, id)) VIRTUAL);
+INSERT INTO rpr_nav_gen (id) VALUES (1);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+
+-- The same on the nullable side of an outer join.
+SELECT i, count(*) OVER w AS cnt
+FROM generate_series(1, 1) i LEFT JOIN rpr_nav_gen ON id = 99
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+
+-- The same for an expression with a Var that folds to a constant.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(h / 0) > 0);
+
+-- A merged column whose USING coerces the side carries the constant through
+-- the join alias, on either side of the outer join and through a nested join.
+CREATE TABLE rpr_nav_gen8 (g bigint);
+INSERT INTO rpr_nav_gen8 VALUES (10);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen8 RIGHT JOIN rpr_nav_gen USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM (rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g))
+     LEFT JOIN rpr_nav_gen8 r USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+-- Outside the argument the merged column folds as usual.
+EXPLAIN (COSTS OFF)
+SELECT id FROM rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g) WHERE g = 11;
+DROP TABLE rpr_nav_gen8;
+
+-- Read also outside the argument on the nullable side, the column is
+-- computed once at the scan.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT i, g, count(*) OVER w AS cnt
+FROM generate_series(1, 2) i LEFT JOIN rpr_nav_gen ON id = i
+WINDOW w AS (ORDER BY i ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g) IS NULL);
+SELECT i, g, count(*) OVER w AS cnt
+FROM generate_series(1, 2) i LEFT JOIN rpr_nav_gen ON id = i
+WINDOW w AS (ORDER BY i ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g) IS NULL);
+DROP TABLE rpr_nav_gen;
+
+-- A constant virtual generated column on the nullable side under GROUP BY:
+-- the same matches as without GROUP BY.
+CREATE TABLE rpr_nav_o3 (oid3 int PRIMARY KEY);
+INSERT INTO rpr_nav_o3 SELECT generate_series(1, 4);
+CREATE TABLE rpr_nav_gy (gyid int PRIMARY KEY,
+                         gyc int GENERATED ALWAYS AS (10) VIRTUAL);
+INSERT INTO rpr_nav_gy (gyid) VALUES (1), (3);
+SELECT oid3, count(*) OVER w AS cnt
+FROM rpr_nav_o3 LEFT JOIN rpr_nav_gy ON oid3 = gyid GROUP BY oid3, gyid
+WINDOW w AS (ORDER BY oid3 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(gyc) IS NULL);
+SELECT oid3, count(*) OVER w AS cnt
+FROM rpr_nav_o3 LEFT JOIN rpr_nav_gy ON oid3 = gyid
+WINDOW w AS (ORDER BY oid3 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(gyc) IS NULL);
+DROP TABLE rpr_nav_o3, rpr_nav_gy;
+
+-- Without a navigation the VALUES is pulled up, and the division is folded
+-- and raises at plan time -- as it does for the same WHERE clause.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS v / 0 > 0);
 
--- A replacement that still depends on the row is left unwrapped, because it
--- is what the column meant at whichever row the navigation lands on.
+-- A subquery whose column depends on the row is pulled up as usual; the
+-- argument reads it at whichever row the navigation lands on.
 SELECT id, count(*) OVER w AS cnt
 FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN (A+) DEFINE A AS PREV(v) > 0);
 
--- Nesting: the inner navigation's argument is below the outer one's, so the
--- column there is wrapped too.
+-- Nesting: the inner navigation's argument is below the outer one's, so
+-- nothing in it is evaluated either.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
@@ -6231,8 +6373,8 @@ WINDOW w AS (
 
 DROP TABLE rpr_join1, rpr_join2;
 
--- A mismatched-type USING merge column used to let the other side's
--- pulled-up constant fold into a navigation argument at plan time.
+-- A navigation argument reading a mismatched-type USING merge column gets
+-- the constant side through the join alias, and it is not evaluated.
 CREATE TABLE rpr_join4 (k bigint);
 INSERT INTO rpr_join4 VALUES (10);
 

@@ -41,9 +41,8 @@
       - src/backend/optimizer/plan/subselect.c     (DEFINE param sets)
       - src/backend/optimizer/path/allpaths.c      (keeping DEFINE columns)
       - src/backend/optimizer/path/costsize.c      (DEFINE evaluation cost)
-      - src/backend/optimizer/prep/prepjointree.c  (PlaceHolderVar wrapping)
-      - src/backend/optimizer/util/var.c           (join alias expansion)
-      - src/backend/rewrite/rewriteManip.c         (marking navigation args)
+      - src/backend/optimizer/prep/prepjointree.c  (DEFINE pull-up substitution)
+      - src/backend/optimizer/util/clauses.c       (navigation argument folding)
 
     Executor
       - src/backend/executor/nodeWindowAgg.c       (reduced frame and nav trim)
@@ -527,28 +526,7 @@ list must keep its length and its order.  rpPattern stays as well.  It
 holds no Vars, an undefined pattern variable simply matches TRUE, and it is
 what marks the clause as a row pattern window (IV-5).
 
-IV-2. Navigation Arguments, Subquery Pull-up and Join Aliases
-
-A navigation's argument is evaluated at the row the navigation lands on, not
-at the row being tested (VII-3).  When subquery pull-up substitutes a
-subquery output expression into a DEFINE clause, a replacement that does not
-depend on the row -- a constant, or anything built only from values outside
-the subquery -- must not simply be folded into that argument, or PREV(x)
-would collapse to a value that no longer varies with the row it is read at.
-
-replace_rte_variables_mutator() (rewriteManip.c) therefore handles RPRNavExpr
-itself instead of leaving it to the generic mutator: it sets in_rpr_nav_arg
-while it walks arg and restores the previous value before walking offset_arg
-and compound_offset_arg, which are ordinary expressions read at the current
-row.  pullup_replace_vars_callback() (prepjointree.c) adds that flag to the
-conditions that make a replacement a wrapping candidate, beside
-varnullingrels and the caller's own wrap option.  A replacement that is
-itself a simple Var or PlaceHolderVar still escapes the wrapper, as does an
-expression that contains the subquery's Vars and no non-strict constructs;
-this costs nothing since such a replacement already varies with the row.
-Anything else -- including the row-independent expression that would
-otherwise be folded into the argument -- comes back wrapped in a
-PlaceHolderVar.
+IV-2. Subquery Pull-up and Join Aliases
 
 The pull-up does not reach the DEFINE clause through query_tree_mutator().
 perform_pullup_replace_vars() (prepjointree.c) names each part of the upper
@@ -560,14 +538,16 @@ field has to list defineClause itself.
 
 Join alias expansion substitutes into a DEFINE clause as well: a Var naming
 a join output column is replaced by the expression behind it.
-flatten_join_alias_vars_mutator() (var.c) carries its own copy of the same
-protection.  It handles RPRNavExpr itself and sets in_rpr_nav_arg over arg
-alone, as replace_rte_variables_mutator() does, and while that flag is set
-it wraps a replacement in a PlaceHolderVar unless it is a Var or a
-PlaceHolderVar of the same level.  Unlike pullup_replace_vars_callback(),
-it wraps a strict expression over row Vars as well.
-It wraps only when it has a PlannerInfo; flatten_join_alias_for_parser()
-passes none and gets the replacement unwrapped.
+
+These substitutions can leave a constant where a navigation argument read
+a column: a one-row VALUES, a constant subquery output or a function RTE
+folded to a constant is pulled up, a virtual generated column is replaced
+by a generation expression without Vars, and a merged column of an outer
+join carries either of those.  They are left to happen; nothing below a
+navigation argument is evaluated after they run (IV-3).  When a SQL
+function in FROM is inlined, a constant argument that its body passes to a
+navigation takes the parameter's place and so counts as a constant written
+there, as a bound parameter does in a custom plan.
 
 IV-3. Preprocessing a DEFINE Clause as a Qual
 
@@ -583,13 +563,28 @@ of a window it will not run (IV-1).
 As a qual the condition goes through every step a WHERE clause does.  Join
 alias Vars are flattened first (IV-2).  eval_const_expressions() then folds
 constants, inlines SQL functions and inserts the actual values of default
-arguments.  canonicalize_qual() runs with is_check false, so a NULL
-constant at the top level of an AND or OR is treated as FALSE, which is
-sound only because a NULL result and a FALSE one are told apart nowhere
-downstream.  Uplevel Vars become Params, and the result comes back as an
-implicit-AND list.  A TargetEntry holds one expression, so the loop turns
-the list straight back into one with make_ands_explicit(); a condition that
-folds to TRUE is left as a constant TRUE.
+arguments.  Below a navigation argument it simplifies but evaluates
+nothing, as the next paragraph explains.  canonicalize_qual() runs with
+is_check false, so a NULL constant at the top level of an AND or OR is
+treated as FALSE, which is sound only because a NULL result and a FALSE
+one are told apart nowhere downstream.  Uplevel Vars become Params, and
+the result comes back as an implicit-AND list.  A TargetEntry holds one
+expression, so the loop turns the list straight back into one with
+make_ands_explicit(); a condition that folds to TRUE is left as a constant
+TRUE.
+
+A navigation's argument is read at the row the navigation lands on, and
+not at all when there is no such row (VII-3), so nothing in it may be
+evaluated at plan time once a column in it can have become a constant
+(IV-2).  Before preprocess_relation_rtes() expands virtual generated
+columns, subquery_planner() folds each argument as written with
+eval_const_navigation_arguments(): constants written there and bound
+parameters are folded, raising at plan time as they would elsewhere, but
+no SQL function is inlined and no not-null proof is used, since either
+could drop a column reference.  In eval_const_expressions() itself,
+evaluate_function() and ece_evaluate_expr leave everything below a
+navigation argument unevaluated.  offset_arg and compound_offset_arg are
+run-time constants and are folded as usual.
 
 The NFA evaluates a DEFINE at most once per row and caches the result
 (VII-3), re-evaluating only the match_start dependent variables of VII-5.
