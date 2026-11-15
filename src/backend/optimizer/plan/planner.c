@@ -1257,10 +1257,8 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 		 * set attached survive onto the replacement -- setrefs.c matches the
 		 * DEFINE copy against the target list copy and insists they agree.
 		 */
-		foreach(l, parse->windowClause)
+		foreach_node(WindowClause, wc, parse->windowClause)
 		{
-			WindowClause *wc = lfirst_node(WindowClause, l);
-
 			if (wc->defineClause != NIL)
 				wc->defineClause = (List *)
 					flatten_group_exprs(root, root->parse,
@@ -6718,10 +6716,8 @@ make_window_input_target(PlannerInfo *root,
 	 * Add what is missing now, once the clause has the shape it will be
 	 * executed with.
 	 */
-	foreach(lc, activeWindows)
+	foreach_node(WindowClause, wc, activeWindows)
 	{
-		WindowClause *wc = lfirst_node(WindowClause, lc);
-
 		if (wc->defineClause != NIL)
 			add_define_inputs_walker((Node *) wc->defineClause, input_target);
 	}

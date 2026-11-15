@@ -614,7 +614,7 @@ DEFINE
     when the pattern as a whole can match zero rows (for
     example <literal>A*</literal> or <literal>A?</literal>): such a match
     contains no rows, so the frame is empty.
-    Example of a <literal>SELECT</literal> using
+    Example of a <command>SELECT</command> using
     the <literal>DEFINE</literal> and <literal>PATTERN</literal> clause is as
     follows.
 

@@ -729,8 +729,8 @@ _outRPRPattern(StringInfo str, const RPRPattern *node)
 
 	/*
 	 * Write varNames array as list of strings.  makeRPRPattern() guarantees
-	 * the array, so the list has exactly one spelling and the read side has
-	 * no second shape to interpret.
+	 * the array exists, so the list has exactly one spelling and the read
+	 * side has no second shape to interpret.
 	 */
 	appendStringInfoString(str, " :varNames");
 	Assert(node->numVars > 0 && node->varNames != NULL);

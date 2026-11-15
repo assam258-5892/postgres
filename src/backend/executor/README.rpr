@@ -17,6 +17,10 @@
 
     Parser
       - src/backend/parser/gram.y                  (grammar and keywords)
+      - src/backend/parser/scan.l                  ('|' as a self token)
+      - src/include/parser/kwlist.h                (row pattern keywords)
+      - src/fe_utils/psqlscan.l                    (psql lexer, kept in sync)
+      - src/interfaces/ecpg/preproc/pgc.l          (ecpg lexer, kept in sync)
       - src/backend/parser/parse_rpr.c             (PATTERN/DEFINE analysis)
       - src/include/parser/parse_rpr.h             (parser entry points)
       - src/include/parser/parse_node.h            (DEFINE parse state)
@@ -46,8 +50,10 @@
       - src/backend/executor/execRPR.c             (NFA engine)
       - src/include/executor/execRPR.h             (NFA public API)
       - src/backend/executor/execExpr.c            (navigation opcode compile)
+      - src/include/executor/execExpr.h            (navigation opcode steps)
       - src/backend/executor/execExprInterp.c      (navigation opcode eval)
       - src/backend/jit/llvm/llvmjit_expr.c        (JIT path for those opcodes)
+      - src/backend/jit/llvm/llvmjit_types.c       (functions the JIT calls)
 
     Node support
       - src/include/nodes/parsenodes.h             (parse node definitions)
