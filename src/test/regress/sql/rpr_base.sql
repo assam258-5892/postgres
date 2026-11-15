@@ -4794,6 +4794,250 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
              PATTERN ((A B*)+ A B*)
              DEFINE A AS val <= 50, B AS val > 50);
 
+-- PREFIX fold rejected for a nullable group body: (A | B??) ((A | B??))? C
+-- must not fold to (a | b??){1,2} c; the matches are rows 1-2 and 3-3
+EXPLAIN (COSTS OFF)
+WITH test_prefix_fold_nullable AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT COUNT(*) OVER w FROM test_prefix_fold_nullable
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B??) ((A | B??))? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+WITH test_prefix_fold_nullable AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B??) ((A | B??))? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- same shape with renamed variables (no fold possible): same result
+WITH test_prefix_fold_nullable_renamed AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable_renamed
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B??) ((A1 | B1??))? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        A1 AS 'A' = ANY(flags),
+        B1 AS 'B' = ANY(flags)
+);
+
+-- nullable body with {1,2}: the match still spans rows 1-3
+WITH test_prefix_fold_nullable_range AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable_range
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B??) ((A | B??)){1,2} C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- unbounded min-0 group: the fold applies to a nullable body too
+EXPLAIN (COSTS OFF)
+WITH test_prefix_fold_nullable_star AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT COUNT(*) OVER w FROM test_prefix_fold_nullable_star
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B??) ((A | B??))* C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+WITH test_prefix_fold_nullable_star AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable_star
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B??) ((A | B??))* C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- non-nullable body: the fold still applies
+EXPLAIN (COSTS OFF)
+WITH test_prefix_fold_non_nullable AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT COUNT(*) OVER w FROM test_prefix_fold_non_nullable
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B) ((A | B))? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+WITH test_prefix_fold_non_nullable AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['B']),
+        (2, ARRAY['A','C']),
+        (3, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_non_nullable
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A | B) ((A | B))? C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- nullable body made of quantified variables
+WITH test_prefix_fold_nullable_seq AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable_seq
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (B* A?? (B* A??)? B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
+WITH test_prefix_fold_nullable_seq_renamed AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable_seq_renamed
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (B* A?? (B1* A1??)? B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        A1 AS 'A' = ANY(flags),
+        B1 AS 'B' = ANY(flags)
+);
+
+WITH test_prefix_fold_nullable_seq_range AS (
+    SELECT * FROM (VALUES
+        (1, ARRAY['A']),
+        (2, ARRAY['B']),
+        (3, ARRAY['B'])
+    ) AS t(id, flags)
+)
+SELECT id, flags,
+       first_value(id) OVER w AS match_start,
+       last_value(id) OVER w AS match_end
+FROM test_prefix_fold_nullable_seq_range
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((B* A??){1,2} B)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags)
+);
+
 -- Unwrap GROUP{1,1}: ((A | B | C)) -> (a | b | c)
 EXPLAIN (COSTS OFF)
 SELECT COUNT(*) OVER w FROM rpr_plan

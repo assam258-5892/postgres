@@ -796,10 +796,14 @@ error.
       (A | B) (A | B) (A | B) -> (A | B){3}
 
   (e) Prefix/suffix merging: Merge an identical sequence before or after
-      a group.  A prefix copy is mandatory and comes before the group, so
-      it always merges; a suffix copy merges only when the body consumes a
-      fixed number of rows.
+      a group.  A prefix copy merges unless the group has min 0, a finite
+      max and content that can match empty; a suffix copy merges only when
+      the body consumes a fixed number of rows.
       A B (A B)+ -> (A B){2,INF}
+      (A | B??) ((A | B??))* -> (A | B??)+
+      (A | B??) ((A | B??))? stays as-is (an empty first iteration would
+      end the merged loop and lose the path where the group's own first
+      iteration consumes rows)
 
   (f) ALT flattening and deduplication
       (A | (B | C)) -> (A | B | C)
