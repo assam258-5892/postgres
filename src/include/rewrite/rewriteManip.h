@@ -32,6 +32,7 @@ struct replace_rte_variables_context
 	int			target_varno;	/* RTE index to search for */
 	int			sublevels_up;	/* (current) nesting depth */
 	bool		inserted_sublink;	/* have we inserted a SubLink? */
+	bool		in_rpr_nav_arg; /* 행 패턴 내비게이션 인자 아래에 있는가? */
 };
 
 typedef enum ReplaceVarsNoMatchOption

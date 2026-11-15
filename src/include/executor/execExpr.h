@@ -274,6 +274,10 @@ typedef enum ExprEvalOp
 	EEOP_MERGE_SUPPORT_FUNC,
 	EEOP_SUBPLAN,
 
+	/* 행 패턴 내비게이션 (RPRNavKind 의 여덟 가지 종류 전부) */
+	EEOP_RPR_NAV_SET,
+	EEOP_RPR_NAV_RESTORE,
+
 	/* aggregation related nodes */
 	EEOP_AGG_STRICT_DESERIALIZE,
 	EEOP_AGG_DESERIALIZE,
@@ -692,6 +696,12 @@ typedef struct ExprEvalStep
 			SubPlanState *sstate;
 		}			subplan;
 
+		/* EEOP_RPR_NAV_SET / EEOP_RPR_NAV_RESTORE 용 */
+		struct
+		{
+			RPRNavState *rprnavstate;
+		}			rpr_nav;
+
 		/* for EEOP_AGG_*DESERIALIZE */
 		struct
 		{
@@ -899,6 +909,10 @@ extern void ExecEvalMergeSupportFunc(ExprState *state, ExprEvalStep *op,
 									 ExprContext *econtext);
 extern void ExecEvalSubPlan(ExprState *state, ExprEvalStep *op,
 							ExprContext *econtext);
+extern void ExecEvalRPRNavSet(ExprState *state, ExprEvalStep *op,
+							  ExprContext *econtext);
+extern void ExecEvalRPRNavRestore(ExprState *state, ExprEvalStep *op,
+								  ExprContext *econtext);
 extern void ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op,
 								ExprContext *econtext);
 extern void ExecEvalSysVar(ExprState *state, ExprEvalStep *op,

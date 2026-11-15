@@ -166,6 +166,37 @@ _copyBitmapset(const Bitmapset *from)
 	return bms_copy(from);
 }
 
+static RPRPattern *
+_copyRPRPattern(const RPRPattern *from)
+{
+	RPRPattern *newnode = makeNode(RPRPattern);
+
+	COPY_SCALAR_FIELD(numVars);
+	COPY_SCALAR_FIELD(maxDepth);
+	COPY_SCALAR_FIELD(numElements);
+
+	/* varNames 배열을 깊이 복사한다(DEFINE 절은 필수) */
+	Assert(from->numVars > 0 && from->varNames != NULL);
+	newnode->varNames = palloc0_array(char *, from->numVars);
+	for (int i = 0; i < from->numVars; i++)
+		newnode->varNames[i] = pstrdup(from->varNames[i]);
+
+	/*
+	 * elements 배열을 깊이 복사한다(항상 요소 하나 + FIN을 최소로 가진다).
+	 * out/read는 일곱 필드만 나르고 그 바이트를 0으로 채우는 데 반해, 이
+	 * 복사는 reserved 바이트까지 포함해 구조체 전체를 그대로 나른다 --
+	 * RPRPatternElement 를 참고하라.
+	 */
+	Assert(from->numElements >= 2);
+	newnode->elements = palloc_array(RPRPatternElement, from->numElements);
+	memcpy(newnode->elements, from->elements,
+		   from->numElements * sizeof(RPRPatternElement));
+
+	COPY_SCALAR_FIELD(isAbsorbable);
+
+	return newnode;
+}
+
 
 /*
  * copyObjectImpl -- implementation of copyObject(); see nodes/nodes.h

@@ -96,6 +96,14 @@ static void checkWellFormedRecursion(CteState *cstate);
 static bool checkWellFormedRecursionWalker(Node *node, CteState *cstate);
 static void checkWellFormedSelectStmt(SelectStmt *stmt, CteState *cstate);
 
+/* 재귀 WITH 의 RPR 거부 */
+typedef struct
+{
+	ParseLoc	location;		/* 첫 RPR 윈도우의 위치, 없으면 -1 */
+} ContainRPRContext;
+
+static bool contain_rpr_walker(Node *node, void *context);
+
 
 /*
  * transformWithClause -
@@ -163,6 +171,29 @@ transformWithClause(ParseState *pstate, WithClause *withClause)
 		 */
 		CteState	cstate;
 		int			i;
+
+		/*
+		 * ISO/IEC 9075-2:2016 7.17 Syntax Rule 3)e)f) 에 따르면, WITH
+		 * RECURSIVE 절의 모든 <with list element>는
+		 * "potentially recursive"이며 <row pattern common syntax>를
+		 * 포함해서는 안 된다.  (PostgreSQL 은 <row pattern measures>를
+		 * 구현하지 않으므로, common syntax 만 검사하면 된다.) ISO/IEC 19075-5
+		 * 6.17.5 (R020) 와
+		 * 4.18.5 (R010) 는 CREATE RECURSIVE VIEW 에 대해서도 같은 금지를 재차
+		 * 규정하는데, 이는 makeRecursiveViewSelect() 가 WITH RECURSIVE 로
+		 * 재작성하므로 여기도 거치게 된다.
+		 */
+		foreach_node(CommonTableExpr, cte, withClause->ctes)
+		{
+			ContainRPRContext ctx;
+
+			ctx.location = -1;
+			if (contain_rpr_walker(cte->ctequery, &ctx))
+				ereport(ERROR,
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("cannot use row pattern recognition in a recursive query"),
+						parser_errposition(pstate, ctx.location));
+		}
 
 		cstate.pstate = pstate;
 		cstate.numitems = list_length(withClause->ctes);
@@ -1267,4 +1298,28 @@ checkWellFormedSelectStmt(SelectStmt *stmt, CteState *cstate)
 					 (int) stmt->op);
 		}
 	}
+}
+
+
+/*
+ * contain_rpr_walker
+ *	  원시 파스 트리에 <row pattern common syntax>가 하나라도 있으면 true 를
+ *	  반환한다 -- 즉, PATTERN/DEFINE 이 붙은 WindowDef 가 있는지 본다.
+ */
+static bool
+contain_rpr_walker(Node *node, void *context)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, WindowDef))
+	{
+		WindowDef  *wd = (WindowDef *) node;
+
+		if (wd->rpCommonSyntax != NULL)
+		{
+			((ContainRPRContext *) context)->location = wd->rpCommonSyntax->location;
+			return true;
+		}
+	}
+	return raw_expression_tree_walker(node, contain_rpr_walker, context);
 }
