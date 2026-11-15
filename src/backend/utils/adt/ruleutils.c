@@ -4079,27 +4079,22 @@ static void
 collapse_define_join_vars(Query *query)
 {
 	collapse_define_context context;
-	ListCell   *lc;
 	int			rtindex = 0;
 
 	/* Collect the merge expressions once; most queries have none */
 	context.exprs = NIL;
 	context.vars = NIL;
 	context.relids = bms_add_range(NULL, 1, list_length(query->rtable));
-	foreach(lc, query->rtable)
+	foreach_node(RangeTblEntry, rte, query->rtable)
 	{
-		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
-		ListCell   *lc2;
 		AttrNumber	attno = 0;
 
 		rtindex++;
 		if (rte->rtekind != RTE_JOIN)
 			continue;
 
-		foreach(lc2, rte->joinaliasvars)
+		foreach_ptr(Node, aliasvar, rte->joinaliasvars)
 		{
-			Node	   *aliasvar = (Node *) lfirst(lc2);
-
 			if (++attno > rte->joinmergedcols)
 				break;
 
@@ -4121,10 +4116,8 @@ collapse_define_join_vars(Query *query)
 	if (context.exprs == NIL)
 		return;
 
-	foreach(lc, query->windowClause)
+	foreach_node(WindowClause, wc, query->windowClause)
 	{
-		WindowClause *wc = lfirst_node(WindowClause, lc);
-
 		if (wc->defineClause != NIL)
 			wc->defineClause = (List *)
 				collapse_define_join_vars_mutator((Node *) wc->defineClause,
@@ -4574,11 +4567,8 @@ set_using_names(deparse_namespace *dpns, Node *jtnode, List *parentUsing)
 static void
 mark_define_columns(deparse_namespace *dpns, Query *query)
 {
-	ListCell   *lc;
-
-	foreach(lc, query->windowClause)
+	foreach_node(WindowClause, wc, query->windowClause)
 	{
-		WindowClause *wc = lfirst_node(WindowClause, lc);
 		List	   *vars;
 
 		/* DEFINE has no outer-level Vars or sub-selects */
@@ -4708,11 +4698,9 @@ preset_input_colname(deparse_namespace *dpns, int varno, AttrNumber attno)
 	{
 		Node	   *aliasvar = (Node *) list_nth(rte->joinaliasvars, attno - 1);
 		List	   *vars = pull_var_clause(aliasvar, 0);
-		ListCell   *lc;
 
-		foreach(lc, vars)
+		foreach_node(Var, var, vars)
 		{
-			Var		   *var = (Var *) lfirst(lc);
 			char	   *colname;
 
 			colname = preset_input_colname(dpns, var->varno, var->varattno);
@@ -4730,14 +4718,12 @@ preset_input_colname(deparse_namespace *dpns, int varno, AttrNumber attno)
 static void
 reserve_colname(deparse_namespace *dpns, char *colname)
 {
-	ListCell   *lc;
-
-	foreach(lc, dpns->using_names)
+	foreach_ptr(char, name, dpns->using_names)
 	{
-		if (strcmp((char *) lfirst(lc), colname) == 0)
+		if (strcmp(name, colname) == 0)
 			return;
 	}
-	dpns->using_names = lappend(dpns->using_names, colname);
+	dpns->using_names = lappend(dpns->using_names, pstrdup(colname));
 }
 
 /*
@@ -6044,8 +6030,6 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	 */
 	if (query->hasGroupRTE)
 	{
-		ListCell   *lc;
-
 		query->targetList = (List *)
 			flatten_group_exprs(NULL, query, (Node *) query->targetList);
 		query->havingQual =
@@ -6056,10 +6040,8 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 		 * them, or the deparsed text would name the grouping step rather than
 		 * the expression the user wrote, and the view would not re-parse.
 		 */
-		foreach(lc, query->windowClause)
+		foreach_node(WindowClause, wc, query->windowClause)
 		{
-			WindowClause *wc = lfirst_node(WindowClause, lc);
-
 			if (wc->defineClause != NIL)
 				wc->defineClause = (List *)
 					flatten_group_exprs(NULL, query, (Node *) wc->defineClause);

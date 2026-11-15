@@ -764,17 +764,17 @@ WINDOW w AS (
     computed and every row of the frame has to be kept; and
     <literal>Nav Mark Lookahead</literal> reports <literal>runtime</literal>
     or <literal>infinite</literal>.
-    Under <literal>ANALYZE</literal>, a node that was executed shows the
-    bound resolved for its last scan instead of <literal>runtime</literal>:
-    a row count, <literal>retain all</literal> or
+    Under <command>EXPLAIN ANALYZE</command>, a node that was executed shows
+    the bound resolved for its last scan instead of
+    <literal>runtime</literal>: a row count, <literal>retain all</literal> or
     <literal>infinite</literal>.
    </para>
 
    <para>
-    Under <literal>ANALYZE</literal>, further lines report counters for the
-    matcher's internal states and contexts.  Those are diagnostics for the
-    implementation rather than a stable interface; their names and contents
-    may change.
+    Under <command>EXPLAIN ANALYZE</command>, further lines report counters
+    for the matcher's internal states and contexts.  Those are diagnostics
+    for the implementation rather than a stable interface; their names and
+    contents may change.
    </para>
 
    <para>
