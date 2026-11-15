@@ -50,6 +50,8 @@ static int64 rprBodyRowCount(List *children);
 static bool rprBodyHasUniformLength(List *children);
 static bool rprChildrenMatchAt(List *children, int start, List *content);
 static List *rprGroupContent(RPRPatternNode *group);
+static bool rprNodeIsNullable(RPRPatternNode *node);
+static bool rprBodyIsNullable(List *children);
 static bool rprTryAddIteration(RPRPatternNode *group);
 pg_nodiscard static List *flattenSeqChildren(List *children);
 pg_nodiscard static List *mergeConsecutiveVars(List *children);
@@ -232,6 +234,59 @@ rprGroupContent(RPRPatternNode *group)
 
 	Assert(list_length(content) > 0);
 	return content;
+}
+
+/*
+ * rprNodeIsNullable
+ *		Can node match zero rows?
+ *
+ * A VAR can when its quantifier allows zero repetitions, a GROUP when it can
+ * be skipped or its body can match empty, a SEQ when every child can, and an
+ * ALT when any branch can.  This is the parse-tree twin of the
+ * RPR_ELEM_EMPTY_LOOP flag the fill pass derives later.
+ */
+static bool
+rprNodeIsNullable(RPRPatternNode *node)
+{
+	check_stack_depth();
+
+	switch (node->nodeType)
+	{
+		case RPR_PATTERN_VAR:
+			return node->min == 0;
+
+		case RPR_PATTERN_GROUP:
+			return node->min == 0 || rprBodyIsNullable(node->children);
+
+		case RPR_PATTERN_SEQ:
+			return rprBodyIsNullable(node->children);
+
+		case RPR_PATTERN_ALT:
+			foreach_node(RPRPatternNode, branch, node->children)
+			{
+				if (rprNodeIsNullable(branch))
+					return true;
+			}
+			return false;
+	}
+
+	pg_unreachable();
+	return false;
+}
+
+/*
+ * rprBodyIsNullable
+ *		Can children, taken in order, match zero rows?
+ */
+static bool
+rprBodyIsNullable(List *children)
+{
+	foreach_node(RPRPatternNode, child, children)
+	{
+		if (!rprNodeIsNullable(child))
+			return false;
+	}
+	return true;
 }
 
 /*
@@ -550,13 +605,17 @@ mergeConsecutiveAlts(List *children)
  *   (A B)+ A B -> (A B){2,}
  *   A B (A B)+ A B -> (A B){3,}
  *
- * The two phases are not equally safe.  A prefix copy is mandatory and comes
- * before the group, exactly like the leading mandatory iterations it becomes,
- * so the decision trees stay isomorphic for any content.  A suffix copy comes
- * after the group has already decided to stop, which the merged form defers
- * until after the last iteration's own choices.  Merge a suffix only when the
- * content consumes a fixed number of rows, which leaves it nothing to decide;
- * see mergeConsecutiveGroups for why that condition is the right one.
+ * The two phases are not equally safe.  A prefix copy becomes the merged
+ * loop's first iteration, so do not fold it when the group has min 0, a
+ * finite max and content that can match empty: an empty first iteration
+ * would end the merged loop (ISO/IEC 19075-5 7.2.8) where the written
+ * pattern still tries the group.  See README.rpr V-3 (e).
+ *
+ * A suffix copy comes after the group has already decided to stop, which the
+ * merged form defers until after the last iteration's own choices.  Merge a
+ * suffix only when the content consumes a fixed number of rows, which leaves
+ * it nothing to decide; see mergeConsecutiveGroups for why that condition is
+ * the right one.
  */
 static List *
 mergeGroupPrefixSuffix(List *children)
@@ -572,8 +631,8 @@ mergeGroupPrefixSuffix(List *children)
 	 * and a prefix of the one after, and this order hands it to the second,
 	 * which is the safer of the two rules: a mandatory copy before a group
 	 * already sits where the leading iterations it becomes would sit, so
-	 * folding it as a prefix holds for any content, while folding one as a
-	 * suffix needs a fixed-length body.
+	 * folding it as a prefix needs only the min-0 check in the header
+	 * comment, while folding one as a suffix needs a fixed-length body.
 	 *
 	 * A prefix copy is one of the survivors already stored, so folding it is
 	 * a step back of the write cursor.
@@ -590,7 +649,11 @@ mergeGroupPrefixSuffix(List *children)
 			List	   *content = rprGroupContent(child);
 			int			content_len = list_length(content);
 
-			while (rprChildrenMatchAt(children, writepos - content_len, content) &&
+			/* the min-0 check from the header comment */
+			while ((child->min > 0 ||
+					child->max == RPR_QUANTITY_INF ||
+					!rprBodyIsNullable(content)) &&
+				   rprChildrenMatchAt(children, writepos - content_len, content) &&
 				   rprTryAddIteration(child))
 				writepos -= content_len;
 		}
