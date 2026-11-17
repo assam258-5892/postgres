@@ -1460,3 +1460,23 @@ DROP TABLE ruletest_t2;
 DROP TABLE ruletest_t1;
 
 DROP USER regress_rule_user1;
+--
+-- NEW and OLD of a rule have fixed names, even if a relation of the same name
+-- is in use in a query level above (here, the INSERT target named "new",
+-- while the SELECT feeding it is where NEW is in scope)
+--
+create schema ruletest_ns;
+set search_path = ruletest_ns, public;
+create table new (a int);
+create table ruletest_src (a int);
+create rule ruletest_new_r as on insert to ruletest_src
+  do also insert into new select new.a;
+select pg_get_ruledef(oid) from pg_rewrite where rulename = 'ruletest_new_r';
+select pg_get_ruledef(oid) as def from pg_rewrite
+  where rulename = 'ruletest_new_r' \gset
+drop rule ruletest_new_r on ruletest_src;
+:def
+insert into ruletest_src values (7);
+select * from new;
+reset search_path;
+drop schema ruletest_ns cascade;
