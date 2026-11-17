@@ -714,3 +714,68 @@ SELECT expanded_record_field_text(ROW(5, 'field')::expanded_comp, 1),
        expanded_record_field_text(ROW(5, 'field')::expanded_comp, 2);
 
 DROP TYPE expanded_comp;
+
+--
+-- A whole-row Var under an implicit coercion in VALUES must not be printed
+-- as a bare "x.*", which would be expanded into columns when read back.
+--
+
+CREATE TABLE wrv_p (a int, b int);
+CREATE TABLE wrv_c () INHERITS (wrv_p);
+CREATE DOMAIN wrv_pd AS wrv_p;
+CREATE TABLE wrv_holder (x wrv_p);
+CREATE TABLE wrv_holderd (x wrv_pd);
+CREATE TABLE wrv_holdert (x text);
+
+-- ConvertRowtypeExpr in a multi-row VALUES list
+CREATE VIEW wrv_v AS
+  SELECT v.x FROM wrv_c, LATERAL (VALUES (wrv_c), (NULL::wrv_p)) v(x);
+SELECT pg_get_viewdef('wrv_v'::regclass, true) AS def \gset
+\echo :def
+CREATE OR REPLACE VIEW wrv_v AS :def
+
+-- ConvertRowtypeExpr in INSERT VALUES
+CREATE RULE wrv_r1 AS ON INSERT TO wrv_c DO ALSO INSERT INTO wrv_holder VALUES (new);
+-- CoerceToDomain in INSERT VALUES
+CREATE RULE wrv_r2 AS ON INSERT TO wrv_p DO ALSO INSERT INTO wrv_holderd VALUES (new);
+-- CoerceViaIO in a multi-row INSERT VALUES
+CREATE RULE wrv_r3 AS ON INSERT TO wrv_p DO ALSO INSERT INTO wrv_holdert VALUES (new), ('x');
+SELECT pg_get_ruledef(oid, true) AS def1 FROM pg_rewrite WHERE rulename = 'wrv_r1' \gset
+SELECT pg_get_ruledef(oid, true) AS def2 FROM pg_rewrite WHERE rulename = 'wrv_r2' \gset
+SELECT pg_get_ruledef(oid, true) AS def3 FROM pg_rewrite WHERE rulename = 'wrv_r3' \gset
+\echo :def1
+\echo :def2
+\echo :def3
+DROP RULE wrv_r1 ON wrv_c;
+DROP RULE wrv_r2 ON wrv_p;
+DROP RULE wrv_r3 ON wrv_p;
+:def1
+:def2
+:def3
+INSERT INTO wrv_c VALUES (1, 2);
+INSERT INTO wrv_p VALUES (3, 4);
+SELECT * FROM wrv_holder;
+SELECT * FROM wrv_holderd;
+SELECT * FROM wrv_holdert ORDER BY x;
+SELECT * FROM wrv_v ORDER BY x;
+
+-- ConvertRowtypeExpr in MERGE INSERT VALUES
+CREATE FUNCTION wrv_merge() RETURNS void LANGUAGE sql
+BEGIN ATOMIC
+  MERGE INTO wrv_holder h USING wrv_c ON false
+    WHEN NOT MATCHED THEN INSERT VALUES (wrv_c);
+END;
+SELECT pg_get_functiondef('wrv_merge'::regproc) AS def \gset
+\echo :def
+:def ;
+SELECT wrv_merge();
+SELECT * FROM wrv_holder;
+
+DROP FUNCTION wrv_merge();
+DROP VIEW wrv_v;
+-- the recreated rules depend on the holder tables
+SET client_min_messages TO warning;
+DROP TABLE wrv_holder, wrv_holderd, wrv_holdert CASCADE;
+RESET client_min_messages;
+DROP DOMAIN wrv_pd;
+DROP TABLE wrv_c, wrv_p;

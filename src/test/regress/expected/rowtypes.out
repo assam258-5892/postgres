@@ -1580,3 +1580,128 @@ SELECT expanded_record_field_text(ROW(5, 'field')::expanded_comp, 1),
 (1 row)
 
 DROP TYPE expanded_comp;
+--
+-- A whole-row Var under an implicit coercion in VALUES must not be printed
+-- as a bare "x.*", which would be expanded into columns when read back.
+--
+CREATE TABLE wrv_p (a int, b int);
+CREATE TABLE wrv_c () INHERITS (wrv_p);
+CREATE DOMAIN wrv_pd AS wrv_p;
+CREATE TABLE wrv_holder (x wrv_p);
+CREATE TABLE wrv_holderd (x wrv_pd);
+CREATE TABLE wrv_holdert (x text);
+-- ConvertRowtypeExpr in a multi-row VALUES list
+CREATE VIEW wrv_v AS
+  SELECT v.x FROM wrv_c, LATERAL (VALUES (wrv_c), (NULL::wrv_p)) v(x);
+SELECT pg_get_viewdef('wrv_v'::regclass, true) AS def \gset
+\echo :def
+ SELECT v.x
+   FROM wrv_c,
+    LATERAL ( VALUES (wrv_c.*), (NULL::wrv_p)) v(x);
+CREATE OR REPLACE VIEW wrv_v AS :def
+ERROR:  VALUES lists must all be the same length
+LINE 3:     LATERAL ( VALUES (wrv_c.*), (NULL::wrv_p)) v(x);
+                                         ^
+-- ConvertRowtypeExpr in INSERT VALUES
+CREATE RULE wrv_r1 AS ON INSERT TO wrv_c DO ALSO INSERT INTO wrv_holder VALUES (new);
+-- CoerceToDomain in INSERT VALUES
+CREATE RULE wrv_r2 AS ON INSERT TO wrv_p DO ALSO INSERT INTO wrv_holderd VALUES (new);
+-- CoerceViaIO in a multi-row INSERT VALUES
+CREATE RULE wrv_r3 AS ON INSERT TO wrv_p DO ALSO INSERT INTO wrv_holdert VALUES (new), ('x');
+SELECT pg_get_ruledef(oid, true) AS def1 FROM pg_rewrite WHERE rulename = 'wrv_r1' \gset
+SELECT pg_get_ruledef(oid, true) AS def2 FROM pg_rewrite WHERE rulename = 'wrv_r2' \gset
+SELECT pg_get_ruledef(oid, true) AS def3 FROM pg_rewrite WHERE rulename = 'wrv_r3' \gset
+\echo :def1
+CREATE RULE wrv_r1 AS
+    ON INSERT TO wrv_c DO  INSERT INTO wrv_holder (x)
+  VALUES (new.*);
+\echo :def2
+CREATE RULE wrv_r2 AS
+    ON INSERT TO wrv_p DO  INSERT INTO wrv_holderd (x)
+  VALUES (new.*);
+\echo :def3
+CREATE RULE wrv_r3 AS
+    ON INSERT TO wrv_p DO  INSERT INTO wrv_holdert (x) VALUES (new.*), ('x'::text);
+DROP RULE wrv_r1 ON wrv_c;
+DROP RULE wrv_r2 ON wrv_p;
+DROP RULE wrv_r3 ON wrv_p;
+:def1
+ERROR:  INSERT has more expressions than target columns
+LINE 3:   VALUES (new.*);
+                  ^
+:def2
+ERROR:  INSERT has more expressions than target columns
+LINE 3:   VALUES (new.*);
+                  ^
+:def3
+ERROR:  INSERT has more expressions than target columns
+LINE 2: ... TO wrv_p DO  INSERT INTO wrv_holdert (x) VALUES (new.*), ('...
+                                                             ^
+INSERT INTO wrv_c VALUES (1, 2);
+INSERT INTO wrv_p VALUES (3, 4);
+SELECT * FROM wrv_holder;
+ x 
+---
+(0 rows)
+
+SELECT * FROM wrv_holderd;
+ x 
+---
+(0 rows)
+
+SELECT * FROM wrv_holdert ORDER BY x;
+ x 
+---
+(0 rows)
+
+SELECT * FROM wrv_v ORDER BY x;
+   x   
+-------
+ (1,2)
+ 
+(2 rows)
+
+-- ConvertRowtypeExpr in MERGE INSERT VALUES
+CREATE FUNCTION wrv_merge() RETURNS void LANGUAGE sql
+BEGIN ATOMIC
+  MERGE INTO wrv_holder h USING wrv_c ON false
+    WHEN NOT MATCHED THEN INSERT VALUES (wrv_c);
+END;
+SELECT pg_get_functiondef('wrv_merge'::regproc) AS def \gset
+\echo :def
+CREATE OR REPLACE FUNCTION public.wrv_merge()
+ RETURNS void
+ LANGUAGE sql
+BEGIN ATOMIC
+ MERGE INTO wrv_holder AS h
+    USING wrv_c
+    ON false
+    WHEN NOT MATCHED
+     THEN INSERT (x)
+      VALUES (wrv_c.*);
+END
+
+:def ;
+ERROR:  INSERT has more expressions than target columns
+LINE 10:       VALUES (wrv_c.*);
+                       ^
+SELECT wrv_merge();
+ wrv_merge 
+-----------
+ 
+(1 row)
+
+SELECT * FROM wrv_holder;
+   x   
+-------
+ (1,2)
+(1 row)
+
+DROP FUNCTION wrv_merge();
+DROP VIEW wrv_v;
+-- the recreated rules depend on the holder tables
+SET client_min_messages TO warning;
+DROP TABLE wrv_holder, wrv_holderd, wrv_holdert CASCADE;
+RESET client_min_messages;
+DROP DOMAIN wrv_pd;
+DROP TABLE wrv_c, wrv_p;
