@@ -899,3 +899,24 @@ SELECT array_sort(a) FROM (VALUES ('[-1:0]={7,1}'::int[])) v(a);
 SELECT array_sort(a) FROM (VALUES ('[-2:0][20:21]={{1,2},{10,20},{1,-4}}'::int[])) v(a);
 SELECT array_sort(a [-1:0]) FROM (VALUES ('[-2:0][20:21]={{1,2},{10,20},{1,-4}}'::int[])) v(a);
 SELECT array_sort(a [-1:0][20:20]) FROM (VALUES ('[-2:0][20:21]={{1,2},{10,20},{1,-4}}'::int[])) v(a);
+
+-- a slice upper bound that starts with "=" must not be glued to the colon
+create operator =~ (rightarg = int4, function = int4um);
+create table arr_slice_op (a int[], b int);
+insert into arr_slice_op values ('{1,2,3}', -2);
+create view arr_slice_op_v as
+  select a[1: =~ b] as x, a[: =~ b] as y from arr_slice_op;
+select pg_get_viewdef('arr_slice_op_v'::regclass, true);
+select pg_get_viewdef('arr_slice_op_v'::regclass, true) as def \gset
+create view arr_slice_op_v_re as :def
+select * from arr_slice_op_v_re;
+create rule arr_slice_op_r as on insert to arr_slice_op
+  do also update arr_slice_op set a[1: =~ new.b] = '{0,0}';
+select pg_get_ruledef(oid, true) from pg_rewrite where rulename = 'arr_slice_op_r';
+select pg_get_ruledef(oid, true) as def from pg_rewrite
+  where rulename = 'arr_slice_op_r' \gset
+drop rule arr_slice_op_r on arr_slice_op;
+:def
+select pg_get_ruledef(oid, true) from pg_rewrite where rulename = 'arr_slice_op_r';
+drop table arr_slice_op cascade;
+drop operator =~ (none, int4);

@@ -3024,3 +3024,50 @@ SELECT array_sort(a [-1:0][20:20]) FROM (VALUES ('[-2:0][20:21]={{1,2},{10,20},{
  {{1},{10}}
 (1 row)
 
+-- a slice upper bound that starts with "=" must not be glued to the colon
+create operator =~ (rightarg = int4, function = int4um);
+create table arr_slice_op (a int[], b int);
+insert into arr_slice_op values ('{1,2,3}', -2);
+create view arr_slice_op_v as
+  select a[1: =~ b] as x, a[: =~ b] as y from arr_slice_op;
+select pg_get_viewdef('arr_slice_op_v'::regclass, true);
+     pg_get_viewdef      
+-------------------------
+  SELECT a[1:=~ b] AS x,+
+     a[:=~ b] AS y      +
+    FROM arr_slice_op;
+(1 row)
+
+select pg_get_viewdef('arr_slice_op_v'::regclass, true) as def \gset
+create view arr_slice_op_v_re as :def
+ERROR:  syntax error at or near ":="
+LINE 1: create view arr_slice_op_v_re as  SELECT a[1:=~ b] AS x,
+                                                    ^
+select * from arr_slice_op_v_re;
+ERROR:  relation "arr_slice_op_v_re" does not exist
+LINE 1: select * from arr_slice_op_v_re;
+                      ^
+create rule arr_slice_op_r as on insert to arr_slice_op
+  do also update arr_slice_op set a[1: =~ new.b] = '{0,0}';
+select pg_get_ruledef(oid, true) from pg_rewrite where rulename = 'arr_slice_op_r';
+                                        pg_get_ruledef                                         
+-----------------------------------------------------------------------------------------------
+ CREATE RULE arr_slice_op_r AS                                                                +
+     ON INSERT TO arr_slice_op DO  UPDATE arr_slice_op SET a[1:=~ new.b] = '{0,0}'::integer[];
+(1 row)
+
+select pg_get_ruledef(oid, true) as def from pg_rewrite
+  where rulename = 'arr_slice_op_r' \gset
+drop rule arr_slice_op_r on arr_slice_op;
+:def
+ERROR:  syntax error at or near ":="
+LINE 2: ...RT TO arr_slice_op DO  UPDATE arr_slice_op SET a[1:=~ new.b]...
+                                                             ^
+select pg_get_ruledef(oid, true) from pg_rewrite where rulename = 'arr_slice_op_r';
+ pg_get_ruledef 
+----------------
+(0 rows)
+
+drop table arr_slice_op cascade;
+NOTICE:  drop cascades to view arr_slice_op_v
+drop operator =~ (none, int4);
