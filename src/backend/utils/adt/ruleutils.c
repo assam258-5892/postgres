@@ -3929,6 +3929,7 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 	bool		found;
 	int			rtindex;
 	ListCell   *lc;
+	List	   *returning_aliases;
 
 	dpns->rtable_names = NIL;
 	/* nothing more to do if empty rtable */
@@ -4009,12 +4010,40 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		}
 	}
 
+	/*
+	 * The aliases for OLD and NEW in a RETURNING list are not RTEs either.
+	 * They are visible in the query level that has them and in the levels
+	 * below, where a relation of the same name would capture them.  So an RTE
+	 * that has no alias of its own must not take such a name.  An alias that
+	 * the user wrote is not checked: the parser rejects a clash at the same
+	 * level, and in a lower level the user's alias hides the RETURNING one,
+	 * as it did in the original query.
+	 */
+	returning_aliases = NIL;
+	if (rels_used == NULL)
+	{
+		if (dpns->ret_old_alias)
+			returning_aliases = lappend(returning_aliases, dpns->ret_old_alias);
+		if (dpns->ret_new_alias)
+			returning_aliases = lappend(returning_aliases, dpns->ret_new_alias);
+		foreach(lc, parent_namespaces)
+		{
+			deparse_namespace *olddpns = (deparse_namespace *) lfirst(lc);
+
+			if (olddpns->ret_old_alias)
+				returning_aliases = lappend(returning_aliases, olddpns->ret_old_alias);
+			if (olddpns->ret_new_alias)
+				returning_aliases = lappend(returning_aliases, olddpns->ret_new_alias);
+		}
+	}
+
 	/* Now we can scan the rtable */
 	rtindex = 1;
 	foreach(lc, dpns->rtable)
 	{
 		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
 		char	   *refname;
+		bool		reserved = false;
 		bool		fixed = false;
 
 		/* Just in case this takes an unreasonable amount of time ... */
@@ -4064,10 +4093,10 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		}
 
 		/*
-		 * If the selected name isn't unique, append digits to make it so, and
-		 * make a new hash entry for it once we've got a unique name.  For a
-		 * very long input name, we might have to truncate to stay within
-		 * NAMEDATALEN.
+		 * If the selected name isn't unique, or is reserved for a RETURNING
+		 * OLD/NEW alias, append digits to make it acceptable, and make a new
+		 * hash entry for it once we've got a usable name.  For a very long
+		 * input name, we might have to truncate to stay within NAMEDATALEN.
 		 */
 		if (refname && fixed)
 		{
@@ -4075,17 +4104,33 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		}
 		else if (refname)
 		{
+			/* An RTE without an alias must not take an OLD/NEW alias name */
+			if (rte->alias == NULL)
+			{
+				foreach_ptr(char, retalias, returning_aliases)
+				{
+					if (strcmp(retalias, refname) == 0)
+						reserved = true;
+				}
+			}
+
 			hentry = (NameHashEntry *) hash_search(names_hash,
 												   refname,
 												   HASH_ENTER,
 												   &found);
-			if (found)
+			if (found || reserved)
 			{
-				/* Name already in use, must choose a new one */
+				/*
+				 * Name already in use or reserved, must choose a new one.  A
+				 * reserved name may not be in the hash table yet, in which
+				 * case its new entry has no counter value yet.
+				 */
 				int			refnamelen = strlen(refname);
 				char	   *modname = (char *) palloc(refnamelen + 16);
 				NameHashEntry *hentry2;
 
+				if (!found)
+					hentry->counter = 0;
 				do
 				{
 					hentry->counter++;
@@ -4103,8 +4148,15 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 															modname,
 															HASH_ENTER,
 															&found);
-				} while (found);
-				hentry2->counter = 0;	/* init new hash entry */
+					if (!found)
+						hentry2->counter = 0;	/* init new hash entry */
+					reserved = false;
+					foreach_ptr(char, retalias, returning_aliases)
+					{
+						if (strcmp(retalias, modname) == 0)
+							reserved = true;
+					}
+				} while (found || reserved);
 				refname = modname;
 			}
 			else
