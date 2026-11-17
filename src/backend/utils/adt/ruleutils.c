@@ -11361,11 +11361,33 @@ get_func_sql_syntax(FuncExpr *expr, deparse_context *context)
 			appendStringInfoString(buf, "EXTRACT(");
 			{
 				Const	   *con = (Const *) linitial(expr->args);
+				char	   *field;
+				const char *ident;
 
 				Assert(IsA(con, Const) &&
 					   con->consttype == TEXTOID &&
 					   !con->constisnull);
-				appendStringInfoString(buf, quote_identifier(TextDatumGetCString(con->constvalue)));
+				field = TextDatumGetCString(con->constvalue);
+				ident = quote_identifier(field);
+
+				/*
+				 * The grammar takes an identifier, YEAR through SECOND, or a
+				 * string.  Print anything else that would not read back as
+				 * the same identifier as a string.
+				 */
+				if (field[0] == '\0' ||
+					strlen(field) >= NAMEDATALEN ||
+					(ident == field &&
+					 ScanKeywordLookup(field, &ScanKeywords) >= 0 &&
+					 strcmp(field, "year") != 0 &&
+					 strcmp(field, "month") != 0 &&
+					 strcmp(field, "day") != 0 &&
+					 strcmp(field, "hour") != 0 &&
+					 strcmp(field, "minute") != 0 &&
+					 strcmp(field, "second") != 0))
+					simple_quote_literal(buf, field);
+				else
+					appendStringInfoString(buf, ident);
 			}
 			appendStringInfoString(buf, " FROM ");
 			get_rule_expr((Node *) lsecond(expr->args), context, false);
