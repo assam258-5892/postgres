@@ -1807,16 +1807,25 @@ pg_get_statisticsobj_worker(Oid statextid, bool columns_only, bool missing_ok)
 	{
 		Node	   *expr = (Node *) lfirst(lc);
 		char	   *str;
-		int			prettyFlags = PRETTYFLAG_PAREN;
 
+		/*
+		 * Don't use PRETTYFLAG_PAREN: pg_dump and ALTER COLUMN TYPE read this
+		 * text back, and pretty mode does not promise that it reads back.
+		 */
 		str = deparse_expression_pretty(expr, context, false, false,
-										prettyFlags, 0);
+										PRETTYFLAG_INDENT, 0);
 
 		if (colno > 0)
 			appendStringInfoString(&buf, ", ");
 
-		/* Need parens if it's not a bare function call */
-		if (looks_like_function(expr))
+		/*
+		 * Need parens if it's not a bare function call, unless the expression
+		 * is one that is printed with its own parens.
+		 */
+		if (looks_like_function(expr) ||
+			IsA(expr, OpExpr) || IsA(expr, DistinctExpr) ||
+			IsA(expr, ScalarArrayOpExpr) || IsA(expr, BoolExpr) ||
+			IsA(expr, NullTest) || IsA(expr, BooleanTest))
 			appendStringInfoString(&buf, str);
 		else
 			appendStringInfo(&buf, "(%s)", str);
