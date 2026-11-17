@@ -1597,11 +1597,8 @@ SELECT pg_get_viewdef('wrv_v'::regclass, true) AS def \gset
 \echo :def
  SELECT v.x
    FROM wrv_c,
-    LATERAL ( VALUES (wrv_c.*), (NULL::wrv_p)) v(x);
+    LATERAL ( VALUES (wrv_c.*::wrv_c), (NULL::wrv_p)) v(x);
 CREATE OR REPLACE VIEW wrv_v AS :def
-ERROR:  VALUES lists must all be the same length
-LINE 3:     LATERAL ( VALUES (wrv_c.*), (NULL::wrv_p)) v(x);
-                                         ^
 -- ConvertRowtypeExpr in INSERT VALUES
 CREATE RULE wrv_r1 AS ON INSERT TO wrv_c DO ALSO INSERT INTO wrv_holder VALUES (new);
 -- CoerceToDomain in INSERT VALUES
@@ -1614,45 +1611,40 @@ SELECT pg_get_ruledef(oid, true) AS def3 FROM pg_rewrite WHERE rulename = 'wrv_r
 \echo :def1
 CREATE RULE wrv_r1 AS
     ON INSERT TO wrv_c DO  INSERT INTO wrv_holder (x)
-  VALUES (new.*);
+  VALUES (new.*::wrv_c);
 \echo :def2
 CREATE RULE wrv_r2 AS
     ON INSERT TO wrv_p DO  INSERT INTO wrv_holderd (x)
-  VALUES (new.*);
+  VALUES (new.*::wrv_p);
 \echo :def3
 CREATE RULE wrv_r3 AS
-    ON INSERT TO wrv_p DO  INSERT INTO wrv_holdert (x) VALUES (new.*), ('x'::text);
+    ON INSERT TO wrv_p DO  INSERT INTO wrv_holdert (x) VALUES (new.*::wrv_p), ('x'::text);
 DROP RULE wrv_r1 ON wrv_c;
 DROP RULE wrv_r2 ON wrv_p;
 DROP RULE wrv_r3 ON wrv_p;
 :def1
-ERROR:  INSERT has more expressions than target columns
-LINE 3:   VALUES (new.*);
-                  ^
 :def2
-ERROR:  INSERT has more expressions than target columns
-LINE 3:   VALUES (new.*);
-                  ^
 :def3
-ERROR:  INSERT has more expressions than target columns
-LINE 2: ... TO wrv_p DO  INSERT INTO wrv_holdert (x) VALUES (new.*), ('...
-                                                             ^
 INSERT INTO wrv_c VALUES (1, 2);
 INSERT INTO wrv_p VALUES (3, 4);
 SELECT * FROM wrv_holder;
- x 
----
-(0 rows)
+   x   
+-------
+ (1,2)
+(1 row)
 
 SELECT * FROM wrv_holderd;
- x 
----
-(0 rows)
+   x   
+-------
+ (3,4)
+(1 row)
 
 SELECT * FROM wrv_holdert ORDER BY x;
- x 
----
-(0 rows)
+   x   
+-------
+ (3,4)
+ x
+(2 rows)
 
 SELECT * FROM wrv_v ORDER BY x;
    x   
@@ -1678,13 +1670,10 @@ BEGIN ATOMIC
     ON false
     WHEN NOT MATCHED
      THEN INSERT (x)
-      VALUES (wrv_c.*);
+      VALUES (wrv_c.*::wrv_c);
 END
 
 :def ;
-ERROR:  INSERT has more expressions than target columns
-LINE 10:       VALUES (wrv_c.*);
-                       ^
 SELECT wrv_merge();
  wrv_merge 
 -----------
@@ -1695,7 +1684,8 @@ SELECT * FROM wrv_holder;
    x   
 -------
  (1,2)
-(1 row)
+ (1,2)
+(2 rows)
 
 DROP FUNCTION wrv_merge();
 DROP VIEW wrv_v;

@@ -10723,13 +10723,25 @@ get_rule_expr(Node *node, deparse_context *context,
  * parser would expand "foo.*" appearing at top level.  (In principle we'd
  * use this in get_target_list() too, but that has additional worries about
  * whether to print AS, so it needs to invoke get_variable() directly anyway.)
+ *
+ * If showimplicit is false, a whole-row Var under implicit coercions is
+ * printed the same way, with its own type; the parser re-adds the coercions.
  */
 static void
 get_rule_expr_toplevel(Node *node, deparse_context *context,
 					   bool showimplicit)
 {
-	if (node && IsA(node, Var))
-		(void) get_variable((Var *) node, 0, true, context);
+	Node	   *inner = node;
+
+	if (!showimplicit && node)
+	{
+		inner = strip_implicit_coercions(node);
+		if (!(IsA(inner, Var) && ((Var *) inner)->varattno == 0))
+			inner = node;
+	}
+
+	if (inner && IsA(inner, Var))
+		(void) get_variable((Var *) inner, 0, true, context);
 	else
 		get_rule_expr(node, context, showimplicit);
 }
