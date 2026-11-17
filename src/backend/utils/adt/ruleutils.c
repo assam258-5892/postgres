@@ -9891,19 +9891,22 @@ get_rule_expr(Node *node, deparse_context *context,
 					{
 						/*
 						 * The parser should have produced WHEN clauses of the
-						 * form "CaseTestExpr = RHS", possibly with an
-						 * implicit coercion inserted above the CaseTestExpr.
-						 * For accurate decompilation of rules it's essential
-						 * that we show just the RHS.  However in an
+						 * form "CaseTestExpr = RHS", possibly with implicit
+						 * coercions inserted above the CaseTestExpr and above
+						 * the whole clause (to coerce the operator result to
+						 * boolean).  For accurate decompilation of rules it's
+						 * essential that we show just the RHS.  However in an
 						 * expression that's been through the optimizer, the
 						 * WHEN clause could be almost anything (since the
 						 * equality operator could have been expanded into an
 						 * inline function).  If we don't recognize the form
 						 * of the WHEN clause, just punt and display it as-is.
 						 */
-						if (IsA(w, OpExpr))
+						Node	   *wop = strip_implicit_coercions(w);
+
+						if (IsA(wop, OpExpr))
 						{
-							List	   *args = ((OpExpr *) w)->args;
+							List	   *args = ((OpExpr *) wop)->args;
 
 							if (list_length(args) == 2 &&
 								IsA(strip_implicit_coercions(linitial(args)),
