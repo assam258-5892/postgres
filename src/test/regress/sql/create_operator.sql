@@ -377,3 +377,26 @@ CREATE OPERATOR ===
 	"Hashes",
 	"Merges"
 );
+
+-- prefix operators whose names are not lexed as Op must be deparsed qualified
+CREATE OPERATOR * (rightarg = int4, function = int4um);
+CREATE OPERATOR <= (rightarg = int4, function = int4um);
+CREATE OPERATOR <> (rightarg = int4, function = int4um);
+CREATE TABLE prefix_op_tbl (a int, b int);
+INSERT INTO prefix_op_tbl VALUES (1, 2);
+CREATE VIEW prefix_op_view AS
+  SELECT OPERATOR(public.*) a AS r, a * OPERATOR(public.*) b AS s,
+         -(OPERATOR(public.<=) a) AS le, OPERATOR(public.<>) (-b) AS ne
+  FROM prefix_op_tbl;
+SELECT pg_get_viewdef('prefix_op_view'::regclass, false) AS d \gset
+\echo :d
+CREATE VIEW prefix_op_view_re1 AS :d;
+SELECT * FROM prefix_op_view_re1;
+SELECT pg_get_viewdef('prefix_op_view'::regclass, true) AS d \gset
+\echo :d
+CREATE VIEW prefix_op_view_re2 AS :d;
+SELECT * FROM prefix_op_view_re2;
+DROP TABLE prefix_op_tbl CASCADE;
+DROP OPERATOR * (none, int4);
+DROP OPERATOR <= (none, int4);
+DROP OPERATOR <> (none, int4);

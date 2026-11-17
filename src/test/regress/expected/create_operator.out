@@ -462,3 +462,48 @@ WARNING:  operator attribute "Join" not recognized
 WARNING:  operator attribute "Hashes" not recognized
 WARNING:  operator attribute "Merges" not recognized
 ERROR:  operator function must be specified
+-- prefix operators whose names are not lexed as Op must be deparsed qualified
+CREATE OPERATOR * (rightarg = int4, function = int4um);
+CREATE OPERATOR <= (rightarg = int4, function = int4um);
+CREATE OPERATOR <> (rightarg = int4, function = int4um);
+CREATE TABLE prefix_op_tbl (a int, b int);
+INSERT INTO prefix_op_tbl VALUES (1, 2);
+CREATE VIEW prefix_op_view AS
+  SELECT OPERATOR(public.*) a AS r, a * OPERATOR(public.*) b AS s,
+         -(OPERATOR(public.<=) a) AS le, OPERATOR(public.<>) (-b) AS ne
+  FROM prefix_op_tbl;
+SELECT pg_get_viewdef('prefix_op_view'::regclass, false) AS d \gset
+\echo :d
+ SELECT (* a) AS r,
+    (a * (* b)) AS s,
+    (- (<= a)) AS le,
+    (<> (- b)) AS ne
+   FROM prefix_op_tbl;
+CREATE VIEW prefix_op_view_re1 AS :d;
+ERROR:  syntax error at or near "*"
+LINE 1: CREATE VIEW prefix_op_view_re1 AS  SELECT (* a) AS r,
+                                                   ^
+SELECT * FROM prefix_op_view_re1;
+ERROR:  relation "prefix_op_view_re1" does not exist
+LINE 1: SELECT * FROM prefix_op_view_re1;
+                      ^
+SELECT pg_get_viewdef('prefix_op_view'::regclass, true) AS d \gset
+\echo :d
+ SELECT * a AS r,
+    a * (* b) AS s,
+    - (<= a) AS le,
+    <> (- b) AS ne
+   FROM prefix_op_tbl;
+CREATE VIEW prefix_op_view_re2 AS :d;
+ERROR:  syntax error at or near "a"
+LINE 1: CREATE VIEW prefix_op_view_re2 AS  SELECT * a AS r,
+                                                    ^
+SELECT * FROM prefix_op_view_re2;
+ERROR:  relation "prefix_op_view_re2" does not exist
+LINE 1: SELECT * FROM prefix_op_view_re2;
+                      ^
+DROP TABLE prefix_op_tbl CASCADE;
+NOTICE:  drop cascades to view prefix_op_view
+DROP OPERATOR * (none, int4);
+DROP OPERATOR <= (none, int4);
+DROP OPERATOR <> (none, int4);
