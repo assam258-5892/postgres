@@ -268,3 +268,38 @@ ROLLBACK;
 
 DROP TABLE CASE_TBL;
 DROP TABLE CASE2_TBL;
+
+-- Simple CASE whose "=" result is coerced to boolean
+CREATE TABLE case_coerce_tbl (x text, y varchar);
+INSERT INTO case_coerce_tbl VALUES ('1', '2.5'), ('3', '4');
+CREATE DOMAIN case_boolish AS boolean;
+CREATE TYPE case_tf AS ENUM ('f', 't');
+CREATE CAST (case_tf AS boolean) WITH INOUT AS ASSIGNMENT;
+CREATE FUNCTION case_txteqint(text, int) RETURNS case_boolish
+  LANGUAGE sql IMMUTABLE AS 'SELECT $1 = $2::text';
+CREATE FUNCTION case_txteqnum(text, numeric) RETURNS case_tf
+  LANGUAGE sql IMMUTABLE
+  AS 'SELECT CASE WHEN $1 = $2::text THEN ''t''::case_tf ELSE ''f'' END';
+CREATE OPERATOR = (LEFTARG = text, RIGHTARG = int, FUNCTION = case_txteqint);
+CREATE OPERATOR = (LEFTARG = text, RIGHTARG = numeric, FUNCTION = case_txteqnum);
+CREATE VIEW case_coerce_v AS
+  SELECT CASE x WHEN 1 THEN 'one' ELSE 'other' END AS a,
+         CASE y WHEN 2.5 THEN 'two' ELSE 'other' END AS b
+  FROM case_coerce_tbl;
+SELECT pg_get_viewdef('case_coerce_v'::regclass);
+SELECT pg_get_viewdef('case_coerce_v'::regclass, true);
+SELECT pg_get_viewdef('case_coerce_v'::regclass) AS d \gset
+CREATE VIEW case_coerce_v_re AS :d
+SELECT pg_get_viewdef('case_coerce_v'::regclass, true) AS d \gset
+CREATE VIEW case_coerce_v_re2 AS :d
+SELECT * FROM case_coerce_v;
+SELECT * FROM case_coerce_v_re;
+SELECT * FROM case_coerce_v_re2;
+DROP TABLE case_coerce_tbl CASCADE;
+DROP OPERATOR = (text, int);
+DROP OPERATOR = (text, numeric);
+DROP FUNCTION case_txteqint(text, int);
+DROP FUNCTION case_txteqnum(text, numeric);
+DROP CAST (case_tf AS boolean);
+DROP TYPE case_tf;
+DROP DOMAIN case_boolish;
