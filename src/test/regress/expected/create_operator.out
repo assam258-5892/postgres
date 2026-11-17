@@ -474,36 +474,37 @@ CREATE VIEW prefix_op_view AS
   FROM prefix_op_tbl;
 SELECT pg_get_viewdef('prefix_op_view'::regclass, false) AS d \gset
 \echo :d
- SELECT (* a) AS r,
-    (a * (* b)) AS s,
-    (- (<= a)) AS le,
-    (<> (- b)) AS ne
+ SELECT (OPERATOR(public.*) a) AS r,
+    (a * (OPERATOR(public.*) b)) AS s,
+    (- (OPERATOR(public.<=) a)) AS le,
+    (OPERATOR(public.<>) (- b)) AS ne
    FROM prefix_op_tbl;
 CREATE VIEW prefix_op_view_re1 AS :d;
-ERROR:  syntax error at or near "*"
-LINE 1: CREATE VIEW prefix_op_view_re1 AS  SELECT (* a) AS r,
-                                                   ^
 SELECT * FROM prefix_op_view_re1;
-ERROR:  relation "prefix_op_view_re1" does not exist
-LINE 1: SELECT * FROM prefix_op_view_re1;
-                      ^
+ r  | s  | le | ne 
+----+----+----+----
+ -1 | -2 |  1 |  2
+(1 row)
+
 SELECT pg_get_viewdef('prefix_op_view'::regclass, true) AS d \gset
 \echo :d
- SELECT * a AS r,
-    a * (* b) AS s,
-    - (<= a) AS le,
-    <> (- b) AS ne
+ SELECT OPERATOR(public.*) a AS r,
+    a * (OPERATOR(public.*) b) AS s,
+    - (OPERATOR(public.<=) a) AS le,
+    OPERATOR(public.<>) (- b) AS ne
    FROM prefix_op_tbl;
 CREATE VIEW prefix_op_view_re2 AS :d;
-ERROR:  syntax error at or near "a"
-LINE 1: CREATE VIEW prefix_op_view_re2 AS  SELECT * a AS r,
-                                                    ^
 SELECT * FROM prefix_op_view_re2;
-ERROR:  relation "prefix_op_view_re2" does not exist
-LINE 1: SELECT * FROM prefix_op_view_re2;
-                      ^
+ r  | s  | le | ne 
+----+----+----+----
+ -1 | -2 |  1 |  2
+(1 row)
+
 DROP TABLE prefix_op_tbl CASCADE;
-NOTICE:  drop cascades to view prefix_op_view
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to view prefix_op_view
+drop cascades to view prefix_op_view_re1
+drop cascades to view prefix_op_view_re2
 DROP OPERATOR * (none, int4);
 DROP OPERATOR <= (none, int4);
 DROP OPERATOR <> (none, int4);

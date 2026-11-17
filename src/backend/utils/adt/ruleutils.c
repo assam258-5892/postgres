@@ -13689,8 +13689,18 @@ generate_operator_name(Oid operid, Oid arg1, Oid arg2)
 							true, -1);
 			break;
 		case 'l':
-			p_result = left_oper(NULL, list_make1(makeString(oprname)), arg2,
-								 true, -1);
+
+			/*
+			 * The grammar takes a bare prefix operator only for + and - and
+			 * names lexed as Op, so always qualify the other names.
+			 */
+			if ((strlen(oprname) == 1 && strchr("*/%^<>=", oprname[0])) ||
+				strcmp(oprname, "<=") == 0 || strcmp(oprname, ">=") == 0 ||
+				strcmp(oprname, "<>") == 0)
+				p_result = NULL;
+			else
+				p_result = left_oper(NULL, list_make1(makeString(oprname)),
+									 arg2, true, -1);
 			break;
 		default:
 			elog(ERROR, "unrecognized oprkind: %d", operform->oprkind);
