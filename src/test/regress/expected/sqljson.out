@@ -1740,14 +1740,14 @@ SELECT JSON_OBJECTAGG(k : (x IS JSON) WITH UNIQUE KEYS) AS o5
 FROM test_json_bool_val;
 \sv json_bool_val_v1
 CREATE OR REPLACE VIEW public.json_bool_val_v1 AS
- SELECT JSON_OBJECT('a' : x IS JSON WITH UNIQUE KEYS RETURNING json) AS o1,
-    JSON_OBJECT('a' : NOT x IS JSON WITH UNIQUE KEYS RETURNING json) AS o2,
-    JSON_OBJECT('a' : true AND x IS JSON OBJECT WITH UNIQUE KEYS RETURNING json) AS o3,
-    JSON_OBJECTAGG(k : x IS JSON WITH UNIQUE KEYS RETURNING json) OVER () AS o4
+ SELECT JSON_OBJECT('a' : (x IS JSON) WITH UNIQUE KEYS RETURNING json) AS o1,
+    JSON_OBJECT('a' : (NOT x IS JSON) WITH UNIQUE KEYS RETURNING json) AS o2,
+    JSON_OBJECT('a' : (true AND x IS JSON OBJECT) WITH UNIQUE KEYS RETURNING json) AS o3,
+    JSON_OBJECTAGG(k : (x IS JSON) WITH UNIQUE KEYS RETURNING json) OVER () AS o4
    FROM test_json_bool_val
 \sv json_bool_val_v2
 CREATE OR REPLACE VIEW public.json_bool_val_v2 AS
- SELECT JSON_OBJECTAGG(k : x IS JSON WITH UNIQUE KEYS RETURNING json) AS o5
+ SELECT JSON_OBJECTAGG(k : (x IS JSON) WITH UNIQUE KEYS RETURNING json) AS o5
    FROM test_json_bool_val
 SELECT pg_get_viewdef('json_bool_val_v1'::regclass, true) AS def \gset
 CREATE VIEW json_bool_val_v1_re AS :def
@@ -1759,7 +1759,7 @@ SELECT pg_get_viewdef('json_bool_val_v1'::regclass) =
 	pg_get_viewdef('json_bool_val_v2_re'::regclass) AS same2;
  same1 | same2 
 -------+-------
- f     | f
+ t     | t
 (1 row)
 
 SELECT * FROM json_bool_val_v1;
@@ -1769,9 +1769,9 @@ SELECT * FROM json_bool_val_v1;
 (1 row)
 
 SELECT * FROM json_bool_val_v1_re;
-      o1       |      o2      |      o3       |       o4        
----------------+--------------+---------------+-----------------
- {"a" : false} | {"a" : true} | {"a" : false} | { "a" : false }
+      o1      |      o2       |      o3      |       o4       
+--------------+---------------+--------------+----------------
+ {"a" : true} | {"a" : false} | {"a" : true} | { "a" : true }
 (1 row)
 
 SELECT * FROM json_bool_val_v2;
@@ -1781,9 +1781,9 @@ SELECT * FROM json_bool_val_v2;
 (1 row)
 
 SELECT * FROM json_bool_val_v2_re;
-       o5        
------------------
- { "a" : false }
+       o5       
+----------------
+ { "a" : true }
 (1 row)
 
 DROP TABLE test_json_bool_val CASCADE;

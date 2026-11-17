@@ -494,6 +494,8 @@ static void get_const_expr(Const *constval, deparse_context *context,
 						   int showtype);
 static void get_const_collation(Const *constval, deparse_context *context);
 static void get_json_format(JsonFormat *format, StringInfo buf);
+static void get_json_object_value(Node *node, deparse_context *context,
+								  bool showimplicit);
 static void get_json_returning(JsonReturning *returning, StringInfo buf,
 							   bool json_format_by_default);
 static void get_json_constructor(JsonConstructorExpr *ctor,
@@ -11114,7 +11116,10 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 				}
 				if (use_variadic && i == nargs)
 					appendStringInfoString(buf, "VARIADIC ");
-				get_rule_expr(arg, context, true);
+				if (is_json_objectagg && i == 2)
+					get_json_object_value(arg, context, true);
+				else
+					get_rule_expr(arg, context, true);
 			}
 		}
 
@@ -11212,7 +11217,8 @@ get_windowfunc_expr_helper(WindowFunc *wfunc, deparse_context *context,
 		{
 			get_rule_expr((Node *) linitial(wfunc->args), context, false);
 			appendStringInfoString(buf, " : ");
-			get_rule_expr((Node *) lsecond(wfunc->args), context, false);
+			get_json_object_value((Node *) lsecond(wfunc->args), context,
+								  false);
 		}
 		else
 			get_rule_expr((Node *) wfunc->args, context, true);
@@ -11911,11 +11917,45 @@ get_json_constructor(JsonConstructorExpr *ctor, deparse_context *context,
 			appendStringInfoString(buf, sep);
 		}
 
-		get_rule_expr((Node *) lfirst(lc), context, true);
+		if (is_json_object && (curridx % 2) != 0)
+			get_json_object_value((Node *) lfirst(lc), context, true);
+		else
+			get_rule_expr((Node *) lfirst(lc), context, true);
 	}
 
 	get_json_constructor_options(ctor, buf);
 	appendStringInfoChar(buf, ')');
+}
+
+/*
+ * get_json_object_value - Parse back a value of JSON_OBJECT or JSON_OBJECTAGG
+ *
+ * In pretty mode, IS JSON and boolean expressions need parentheses, or the
+ * WITH UNIQUE KEYS of the constructor would be read back as part of IS JSON.
+ */
+static void
+get_json_object_value(Node *node, deparse_context *context,
+					  bool showimplicit)
+{
+	Node	   *expr = node;
+
+	if (IsA(node, JsonValueExpr))
+		expr = (Node *) ((JsonValueExpr *) node)->raw_expr;
+
+	if (!PRETTY_PAREN(context) ||
+		!(IsA(expr, JsonIsPredicate) || IsA(expr, BoolExpr)))
+	{
+		get_rule_expr(node, context, showimplicit);
+		return;
+	}
+
+	appendStringInfoChar(context->buf, '(');
+	get_rule_expr(expr, context, false);
+	appendStringInfoChar(context->buf, ')');
+
+	/* keep FORMAT outside the parentheses */
+	if (expr != node)
+		get_json_format(((JsonValueExpr *) node)->format, context->buf);
 }
 
 /*
