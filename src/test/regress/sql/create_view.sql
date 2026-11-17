@@ -774,6 +774,19 @@ select
   (select * from SYSTEM_USER) as su2;
 select pg_get_viewdef('tt201v', true);
 
+-- EXTRACT field names that are not plain identifiers
+create view tt202v as
+select
+  extract('zone' from now()) as kw,
+  extract('' from now()) as empty,
+  extract('Year' from now()) as mixed,
+  extract('epoch' from now()) as epoch,
+  extract('isodow' from now()) as isodow,
+  extract('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' from now()) as long;
+select pg_get_viewdef('tt202v', true) as def \gset
+\echo :def
+create view tt202v_re as :def
+
 -- corner cases with empty join conditions
 
 create view tt21v as

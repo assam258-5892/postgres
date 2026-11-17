@@ -2117,6 +2117,27 @@ select pg_get_viewdef('tt201v', true);
             FROM SYSTEM_USER "system_user"("system_user")) AS su2;
 (1 row)
 
+-- EXTRACT field names that are not plain identifiers
+create view tt202v as
+select
+  extract('zone' from now()) as kw,
+  extract('' from now()) as empty,
+  extract('Year' from now()) as mixed,
+  extract('epoch' from now()) as epoch,
+  extract('isodow' from now()) as isodow,
+  extract('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' from now()) as long;
+select pg_get_viewdef('tt202v', true) as def \gset
+\echo :def
+ SELECT EXTRACT(zone FROM now()) AS kw,
+    EXTRACT("" FROM now()) AS empty,
+    EXTRACT("Year" FROM now()) AS mixed,
+    EXTRACT(epoch FROM now()) AS epoch,
+    EXTRACT(isodow FROM now()) AS isodow,
+    EXTRACT(xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx FROM now()) AS long;
+create view tt202v_re as :def
+ERROR:  syntax error at or near "zone"
+LINE 1: create view tt202v_re as  SELECT EXTRACT(zone FROM now()) AS...
+                                                 ^
 -- corner cases with empty join conditions
 create view tt21v as
 select * from tt5 natural inner join tt6;
@@ -2342,7 +2363,7 @@ drop cascades to view aliased_view_2
 drop cascades to view aliased_view_3
 drop cascades to view aliased_view_4
 DROP SCHEMA testviewschm2 CASCADE;
-NOTICE:  drop cascades to 82 other objects
+NOTICE:  drop cascades to 83 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to view temporal1
 drop cascades to view temporal2
@@ -2415,6 +2436,7 @@ drop cascades to view tt18v
 drop cascades to view tt19v
 drop cascades to view tt20v
 drop cascades to view tt201v
+drop cascades to view tt202v
 drop cascades to view tt21v
 drop cascades to view tt22v
 drop cascades to view tt23v
