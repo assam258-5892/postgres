@@ -1210,3 +1210,20 @@ SELECT unistr('wrong: \udb99\u0061');
 SELECT unistr('wrong: \U0000db99\U00000061');
 SELECT unistr('wrong: \U002FFFFF');
 SELECT unistr('wrong: \xyz');
+
+-- SUBSTRING SIMILAR with an operator expression as its first argument
+CREATE FUNCTION substr_similar_op(text, int) RETURNS text
+  LANGUAGE sql IMMUTABLE AS 'SELECT $1 || $2';
+CREATE OPERATOR = (LEFTARG = text, RIGHTARG = int,
+  FUNCTION = substr_similar_op);
+CREATE VIEW substr_similar_v AS
+  SELECT substring((s = 1) SIMILAR '%#"1#"' ESCAPE '#') AS a
+  FROM (VALUES ('x'::text)) t(s);
+SELECT pg_get_viewdef('substr_similar_v'::regclass, true) AS d \gset
+\echo :d
+CREATE VIEW substr_similar_v2 AS :d
+SELECT * FROM substr_similar_v2;
+DROP VIEW substr_similar_v2;
+DROP VIEW substr_similar_v;
+DROP OPERATOR = (text, int);
+DROP FUNCTION substr_similar_op(text, int);
