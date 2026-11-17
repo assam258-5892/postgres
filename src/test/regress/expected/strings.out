@@ -3629,18 +3629,16 @@ CREATE VIEW substr_similar_v AS
   FROM (VALUES ('x'::text)) t(s);
 SELECT pg_get_viewdef('substr_similar_v'::regclass, true) AS d \gset
 \echo :d
- SELECT SUBSTRING(s = 1 SIMILAR '%#"1#"'::text ESCAPE '#'::text) AS a
+ SELECT SUBSTRING((s = 1) SIMILAR '%#"1#"'::text ESCAPE '#'::text) AS a
    FROM ( VALUES ('x'::text)) t(s);
 CREATE VIEW substr_similar_v2 AS :d
-ERROR:  syntax error at or near "'%#"1#"'"
-LINE 1: ...str_similar_v2 AS  SELECT SUBSTRING(s = 1 SIMILAR '%#"1#"'::...
-                                                             ^
 SELECT * FROM substr_similar_v2;
-ERROR:  relation "substr_similar_v2" does not exist
-LINE 1: SELECT * FROM substr_similar_v2;
-                      ^
+ a 
+---
+ 1
+(1 row)
+
 DROP VIEW substr_similar_v2;
-ERROR:  view "substr_similar_v2" does not exist
 DROP VIEW substr_similar_v;
 DROP OPERATOR = (text, int);
 DROP FUNCTION substr_similar_op(text, int);
