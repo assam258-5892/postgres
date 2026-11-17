@@ -1954,3 +1954,31 @@ SELECT most_common_elems, most_common_elem_freqs
   FROM pg_stats_ext_exprs WHERE statistics_name = 'stats_ext_mcelem';
 SELECT * FROM stats_ext_tbl_mcelem WHERE (a || a) @> '{1}';
 DROP TABLE stats_ext_tbl_mcelem;
+
+-- Statistics expressions must be printed in a form that reads back the same.
+-- ALTER COLUMN TYPE rebuilds the statistics from that form.
+CREATE TABLE stts_paren1 (x text, c int);
+CREATE STATISTICS stts_paren1_s ON
+  (json_object('a' : (x IS JSON) WITH UNIQUE KEYS RETURNING jsonb)), c
+  FROM stts_paren1;
+SELECT pg_get_statisticsobjdef(oid), pg_get_expr(stxexprs, stxrelid)
+  FROM pg_statistic_ext WHERE stxname = 'stts_paren1_s';
+ALTER TABLE stts_paren1 ALTER COLUMN c TYPE bigint;
+SELECT pg_get_expr(stxexprs, stxrelid)
+  FROM pg_statistic_ext WHERE stxname = 'stts_paren1_s';
+DROP TABLE stts_paren1;
+CREATE FUNCTION stts_paren_op(text, int) RETURNS text
+  LANGUAGE sql IMMUTABLE AS 'SELECT $1 || $2';
+CREATE OPERATOR = (LEFTARG = text, RIGHTARG = int, FUNCTION = stts_paren_op);
+CREATE TABLE stts_paren2 (s text, s2 text, c int);
+CREATE STATISTICS stts_paren2_s ON
+  (substring((s = 1) SIMILAR s2 ESCAPE '#')), c
+  FROM stts_paren2;
+SELECT pg_get_statisticsobjdef(oid), pg_get_expr(stxexprs, stxrelid)
+  FROM pg_statistic_ext WHERE stxname = 'stts_paren2_s';
+ALTER TABLE stts_paren2 ALTER COLUMN c TYPE bigint;
+SELECT pg_get_expr(stxexprs, stxrelid)
+  FROM pg_statistic_ext WHERE stxname = 'stts_paren2_s';
+DROP TABLE stts_paren2;
+DROP OPERATOR = (text, int);
+DROP FUNCTION stts_paren_op(text, int);
