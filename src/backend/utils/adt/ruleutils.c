@@ -13295,16 +13295,32 @@ printSubscripts(SubscriptingRef *sbsref, deparse_context *context)
 	lowlist_item = list_head(sbsref->reflowerindexpr);	/* could be NULL */
 	foreach(uplist_item, sbsref->refupperindexpr)
 	{
+		int			upper_start = -1;
+
 		appendStringInfoChar(buf, '[');
 		if (lowlist_item)
 		{
 			/* If subexpression is NULL, get_rule_expr prints nothing */
 			get_rule_expr((Node *) lfirst(lowlist_item), context, false);
 			appendStringInfoChar(buf, ':');
+			upper_start = buf->len;
 			lowlist_item = lnext(sbsref->reflowerindexpr, lowlist_item);
 		}
 		/* If subexpression is NULL, get_rule_expr prints nothing */
 		get_rule_expr((Node *) lfirst(uplist_item), context, false);
+
+		/*
+		 * An upper bound that starts with "=", such as a prefix operator =~,
+		 * would read back as ":=", so separate it from the colon.
+		 */
+		if (upper_start >= 0 && buf->len > upper_start &&
+			buf->data[upper_start] == '=')
+		{
+			appendStringInfoChar(buf, ' ');
+			memmove(buf->data + upper_start + 1, buf->data + upper_start,
+					buf->len - upper_start - 1);
+			buf->data[upper_start] = ' ';
+		}
 		appendStringInfoChar(buf, ']');
 	}
 }
