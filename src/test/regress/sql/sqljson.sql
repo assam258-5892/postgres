@@ -677,3 +677,32 @@ SELECT i % 2 AS g,
 FROM generate_series(1, 3) i
 GROUP BY i % 2
 ORDER BY count(*);
+
+-- A boolean value of JSON_OBJECT or JSON_OBJECTAGG must keep its parentheses
+-- in pretty mode, or WITH UNIQUE KEYS attaches to IS JSON on read-back
+CREATE TABLE test_json_bool_val (k text, x text);
+INSERT INTO test_json_bool_val VALUES ('a', '{"b": 1, "b": 2}');
+CREATE VIEW json_bool_val_v1 AS
+SELECT JSON_OBJECT('a' : (x IS JSON) WITH UNIQUE KEYS) AS o1,
+	JSON_OBJECT('a' : (NOT x IS JSON) WITH UNIQUE KEYS) AS o2,
+	JSON_OBJECT('a' : (true AND x IS JSON OBJECT) WITH UNIQUE KEYS) AS o3,
+	JSON_OBJECTAGG(k : (x IS JSON) WITH UNIQUE KEYS) OVER () AS o4
+FROM test_json_bool_val;
+CREATE VIEW json_bool_val_v2 AS
+SELECT JSON_OBJECTAGG(k : (x IS JSON) WITH UNIQUE KEYS) AS o5
+FROM test_json_bool_val;
+\sv json_bool_val_v1
+\sv json_bool_val_v2
+SELECT pg_get_viewdef('json_bool_val_v1'::regclass, true) AS def \gset
+CREATE VIEW json_bool_val_v1_re AS :def
+SELECT pg_get_viewdef('json_bool_val_v2'::regclass, true) AS def \gset
+CREATE VIEW json_bool_val_v2_re AS :def
+SELECT pg_get_viewdef('json_bool_val_v1'::regclass) =
+	pg_get_viewdef('json_bool_val_v1_re'::regclass) AS same1,
+	pg_get_viewdef('json_bool_val_v2'::regclass) =
+	pg_get_viewdef('json_bool_val_v2_re'::regclass) AS same2;
+SELECT * FROM json_bool_val_v1;
+SELECT * FROM json_bool_val_v1_re;
+SELECT * FROM json_bool_val_v2;
+SELECT * FROM json_bool_val_v2_re;
+DROP TABLE test_json_bool_val CASCADE;
