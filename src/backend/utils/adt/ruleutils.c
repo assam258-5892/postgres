@@ -9399,7 +9399,13 @@ get_parameter(Param *param, deparse_context *context)
 		{
 			char	   *argname = dpns->argnames[param->paramid - 1];
 
-			if (argname)
+			/*
+			 * Inside a DEFINE clause a name qualified with the function name
+			 * is rejected, since the qualifier slot belongs to the pattern
+			 * variables, and a bare name would bind to a column of the same
+			 * name.  Print $N there, which always reads the parameter.
+			 */
+			if (argname && !context->inRPRDefine)
 			{
 				bool		should_qualify = false;
 				ListCell   *lc;

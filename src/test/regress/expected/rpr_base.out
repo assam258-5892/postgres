@@ -6510,6 +6510,66 @@ SELECT pg_get_viewdef('rpr_quant_n_plus_v'::regclass);
    a AS (val > 0));
 (1 row)
 
+-- A routine parameter read in DEFINE deparses as $n.
+CREATE TABLE rpr_fnp (id INT, v INT);
+INSERT INTO rpr_fnp SELECT g, g % 5 FROM generate_series(1, 10) g;
+CREATE FUNCTION rpr_fnp_named(threshold INT) RETURNS BIGINT[] LANGUAGE sql
+BEGIN ATOMIC
+  SELECT array_agg(c ORDER BY id) FROM (
+    SELECT id, count(*) OVER w AS c FROM rpr_fnp
+    WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+) DEFINE A AS v > threshold)) s;
+END;
+-- column v would capture a bare v, so the parameter must stay $1
+CREATE FUNCTION rpr_fnp_dollar(v INT) RETURNS BIGINT[] LANGUAGE sql
+BEGIN ATOMIC
+  SELECT array_agg(c ORDER BY id) FROM (
+    SELECT id, count(*) OVER w AS c FROM rpr_fnp
+    WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+) DEFINE A AS id > $1)) s;
+END;
+-- $1 in DEFINE must still match the GROUP BY expression v + k
+CREATE FUNCTION rpr_fnp_group(k INT) RETURNS BIGINT[] LANGUAGE sql
+BEGIN ATOMIC
+  SELECT array_agg(c ORDER BY s) FROM (
+    SELECT v + k AS s, count(*) OVER w AS c FROM rpr_fnp GROUP BY v + k
+    WINDOW w AS (ORDER BY v + k ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+) DEFINE A AS v + k > 2)) s;
+END;
+-- WHERE keeps the qualified name while DEFINE prints $1
+CREATE FUNCTION rpr_fnp_where(threshold INT) RETURNS BIGINT[] LANGUAGE sql
+BEGIN ATOMIC
+  SELECT array_agg(c ORDER BY id) FROM (
+    SELECT id, count(*) OVER w AS c FROM rpr_fnp WHERE v < threshold + 3
+    WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                 PATTERN (A+) DEFINE A AS v > threshold)) s;
+END;
+SELECT proname, (regexp_match(pg_get_functiondef(oid), '^  a AS (.*)$', 'n'))[1] AS define
+FROM pg_proc WHERE proname LIKE 'rpr\_fnp\_%' ORDER BY proname;
+    proname     |       define        
+----------------+---------------------
+ rpr_fnp_dollar | (id > $1))) s;
+ rpr_fnp_group  | ((v + $1) > 2))) s;
+ rpr_fnp_named  | (v > $1))) s;
+ rpr_fnp_where  | (v > $1))) s;
+(4 rows)
+
+SELECT (regexp_match(pg_get_functiondef('rpr_fnp_where'::regproc), '^\s*WHERE (.*)$', 'n'))[1] AS "where";
+                    where                    
+---------------------------------------------
+ (rpr_fnp.v < (rpr_fnp_where.threshold + 3))
+(1 row)
+
+-- recreate each from its definition
+\set ECHO none
+SELECT rpr_fnp_named(1) AS named, rpr_fnp_dollar(5) AS dollar,
+       rpr_fnp_group(1) AS "group", rpr_fnp_where(1) AS "where";
+         named         |        dollar         |    group    |       where       
+-----------------------+-----------------------+-------------+-------------------
+ {0,3,0,0,0,0,3,0,0,0} | {0,0,0,0,0,5,0,0,0,0} | {0,0,3,0,0} | {0,2,0,0,0,2,0,0}
+(1 row)
+
+-- left in place so pg_dump/pg_upgrade also round-trip them
 -- ============================================================
 -- Glued Quantifier / Alternation Tests
 -- ============================================================
