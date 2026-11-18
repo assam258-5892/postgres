@@ -654,9 +654,13 @@ insists the two agree; a mismatch is not a wrong answer at runtime but a
 This is also why make_window_input_target() stops at a subexpression the
 input target already computes whole.  The grouping step produces only that
 expression, so asking for the Vars underneath it would ask the grouping step
-for columns it cannot produce.  This is the one rule the havingQual handling
-it is modelled on does not need: make_group_input_target() builds the input
-of the grouping step, while the window input target sits above it.
+for columns it cannot produce.  make_group_input_target() calls the same
+walker for the DEFINE clause, so a column only DEFINE reads, such as one
+functionally dependent on a GROUP BY key, reaches the Agg input; there the
+stop only keeps the columns under a grouped expression from being added on
+their own.  create_agg_clause_infos() (initsplan.c) collects the Vars of
+DEFINE clauses with those of the targetlist and havingQual, so eager
+aggregation counts them as used outside aggregates.
 
 IV-5. Optimizations an RPR Window Is Excluded From
 

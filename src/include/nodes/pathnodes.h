@@ -504,7 +504,7 @@ struct PlannerInfo
 	/* list of GroupingExprInfos */
 	List	   *group_expr_list;
 
-	/* list of plain Vars contained in targetlist and havingQual */
+	/* list of plain Vars contained in targetlist, havingQual and DEFINE */
 	List	   *tlist_vars;
 
 	/* array of PlaceHolderInfos indexed by phid */

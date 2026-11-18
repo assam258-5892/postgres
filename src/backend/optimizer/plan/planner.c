@@ -5998,6 +5998,29 @@ make_group_input_target(PlannerInfo *root, PathTarget *final_target)
 	}
 	add_new_columns_to_pathtarget(input_target, non_group_vars);
 
+	/*
+	 * The WindowAgg above evaluates DEFINE, so bring up the columns it reads,
+	 * stopping at a grouping expression computed whole.  grouping_planner()
+	 * has emptied the DEFINE clauses of windows that are not planned.
+	 */
+	foreach_node(WindowClause, wc, parse->windowClause)
+	{
+		Node	   *define = (Node *) wc->defineClause;
+
+		if (define == NULL)
+			continue;
+
+		/* the target is logically below the grouping step, as above */
+		if (parse->hasGroupRTE && parse->groupingSets != NIL)
+		{
+			Assert(root->group_rtindex > 0);
+			define = remove_nulling_relids(define,
+										   bms_make_singleton(root->group_rtindex),
+										   NULL);
+		}
+		(void) add_define_inputs_walker(define, input_target);
+	}
+
 	/* clean up cruft */
 	list_free(non_group_vars);
 	list_free(non_group_cols);
@@ -6531,15 +6554,16 @@ common_prefix_cmp(const void *a, const void *b)
  * the join tree, and the node's own input target has to ask for them again
  * because the upper planner projects through explicit targets rather than
  * propagating attr_needed.  make_group_input_target() does the same for
- * havingQual.
+ * havingQual, and calls this walker directly for the DEFINE clause.
  *
  * The walk stops at any expression the target already computes whole, since
  * setrefs.c resolves the DEFINE copy of it against that column.  Stopping
  * matters rather than merely saving work: under GROUP BY the Vars underneath
  * a grouping expression are not available on their own, so descending into
- * one would ask the grouping step for a column it cannot produce.  This is
- * the one rule HAVING does not need, the Agg's input target sitting below
- * the grouping step rather than above it.
+ * one would ask the grouping step for a column it cannot produce.  Below
+ * the grouping step, where make_group_input_target() calls it, the same
+ * stop only keeps the columns under a grouped expression from being added
+ * on their own next to it.
  */
 static bool
 add_define_inputs_walker(Node *node, PathTarget *input_target)
