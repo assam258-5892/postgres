@@ -12518,7 +12518,7 @@ ERROR:  pattern nesting too deep
 LINE 6: ...((((((((((((((((((((((((((((((((((((((((((((((((((A)))))))))...
                                                              ^
 DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
--- A parenthesized alternation costs two levels: 127 nested pass, 128 fail.
+-- An alternation costs no level: 254 nested pass, 255 fail.
 \set ECHO none
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
@@ -12531,7 +12531,19 @@ DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
 (6 rows)
 
 ERROR:  pattern nesting too deep
-LINE 6: ...A | (A | (A | (A | (A | (A | (A | (A | (A | (A | (A | (A))))...
+LINE 6: ...A | (A | (A | (A | (A | (A | (A | (A | (A | (A | (A)))))))))...
+                                                             ^
+DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
+-- Merging (A | B) (A | B) into (A | B){2} keeps the depth: 253 pass, 254 fail.
+\set ECHO none
+ id | count 
+----+-------
+  1 |     0
+  2 |     0
+(2 rows)
+
+ERROR:  pattern nesting too deep
+LINE 6: ...((((((((((((((((((((((((((((((((((((((((((((((((((A | B) (A ...
                                                              ^
 DETAIL:  Pattern nesting depth 255 exceeds maximum 254.
 DROP TABLE rpr_errors;

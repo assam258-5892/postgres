@@ -1178,9 +1178,7 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     Note that the maximum number of unique pattern variables
     used in the <literal>PATTERN</literal> clause is 240.
     Additionally, the maximum nesting depth of pattern groups
-    (parentheses) is 254 levels.  An alternation costs a level of its own,
-    so a pattern that nests alternations reaches the limit at about half
-    as many parentheses.
+    (parentheses) is 254 levels.
     The depth is that of the pattern as written, so parentheses count
     even where they are redundant.
     The pattern is also limited to 32767 elements, counted after pattern
