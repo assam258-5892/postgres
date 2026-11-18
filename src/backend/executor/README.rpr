@@ -375,6 +375,9 @@ variable, and every other qualified name -- including one that
 p_post_columnref_hook resolves, such as a SQL function's parameter or a
 PL/pgSQL variable spelled with its routine name or block label.  Unqualified,
 those remain readable; it is the spelling that is refused, not the value.
+A parameter shadowed by a column of the same name is reachable only as $n,
+and get_parameter() prints every parameter that way inside DEFINE, so a
+deparsed SQL-standard routine body re-parses.
 
 A pattern variable qualifier such as A.price is decided before name
 resolution, by matching the qualifier against the PATTERN variable names
@@ -2599,7 +2602,9 @@ parser's downcased comparison.
 
 inRPRDefine is part of the deparse context, so every routine that builds one
 initializes it, and get_rule_define() saves and restores it around the clause
-the way it does varprefix.
+the way it does varprefix.  get_parameter() reads the same flag to print a
+routine parameter as $n, since the spelling qualified with the routine name is
+rejected in DEFINE and the bare one may be captured by a column (III-4).
 
 XIII-7. DEFINE Vars Under a GROUP RTE
 

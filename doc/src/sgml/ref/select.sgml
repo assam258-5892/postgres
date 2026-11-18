@@ -1223,7 +1223,10 @@ DEFINE <replaceable class="parameter">definition_variable_name</replaceable> AS 
     rejected there.  To read a field of a composite parameter or record
     variable, parenthesize it, as in <literal>(p).amount</literal>; that is
     field selection on a value rather than a qualified name, so the slot
-    stays free.
+    stays free.  A parameter that a column of the same name shadows can be
+    read only by its number, as in <literal>$1</literal>.  When a
+    SQL-standard routine body is displayed, every parameter read in a
+    <literal>DEFINE</literal> condition is shown by its number.
    </para>
 
    <para>
