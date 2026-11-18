@@ -397,6 +397,65 @@ WINDOW w AS (
         D AS 'D' = ANY(flags)
 );
 
+-- Alternation branches share one depth slot: A+ and B{2,3} count in it
+WITH test_alt_slot_var AS (
+    SELECT * FROM (VALUES
+        (1,  ARRAY['A']),
+        (2,  ARRAY['A']),
+        (3,  ARRAY['C']),
+        (4,  ARRAY['B']),
+        (5,  ARRAY['B']),
+        (6,  ARRAY['C']),
+        (7,  ARRAY['B']),
+        (8,  ARRAY['B']),
+        (9,  ARRAY['B']),
+        (10, ARRAY['C'])
+    ) AS t(id, flags)
+)
+SELECT id, flags, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM test_alt_slot_var
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN ((A+ | B{2,3}) C)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags)
+);
+
+-- A group in a branch counts in the branch's slot, inside an outer group
+WITH test_alt_slot_group AS (
+    SELECT * FROM (VALUES
+        (1,  ARRAY['A']),
+        (2,  ARRAY['D']),
+        (3,  ARRAY['B']),
+        (4,  ARRAY['C']),
+        (5,  ARRAY['B']),
+        (6,  ARRAY['C']),
+        (7,  ARRAY['D']),
+        (8,  ARRAY['A']),
+        (9,  ARRAY['D']),
+        (10, ARRAY['B']),
+        (11, ARRAY['C']),
+        (12, ARRAY['D'])
+    ) AS t(id, flags)
+)
+SELECT id, flags, first_value(id) OVER w AS match_start, last_value(id) OVER w AS match_end
+FROM test_alt_slot_group
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    AFTER MATCH SKIP PAST LAST ROW
+    PATTERN (((A | (B C){2,3}) D)+)
+    DEFINE
+        A AS 'A' = ANY(flags),
+        B AS 'B' = ANY(flags),
+        C AS 'C' = ANY(flags),
+        D AS 'D' = ANY(flags)
+);
+
 -- Fixed-length group absorption: (A B{2})+ C
 -- B{2} has min == max, equivalent to unrolling to (A B B)+ C
 WITH test_absorb_fixedlen AS (

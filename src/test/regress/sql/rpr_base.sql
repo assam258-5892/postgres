@@ -7814,7 +7814,7 @@ SELECT format($$CREATE VIEW rpr_deep_v AS SELECT count(*) OVER w
   repeat('(', 255), repeat(')', 255)) \gexec
 \set ECHO all
 
--- A parenthesized alternation costs two levels: 127 nested pass, 128 fail.
+-- An alternation costs no level: 254 nested pass, 255 fail.
 \set ECHO none
 SELECT format($$EXPLAIN (COSTS OFF) SELECT count(*) OVER w
   FROM (VALUES
@@ -7822,14 +7822,32 @@ SELECT format($$EXPLAIN (COSTS OFF) SELECT count(*) OVER w
     (2)) AS t(id)
   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   PATTERN (%sA%s) DEFINE A AS id > 0)$$,
-  repeat('A | (', 127), repeat(')', 127)) \gexec
+  repeat('A | (', 254), repeat(')', 254)) \gexec
 SELECT format($$EXPLAIN (COSTS OFF) SELECT count(*) OVER w
   FROM (VALUES
     (1),
     (2)) AS t(id)
   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   PATTERN (%sA%s) DEFINE A AS id > 0)$$,
-  repeat('A | (', 128), repeat(')', 128)) \gexec
+  repeat('A | (', 255), repeat(')', 255)) \gexec
+\set ECHO all
+
+-- Merging (A | B) (A | B) into (A | B){2} keeps the depth: 253 pass, 254 fail.
+\set ECHO none
+SELECT format($$SELECT id, count(*) OVER w
+  FROM (VALUES
+    (1, 1),
+    (2, 2)) AS t(id, v)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (%s(A | B) (A | B)%s) DEFINE A AS v = 1, B AS v = 2)$$,
+  repeat('(', 253), repeat('){2,3}', 253)) \gexec
+SELECT format($$SELECT id, count(*) OVER w
+  FROM (VALUES
+    (1, 1),
+    (2, 2)) AS t(id, v)
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  PATTERN (%s(A | B) (A | B)%s) DEFINE A AS v = 1, B AS v = 2)$$,
+  repeat('(', 254), repeat('){2,3}', 254)) \gexec
 \set ECHO all
 
 DROP TABLE rpr_errors;
