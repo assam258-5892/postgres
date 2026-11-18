@@ -1597,6 +1597,136 @@ WINDOW w2 AS (PARTITION BY grp ORDER BY id),
         DEFINE U AS val > PREV(val))
 ORDER BY id;
 
+-- ============================================================
+-- B15. RPR + DEFINE-only column dependent on the GROUP BY key
+-- ============================================================
+-- A column read only by DEFINE (v) is in neither the target list nor HAVING.
+-- When it is functionally dependent on the GROUP BY key (the primary key),
+-- the grouping step has to put it into the Agg input so that the WindowAgg
+-- above can evaluate DEFINE.
+
+CREATE TABLE rpr_integ_fd (id int PRIMARY KEY, v int);
+INSERT INTO rpr_integ_fd SELECT g, (g * 7) % 10 FROM generate_series(1, 6) g;
+CREATE TABLE rpr_integ_fd2 (id int, w int);
+INSERT INTO rpr_integ_fd2 SELECT g, g FROM generate_series(1, 6) g;
+ANALYZE rpr_integ_fd;
+ANALYZE rpr_integ_fd2;
+
+-- Grouping one table
+SELECT id, count(*) OVER w AS c
+FROM rpr_integ_fd
+GROUP BY id
+WINDOW w AS (ORDER BY id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (X Y+)
+        DEFINE Y AS v > PREV(v))
+ORDER BY id;
+
+-- Aggregate over a join
+SELECT t.id, sum(u.w) AS sw, count(*) OVER w AS c
+FROM rpr_integ_fd t JOIN rpr_integ_fd2 u ON u.id = t.id
+GROUP BY t.id
+WINDOW w AS (ORDER BY t.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (X Y+)
+        DEFINE Y AS v > PREV(v))
+ORDER BY t.id;
+
+-- u has no primary key, so u.w is not dependent on t.id
+SELECT t.id, count(*) OVER w AS c
+FROM rpr_integ_fd t JOIN rpr_integ_fd2 u ON u.id = t.id
+GROUP BY t.id
+WINDOW w AS (ORDER BY t.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (X Y+)
+        DEFINE Y AS w > PREV(w));
+
+-- Eager aggregation: v appears in the target list only inside an aggregate
+CREATE TABLE rpr_integ_ea_c (pid int, x int);
+INSERT INTO rpr_integ_ea_c SELECT (g % 6) + 1, g FROM generate_series(1, 6000) g;
+CREATE TABLE rpr_integ_ea_d (pid int);
+INSERT INTO rpr_integ_ea_d SELECT (g % 6) + 1 FROM generate_series(1, 60) g;
+ANALYZE rpr_integ_ea_c;
+ANALYZE rpr_integ_ea_d;
+
+SELECT p.id, sum(p.v + c.x) AS s, count(*) OVER w AS cnt
+FROM rpr_integ_fd p
+  JOIN rpr_integ_ea_c c ON c.pid = p.id
+  JOIN rpr_integ_ea_d d ON d.pid = p.id
+GROUP BY p.id
+WINDOW w AS (ORDER BY p.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (X Y+)
+        DEFINE Y AS v > PREV(v))
+ORDER BY p.id;
+
+-- v only in an aggregate FILTER
+SELECT p.id, sum(c.x) FILTER (WHERE p.v > 3) AS s, count(*) OVER w AS cnt
+FROM rpr_integ_fd p
+  JOIN rpr_integ_ea_c c ON c.pid = p.id
+  JOIN rpr_integ_ea_d d ON d.pid = p.id
+GROUP BY p.id
+WINDOW w AS (ORDER BY p.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (X Y+)
+        DEFINE Y AS v > PREV(v))
+ORDER BY p.id;
+
+-- v only in an aggregate in HAVING
+SELECT p.id, sum(c.x) AS s, count(*) OVER w AS cnt
+FROM rpr_integ_fd p
+  JOIN rpr_integ_ea_c c ON c.pid = p.id
+  JOIN rpr_integ_ea_d d ON d.pid = p.id
+GROUP BY p.id
+HAVING sum(p.v) >= 0
+WINDOW w AS (ORDER BY p.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (X Y+)
+        DEFINE Y AS v > PREV(v))
+ORDER BY p.id;
+
+DROP TABLE rpr_integ_ea_c;
+DROP TABLE rpr_integ_ea_d;
+DROP TABLE rpr_integ_fd2;
+DROP TABLE rpr_integ_fd;
+
+-- DEFINE reads a FULL JOIN USING merged column; only r.id comes up
+CREATE TABLE rpr_integ_gl (id int, a int);
+CREATE TABLE rpr_integ_gr (pk int PRIMARY KEY, id int, b int);
+INSERT INTO rpr_integ_gl VALUES (1, 1), (2, 2), (3, 3), (5, 5);
+INSERT INTO rpr_integ_gr VALUES (10, 2, 20), (11, 3, 30), (12, 4, 40);
+CREATE VIEW rpr_integ_gv AS
+SELECT l.id AS lid, r.pk, count(*) OVER w AS c
+FROM rpr_integ_gl l FULL JOIN rpr_integ_gr r USING (id)
+GROUP BY l.id, r.pk
+WINDOW w AS (ORDER BY l.id NULLS LAST, r.pk
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A+)
+        DEFINE A AS id IS NOT NULL);
+SELECT * FROM rpr_integ_gv ORDER BY lid NULLS LAST, pk;
+SELECT 'CREATE VIEW rpr_integ_gv_rt AS '
+       || pg_get_viewdef('rpr_integ_gv'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_integ_gv'::regclass, true)
+       = pg_get_viewdef('rpr_integ_gv_rt'::regclass, true) AS round_trips;
+SELECT * FROM rpr_integ_gv_rt ORDER BY lid NULLS LAST, pk;
+DROP VIEW rpr_integ_gv_rt, rpr_integ_gv;
+DROP TABLE rpr_integ_gl, rpr_integ_gr;
+
+-- DEFINE reads a column from the nullable side of an outer join
+CREATE TABLE rpr_integ_oo (id int PRIMARY KEY);
+INSERT INTO rpr_integ_oo SELECT generate_series(1, 4);
+CREATE TABLE rpr_integ_oi (id int PRIMARY KEY, v int);
+INSERT INTO rpr_integ_oi VALUES (1, 10), (3, 10);
+SELECT o.id, count(*) OVER w AS c
+FROM rpr_integ_oo o LEFT JOIN rpr_integ_oi i ON i.id = o.id
+GROUP BY o.id, i.id
+WINDOW w AS (ORDER BY o.id
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        PATTERN (A B+)
+        DEFINE B AS PREV(v) IS NULL)
+ORDER BY o.id;
+DROP TABLE rpr_integ_oo, rpr_integ_oi;
+
 -- Cleanup
 DROP TABLE rpr_integ;
 DROP TABLE rpr_integ2;

@@ -3257,8 +3257,8 @@ init_grouping_targets(PlannerInfo *root, RelOptInfo *rel,
 			/*
 			 * The expression is referenced by an aggregate function pushed
 			 * down to this relation and does not appear elsewhere in the
-			 * targetlist or havingQual.  Add it to 'agg_input' but not to
-			 * 'target'.
+			 * targetlist, havingQual or a DEFINE clause.  Add it to
+			 * 'agg_input' but not to 'target'.
 			 */
 			add_new_column_to_pathtarget(agg_input, expr);
 		}
@@ -3321,7 +3321,7 @@ init_grouping_targets(PlannerInfo *root, RelOptInfo *rel,
 /*
  * is_var_in_aggref_only
  *	  Check whether the given Var appears in aggregate expressions and not
- *	  elsewhere in the targetlist or havingQual.
+ *	  elsewhere in the targetlist, havingQual or a DEFINE clause.
  */
 static bool
 is_var_in_aggref_only(PlannerInfo *root, Var *var)

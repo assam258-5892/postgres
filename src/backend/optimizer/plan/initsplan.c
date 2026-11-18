@@ -773,7 +773,8 @@ is_partial_agg_memory_risky(PlannerInfo *root)
 /*
  * create_agg_clause_infos
  *	  Search the targetlist and havingQual for Aggrefs and plain Vars, and
- *	  create an AggClauseInfo for each Aggref node.
+ *	  DEFINE clauses for plain Vars, and create an AggClauseInfo for each
+ *	  Aggref node.
  */
 static void
 create_agg_clause_infos(PlannerInfo *root)
@@ -809,6 +810,27 @@ create_agg_clause_infos(PlannerInfo *root)
 		{
 			tlist_exprs = list_concat(tlist_exprs, having_exprs);
 			list_free(having_exprs);
+		}
+	}
+
+	/*
+	 * The WindowAgg above reads DEFINE's columns, so they must not count as
+	 * used only within aggregates.  The parser rejects aggregates in DEFINE,
+	 * so plain Vars are all there is to collect.
+	 */
+	foreach_node(WindowClause, wc, root->parse->windowClause)
+	{
+		List	   *define_exprs;
+
+		if (wc->defineClause == NIL)
+			continue;
+
+		define_exprs = pull_var_clause((Node *) wc->defineClause,
+									   PVC_RECURSE_PLACEHOLDERS);
+		if (define_exprs != NIL)
+		{
+			tlist_exprs = list_concat(tlist_exprs, define_exprs);
+			list_free(define_exprs);
 		}
 	}
 
