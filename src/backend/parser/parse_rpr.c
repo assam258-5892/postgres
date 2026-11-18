@@ -227,16 +227,16 @@ validateRPRPattern(ParseState *pstate, RPRPatternNode *node, int depth,
 			break;
 
 		case RPR_PATTERN_SEQ:
-			/* A sequence adds no level */
+		case RPR_PATTERN_ALT:
+			/* Neither adds a level */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
 				validateRPRPattern(pstate, child, depth, varNames);
 			}
 			break;
 
-		case RPR_PATTERN_ALT:
 		case RPR_PATTERN_GROUP:
-			/* An alternation and a group each add one */
+			/* A group adds one */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
 				validateRPRPattern(pstate, child, depth + 1, varNames);

@@ -1220,13 +1220,13 @@ scanRPRPatternRecursive(RPRPatternNode *node, char **varNames, int *numVars,
 			/* Count ALT start element */
 			(*numElements)++;
 
-			/* Recurse into children at increased depth */
+			/* Recurse into branches at the same depth */
 			foreach_node(RPRPatternNode, child, node->children)
 			{
 				/* Each branch is terminated by a SEP branch-separator marker */
 				(*numElements)++;
 				scanRPRPatternRecursive(child, varNames,
-										numVars, numElements, depth + 1, maxDepth);
+										numVars, numElements, depth, maxDepth);
 			}
 			break;
 	}
@@ -1455,7 +1455,7 @@ fillRPRPatternGroup(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth de
  * fillRPRPatternAlt
  *		Fill an ALT pattern and its alternatives.
  *
- * Creates the ALT marker and fills each alternative at increased depth,
+ * Creates the ALT marker and fills each alternative at the ALT's own depth,
  * terminating every alternative (including the last) with a SEP
  * branch-separator marker.  The branch link runs from ALT through the SEP
  * chain, never through the branch content: a branch's first element may
@@ -1512,7 +1512,7 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		RPRElemFlags branchFlags;
 
 		altBranchStarts = lappend_int(altBranchStarts, branchStart);
-		branchFlags = fillRPRPattern(alt, pat, idx, depth + 1);
+		branchFlags = fillRPRPattern(alt, pat, idx, depth);
 
 		/* nullable if ANY branch is; empty-preferred per the FIRST branch */
 		altFlags |= (branchFlags & RPR_ELEM_EMPTY_LOOP);
@@ -1527,7 +1527,7 @@ fillRPRPatternAlt(RPRPatternNode *node, RPRPattern *pat, int *idx, RPRDepth dept
 		sep = &pat->elements[*idx];
 		memset(sep, 0, sizeof(RPRPatternElement));
 		sep->varId = RPR_VARID_SEP;
-		sep->depth = depth;		/* ALT-level boundary, not branch-level */
+		sep->depth = depth;
 		sep->min = 1;
 		sep->max = 1;
 		sep->next = RPR_ELEMIDX_INVALID;
@@ -1770,37 +1770,31 @@ finalizeRPRPattern(RPRPattern *result)
 
 /*
  * isFixedLengthChildren
- *		Check if every element in elem's scope has a fixed-length
- *		quantifier (min == max), nested subgroups included.
+ *		Check if every element in the body of the group whose BEGIN is given
+ *		has a fixed-length quantifier (min == max), nested subgroups included.
  *
  * A fixed-length group is semantically equivalent to unrolling each child
  * to {1,1} copies, which is the existing Case 2 already proven correct
  * for absorption.  This check recognizes fixed-length groups at compile
  * time without actually unrolling them.
  *
- * Walks the next chain from elem to the element that closes the enclosing
- * group, testing min == max on everything it passes.  A group's quantifier
- * sits on its BEGIN as well as on its END, so one test per element covers
- * a nested subgroup as well, and the walk needs no notion of how deeply
- * that subgroup nests: a GROUP{1,1} that tryUnwrapGroup() has not removed
- * emits no markers at all, and its children still have to be fixed-length
- * for the region to be.  ALT elements are rejected (alternation inside an
- * absorbable group is not supported).
+ * The body is the run of elements between BEGIN and the END it links to,
+ * and is tested in array order.  A group's quantifier sits on its BEGIN as
+ * well as on its END, so one test per element covers a nested subgroup as
+ * well.  ALT elements are rejected (alternation inside an absorbable group
+ * is not supported).
  *
- * Returns true if every element in the scope is fixed-length.
+ * Returns true if every element in the body is fixed-length.
  */
 static bool
-isFixedLengthChildren(RPRPattern *pattern, RPRPatternElement *elem)
+isFixedLengthChildren(RPRPattern *pattern, RPRPatternElement *begin)
 {
-	RPRDepth	scopeDepth = elem->depth;
+	RPRPatternElement *end = &pattern->elements[begin->jump];
 
-	/* FIN bounds the walk where depth cannot, as in isUnboundedStart() */
-	for (; elem->depth >= scopeDepth && !RPRElemIsFin(elem);
-		 elem = &pattern->elements[elem->next])
+	Assert(RPRElemIsBegin(begin) && RPRElemIsEnd(end));
+
+	for (RPRPatternElement *elem = begin + 1; elem < end; elem++)
 	{
-		/* FIN is the only element without a successor, and it stopped us */
-		Assert(elem->next != RPR_ELEMIDX_INVALID);
-
 		/* Alternation inside an absorbable group is not supported */
 		if (RPRElemIsAlt(elem))
 			return false;
@@ -1814,7 +1808,8 @@ isFixedLengthChildren(RPRPattern *pattern, RPRPatternElement *elem)
 
 /*
  * isUnboundedStart
- *		Check if elem starts an unbounded greedy sequence.
+ *		Check if elem, a VAR or a group's BEGIN, starts an unbounded greedy
+ *		sequence.
  *
  * For context absorption to work, the sequence starting at elem must be:
  *   - Unbounded (max = infinity)
@@ -1852,12 +1847,15 @@ isFixedLengthChildren(RPRPattern *pattern, RPRPatternElement *elem)
 static bool
 isUnboundedStart(RPRPattern *pattern, RPRPatternElement *elem)
 {
-	RPRDepth	startDepth = elem->depth;
+	RPRPatternElement *endElem;
 	RPRPatternElement *e;
 
-	/* Case 1: Simple unbounded VAR at start (greedy only) */
-	if (RPRElemIsVar(elem) && RPRElemIsUnbounded(elem) &&
-		!RPRElemIsReluctant(elem))
+	/* Either case needs an unbounded greedy quantifier on elem itself */
+	if (!RPRElemIsUnbounded(elem) || RPRElemIsReluctant(elem))
+		return false;
+
+	/* Case 1: Simple unbounded VAR at start */
+	if (RPRElemIsVar(elem))
 	{
 		/* Set both flags on first element */
 		elem->flags |= RPR_ELEM_ABSORBABLE_BRANCH | RPR_ELEM_ABSORBABLE;
@@ -1865,42 +1863,25 @@ isUnboundedStart(RPRPattern *pattern, RPRPatternElement *elem)
 	}
 
 	/*
-	 * Case 2: Unbounded GROUP with fixed-length children.  Each child must
-	 * have min == max (recursively for nested subgroups), ensuring a fixed
-	 * step size per iteration so that count-dominance holds.
+	 * Case 2: Unbounded GROUP with fixed-length children; elem is its BEGIN,
+	 * which carries the group's quantifier and links to its END.  Each child
+	 * must have min == max (recursively for nested subgroups), ensuring a
+	 * fixed step size per iteration so that count-dominance holds.
 	 */
+	Assert(RPRElemIsBegin(elem));
 	if (!isFixedLengthChildren(pattern, elem))
 		return false;
 
-	/*
-	 * Find the END that closes the group, at startDepth - 1.  Group markers
-	 * sit at their parent's depth, so the first element shallower than
-	 * startDepth is that END, not a nested subgroup's, which sits at
-	 * startDepth.  FIN bounds the walk where depth cannot: at startDepth == 0
-	 * nothing is shallower and FIN's next would walk off the array.
-	 */
-	e = elem;
-	while (e->depth >= startDepth && !RPRElemIsFin(e))
-		e = &pattern->elements[e->next];
+	endElem = &pattern->elements[elem->jump];
+	Assert(RPRElemIsEnd(endElem) && RPRElemIsUnbounded(endElem) &&
+		   !RPRElemIsReluctant(endElem));
+	Assert(endElem->jump == elem->next);
 
-	/* END must be unbounded greedy */
-	if (e->depth == startDepth - 1 &&
-		RPRElemIsEnd(e) && RPRElemIsUnbounded(e) &&
-		!RPRElemIsReluctant(e))
-	{
-		RPRPatternElement *endElem = e;
-
-		/* END points back to first child */
-		Assert(&pattern->elements[e->jump] == elem);
-
-		/* Set ABSORBABLE_BRANCH on all children, ABSORBABLE on END only */
-		for (e = elem; e != endElem; e = &pattern->elements[e->next])
-			e->flags |= RPR_ELEM_ABSORBABLE_BRANCH;
-		endElem->flags |= RPR_ELEM_ABSORBABLE_BRANCH | RPR_ELEM_ABSORBABLE;
-		return true;
-	}
-
-	return false;
+	/* Set ABSORBABLE_BRANCH on all children, ABSORBABLE on END only */
+	for (e = elem + 1; e < endElem; e++)
+		e->flags |= RPR_ELEM_ABSORBABLE_BRANCH;
+	endElem->flags |= RPR_ELEM_ABSORBABLE_BRANCH | RPR_ELEM_ABSORBABLE;
+	return true;
 }
 
 /*
@@ -1966,12 +1947,11 @@ computeAbsorbabilityRecursive(RPRPattern *pattern,
 			return;
 
 		/*
-		 * BEGIN: first try to treat this BEGIN's children as an unbounded
-		 * group directly (handles nested fixed-length groups like ((A{2}
-		 * B{3}){2})+).  If that fails, skip to first child and recurse as
-		 * before.
+		 * BEGIN: first try to treat this group as an unbounded group with
+		 * fixed-length children (handles nested fixed-length groups like
+		 * ((A{2} B{3}){2})+).  If that fails, recurse into the first child.
 		 */
-		if (isUnboundedStart(pattern, &pattern->elements[elem->next]))
+		if (isUnboundedStart(pattern, elem))
 		{
 			*hasAbsorbable = true;
 			elem->flags |= RPR_ELEM_ABSORBABLE_BRANCH;
