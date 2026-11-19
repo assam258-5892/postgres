@@ -703,6 +703,7 @@ static bool rpr_is_quantifier_token(const char *tok);
 				row_pattern row_pattern_alt row_pattern_seq
 				row_pattern_term row_pattern_primary
 				row_pattern_quantifier_opt
+%type <str>	row_pattern_var_name
 %type <list>	row_pattern_definition_list row_pattern_permute_list
 %type <ival>	opt_row_pattern_skip_to
 
@@ -17187,7 +17188,7 @@ row_pattern_term:
 		;
 
 row_pattern_primary:
-			ColId
+			row_pattern_var_name
 				{
 					RPRPatternNode *n = makeNode(RPRPatternNode);
 					n->nodeType = RPR_PATTERN_VAR;
@@ -17220,6 +17221,19 @@ row_pattern_primary:
 							parser_errposition(@1));
 					$$ = NULL;		/* keep compiler quiet */
 				}
+		;
+
+/*
+ * A pattern variable is any ColId.  When FIRST/LAST, JSON or TIME follows,
+ * base_yylex() turns NULLS, FORMAT or WITHOUT into a lookahead token that is
+ * not a ColId; take those back as variable names, since two variables can
+ * sit side by side here.
+ */
+row_pattern_var_name:
+			ColId									{ $$ = $1; }
+			| NULLS_LA								{ $$ = pstrdup("nulls"); }
+			| FORMAT_LA								{ $$ = pstrdup("format"); }
+			| WITHOUT_LA							{ $$ = pstrdup("without"); }
 		;
 
 row_pattern_permute_list:

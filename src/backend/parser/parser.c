@@ -92,6 +92,8 @@ raw_parser(const char *str, RawParseMode mode)
  * This filter is needed because in some cases the standard SQL grammar
  * requires more than one token lookahead.  We reduce these cases to one-token
  * lookahead by replacing tokens here, in order to keep the grammar LALR(1).
+ * A replaced token is no longer a ColId, so one made from a non-reserved
+ * keyword must also be listed in row_pattern_var_name in gram.y.
  *
  * Using a filter is simpler than trying to recognize multiword tokens
  * directly in scan.l, because we'd have to allow for comments between the

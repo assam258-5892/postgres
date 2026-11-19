@@ -2526,7 +2526,11 @@ A pattern variable is printed by quote_pattern_variable() (ruleutils.c),
 which is quote_identifier() plus one extra case: the name permute is quoted
 even though PERMUTE is an unreserved keyword.  A bare permute followed by
 '(' inside a PATTERN would be re-read as the PERMUTE syntax the parser
-rejects, so the deparsed text would no longer re-parse.  The DEFINE clause
+rejects, so the deparsed text would no longer re-parse.  The lookahead
+tokens NULLS_LA, FORMAT_LA and WITHOUT_LA need no quoting: the grammar takes
+them back as the variables nulls, format and without, so nulls first
+re-parses as written, as do format "json" and without "time", where the
+column-name keywords json and time get their usual quotes.  The DEFINE clause
 has no such hazard, because a name there is always followed by AS;
 get_rule_define() therefore uses plain quote_identifier(), and one variable
 can legitimately print bare in DEFINE and quoted in PATTERN.

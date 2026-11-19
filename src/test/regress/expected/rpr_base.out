@@ -3337,7 +3337,95 @@ WINDOW w AS (
          ->  Seq Scan on rpr_permute
 (6 rows)
 
-DROP VIEW rpr_permute_v, rpr_permute_v2;
+-- nulls, format and without are variables even before first, json and time
+SELECT id, val, COUNT(*) OVER w AS cnt
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (nulls first | format json | without time)
+    DEFINE nulls AS val > 5, first AS val > 0, format AS val > 0,
+           json AS val > 9, without AS val > 9, time AS val > 0
+);
+ id | val | cnt 
+----+-----+-----
+  1 |  10 |   0
+(1 row)
+
+-- Deparse leaves nulls, format and without bare, and the output re-parses
+CREATE VIEW rpr_la_v AS
+  SELECT COUNT(*) OVER w AS cnt FROM rpr_permute
+  WINDOW w AS (
+      ORDER BY id
+      ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+      PATTERN (nulls first | nulls last | format json | without time)
+      DEFINE nulls AS val > 5, first AS val > 0, last AS val > 9,
+             format AS val > 0, json AS val > 9, without AS val > 9,
+             time AS val > 0
+  );
+SELECT pg_get_viewdef('rpr_la_v'::regclass);
+                               pg_get_viewdef                                
+-----------------------------------------------------------------------------
+  SELECT count(*) OVER w AS cnt                                             +
+    FROM rpr_permute                                                        +
+   WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING+
+   AFTER MATCH SKIP PAST LAST ROW                                           +
+   INITIAL                                                                  +
+   PATTERN (nulls first | nulls last | format "json" | without "time")      +
+   DEFINE                                                                   +
+   nulls AS (val > 5),                                                      +
+   first AS (val > 0),                                                      +
+   last AS (val > 9),                                                       +
+   format AS (val > 0),                                                     +
+   "json" AS (val > 9),                                                     +
+   without AS (val > 9),                                                    +
+   "time" AS (val > 0));
+(1 row)
+
+SELECT 'CREATE VIEW rpr_la_rt AS '
+       || pg_get_viewdef('rpr_la_v'::regclass, true) \gexec
+CREATE VIEW rpr_la_rt AS  SELECT count(*) OVER w AS cnt
+   FROM rpr_permute
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  AFTER MATCH SKIP PAST LAST ROW
+  INITIAL
+  PATTERN (nulls first | nulls last | format "json" | without "time")
+  DEFINE
+  nulls AS val > 5,
+  first AS val > 0,
+  last AS val > 9,
+  format AS val > 0,
+  "json" AS val > 9,
+  without AS val > 9,
+  "time" AS val > 0);
+SELECT pg_get_viewdef('rpr_la_v'::regclass, true)
+       = pg_get_viewdef('rpr_la_rt'::regclass, true) AS round_trips;
+ round_trips 
+-------------
+ t
+(1 row)
+
+-- EXPLAIN prints them the same way
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (nulls first | nulls last)
+    DEFINE nulls AS val > 5, first AS val > 0, last AS val > 9
+);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ WindowAgg
+   Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+   Pattern: (nulls first | nulls last)
+   ->  Sort
+         Sort Key: id
+         ->  Seq Scan on rpr_permute
+(6 rows)
+
+DROP VIEW rpr_permute_v, rpr_permute_v2, rpr_la_v, rpr_la_rt;
 DROP TABLE rpr_permute;
 -- ============================================================
 -- Serialization/Deserialization Tests
