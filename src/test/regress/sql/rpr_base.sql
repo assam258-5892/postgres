@@ -2265,7 +2265,47 @@ WINDOW w AS (
     DEFINE PERMUTE AS val > 5, A AS val > 0, B AS val > 9
 );
 
-DROP VIEW rpr_permute_v, rpr_permute_v2;
+-- nulls, format and without are variables even where the lexer makes them
+-- NULLS_LA, FORMAT_LA and WITHOUT_LA
+SELECT id, val, COUNT(*) OVER w AS cnt
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (nulls first | format json | without time)
+    DEFINE nulls AS val > 5, first AS val > 0, format AS val > 0,
+           json AS val > 9, without AS val > 9, time AS val > 0
+);
+
+-- Deparse leaves nulls, format and without bare, and the output re-parses
+CREATE VIEW rpr_la_v AS
+  SELECT COUNT(*) OVER w AS cnt FROM rpr_permute
+  WINDOW w AS (
+      ORDER BY id
+      ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+      PATTERN (nulls first | nulls last | format json | without time)
+      DEFINE nulls AS val > 5, first AS val > 0, last AS val > 9,
+             format AS val > 0, json AS val > 9, without AS val > 9,
+             time AS val > 0
+  );
+SELECT pg_get_viewdef('rpr_la_v'::regclass);
+SELECT 'CREATE VIEW rpr_la_rt AS '
+       || pg_get_viewdef('rpr_la_v'::regclass, true) \gexec
+SELECT pg_get_viewdef('rpr_la_v'::regclass, true)
+       = pg_get_viewdef('rpr_la_rt'::regclass, true) AS round_trips;
+
+-- EXPLAIN prints them the same way
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) OVER w
+FROM rpr_permute
+WINDOW w AS (
+    ORDER BY id
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (nulls first | nulls last)
+    DEFINE nulls AS val > 5, first AS val > 0, last AS val > 9
+);
+
+DROP VIEW rpr_permute_v, rpr_permute_v2, rpr_la_v, rpr_la_rt;
 DROP TABLE rpr_permute;
 
 -- ============================================================
