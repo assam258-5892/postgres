@@ -86,11 +86,12 @@ WINDOW w AS (ORDER BY id
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val > PREV(val))
    Nav Mark Lookback: 1
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_integ
-(7 rows)
+(8 rows)
 
 -- ============================================================
 -- A2. Run condition pushdown bypass
@@ -147,11 +148,12 @@ SELECT * FROM (
    ->  WindowAgg
          Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: rpr_integ.id
                ->  Seq Scan on rpr_integ
-(9 rows)
+(10 rows)
 
 -- Verify that the RPR query still returns every row whose match count is
 -- greater than zero, confirming the filter is evaluated above the
@@ -220,11 +222,12 @@ FROM rpr_integ;
    ->  WindowAgg
          Window: w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (val > PREV(val))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: id
                ->  Seq Scan on rpr_integ
-(9 rows)
+(10 rows)
 
 -- Verify that the two windows return independent counts per row,
 -- confirming they were not merged into a single WindowAgg.
@@ -300,12 +303,13 @@ EXPLAIN (COSTS OFF) SELECT * FROM rpr_ev_opt_mixed;
    ->  WindowAgg
          Window: w_rpr AS (ORDER BY s.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+#
+         Define: a AS (s.v > 1)
          ->  WindowAgg
                Window: w_normal AS (ORDER BY s.v ROWS UNBOUNDED PRECEDING)
                ->  Sort
                      Sort Key: s.v
                      ->  Function Scan on generate_series s
-(9 rows)
+(10 rows)
 
 -- ============================================================
 -- A4. Window dedup prevention (same PATTERN, different DEFINE or SKIP)
@@ -339,11 +343,12 @@ FROM rpr_integ;
  WindowAgg
    Window: w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val > PREV(val))
    Nav Mark Lookback: 1
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_integ
-(7 rows)
+(8 rows)
 
 -- Two inline RPR windows with the same PATTERN but opposite DEFINE
 -- conditions must remain as separate WindowAgg nodes.
@@ -363,15 +368,17 @@ FROM rpr_integ;
  WindowAgg
    Window: w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val < PREV(val))
    Nav Mark Lookback: 1
    ->  WindowAgg
          Window: w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (val > PREV(val))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: id
                ->  Seq Scan on rpr_integ
-(11 rows)
+(13 rows)
 
 -- Verify that the two windows return different counts per row,
 -- confirming the DEFINE conditions were not collapsed by dedup.
@@ -422,15 +429,17 @@ FROM rpr_integ;
  WindowAgg
    Window: w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val > PREV(val))
    Nav Mark Lookback: 1
    ->  WindowAgg
          Window: w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (val > PREV(val))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: id
                ->  Seq Scan on rpr_integ
-(11 rows)
+(13 rows)
 
 -- Verify the two windows disagree on the rows that a skipped-past match
 -- covered, confirming the skip modes were not collapsed by dedup.
@@ -511,10 +520,11 @@ SELECT count(*), sum(cnt) FROM (
          Output: count(*) OVER w
          Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+#
+         Define: a AS (rpr_integ.val > PREV(rpr_integ.val))
          Nav Mark Lookback: 1
          ->  Seq Scan on public.rpr_integ
                Output: rpr_integ.val
-(9 rows)
+(10 rows)
 
 SELECT count(*), sum(cnt) FROM (
     SELECT count(*) OVER w as cnt FROM rpr_integ
@@ -547,8 +557,9 @@ SELECT count(*), sum(c) FROM (
    ->  WindowAgg
          Window: w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+#
+         Define: a AS true
          ->  Seq Scan on rpr_integ
-(5 rows)
+(6 rows)
 
 SELECT count(*), sum(c) FROM (
     SELECT count(*) OVER w AS c FROM rpr_integ
@@ -587,13 +598,14 @@ SELECT count(*) FROM (
                Output: NULL::integer, count(*) OVER w, rpr_integ.id
                Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                Pattern: a b+
+               Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
                Nav Mark Lookback: 1
                ->  Sort
                      Output: rpr_integ.id, rpr_integ.val
                      Sort Key: rpr_integ.id
                      ->  Seq Scan on public.rpr_integ
                            Output: rpr_integ.id, rpr_integ.val
-(15 rows)
+(16 rows)
 
 SELECT count(*) FROM (
     SELECT val, count(*) OVER w AS c FROM rpr_integ
@@ -626,13 +638,14 @@ WINDOW w AS (ORDER BY id
    Output: id, count(*) OVER w
    Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
    Nav Mark Lookback: 1
    ->  Sort
          Output: id, val
          Sort Key: rpr_integ.id
          ->  Seq Scan on public.rpr_integ
                Output: id, val
-(10 rows)
+(11 rows)
 
 SELECT id, count(*) OVER w AS cnt
 FROM rpr_integ
@@ -674,6 +687,7 @@ SELECT id, c FROM (
    ->  WindowAgg
          Window: w AS (ORDER BY t.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (u.uval > PREV(u.uval))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: t.id
@@ -682,7 +696,7 @@ SELECT id, c FROM (
                      ->  Seq Scan on rpr_integ t
                      ->  Hash
                            ->  Seq Scan on rpr_integ_u u
-(12 rows)
+(13 rows)
 
 SELECT id, c FROM (
     SELECT t.id AS id, u.uval AS uv, count(*) OVER w AS c
@@ -717,12 +731,13 @@ WINDOW w AS (ORDER BY t.id
     ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
     PATTERN (A B+)
     DEFINE B AS uv1 > PREV(uv1));
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
  WindowAgg
    Output: t.id, count(*) OVER w
    Window: w AS (ORDER BY t.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS ((COALESCE(rpr_integ_u.uval, 0)) > PREV((COALESCE(rpr_integ_u.uval, 0))))
    Nav Mark Lookback: 1
    ->  Sort
          Output: t.id, (COALESCE(rpr_integ_u.uval, 0))
@@ -737,7 +752,7 @@ WINDOW w AS (ORDER BY t.id
                      Output: rpr_integ_u.id, (COALESCE(rpr_integ_u.uval, 0))
                      ->  Seq Scan on public.rpr_integ_u
                            Output: rpr_integ_u.id, COALESCE(rpr_integ_u.uval, 0)
-(18 rows)
+(19 rows)
 
 SELECT t.id, count(*) OVER w AS c
 FROM rpr_integ t
@@ -995,13 +1010,14 @@ SELECT c2 FROM (
          Output: count(*) OVER w2, NULL::bigint, NULL::integer, NULL::integer, rpr_integ_two.id
          Window: w2 AS (ORDER BY rpr_integ_two.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (rpr_integ_two.v1 > PREV(rpr_integ_two.v1))
          Nav Mark Lookback: 1
          ->  Sort
                Output: rpr_integ_two.id, rpr_integ_two.v1
                Sort Key: rpr_integ_two.id
                ->  Seq Scan on public.rpr_integ_two
                      Output: rpr_integ_two.id, rpr_integ_two.v1
-(12 rows)
+(13 rows)
 
 -- A window function entry can be kept for a reason other than the upper query
 -- reading it -- here the subquery's own ORDER BY -- and then its window stays
@@ -1030,6 +1046,7 @@ SELECT c FROM (
                Output: (count(*) OVER w1), count(*) OVER w2, NULL::integer, rpr_integ_two.id
                Window: w2 AS (ORDER BY rpr_integ_two.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                Pattern: a b+
+               Define: b AS (rpr_integ_two.v1 > PREV(rpr_integ_two.v1))
                Nav Mark Lookback: 1
                ->  WindowAgg
                      Output: rpr_integ_two.id, rpr_integ_two.v1, count(*) OVER w1
@@ -1039,7 +1056,7 @@ SELECT c FROM (
                            Sort Key: rpr_integ_two.id
                            ->  Seq Scan on public.rpr_integ_two
                                  Output: rpr_integ_two.id, rpr_integ_two.v1
-(18 rows)
+(19 rows)
 
 DROP TABLE rpr_integ_two;
 -- Whole-row Var in DEFINE is not allowed
@@ -1079,12 +1096,13 @@ SELECT sum(c) FROM (
          Output: NULL::integer, count(*) OVER w, r.id
          Window: w AS (ORDER BY r.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (r.* IS NOT NULL)
          ->  Sort
                Output: r.id, r.*
                Sort Key: r.id
                ->  Seq Scan on public.rpr_integ r
                      Output: r.id, r.*
-(11 rows)
+(12 rows)
 
 SELECT sum(c) FROM (
     SELECT val, count(*) OVER w AS c
@@ -1128,6 +1146,7 @@ SELECT count(*) FROM (
                Output: rpr_integ.id, NULL::integer, (ANY (count(*) OVER w = (hashed SubPlan any_1).col1))
                Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                Pattern: a b+
+               Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
                Nav Mark Lookback: 1
                ->  Sort
                      Output: rpr_integ.id, rpr_integ.val
@@ -1137,7 +1156,7 @@ SELECT count(*) FROM (
                SubPlan any_1
                  ->  Result
                        Output: 2
-(18 rows)
+(19 rows)
 
 SELECT count(*) FROM (
     SELECT id, val, (count(*) OVER w) IN (SELECT 2) AS m
@@ -1295,11 +1314,12 @@ WHERE cnt > 0;
    ->  WindowAgg
          Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: rpr_integ.id
                ->  Seq Scan on rpr_integ
-(9 rows)
+(10 rows)
 
 -- ============================================================
 -- A9. DEFINE expression non-propagation
@@ -1333,13 +1353,14 @@ WINDOW
          Output: id, val, count(*) OVER w_rpr
          Window: w_rpr AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
          Nav Mark Lookback: 1
          ->  Sort
                Output: id, val
                Sort Key: rpr_integ.id
                ->  Seq Scan on public.rpr_integ
                      Output: id, val
-(13 rows)
+(14 rows)
 
 SELECT
     count(*) OVER w_rpr AS rpr_cnt,
@@ -1389,11 +1410,12 @@ LIMIT 5;
    ->  WindowAgg
          Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a b+
+         Define: b AS (val > PREV(val))
          Nav Mark Lookback: 1
          ->  Sort
                Sort Key: id
                ->  Seq Scan on rpr_integ
-(8 rows)
+(9 rows)
 
 -- Reference: un-LIMITed result against which the LIMIT 5 result is
 -- compared.
@@ -1484,11 +1506,12 @@ SELECT id, val, cnt FROM rpr_result ORDER BY id;
  WindowAgg
    Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
    Nav Mark Lookback: 1
    ->  Sort
          Sort Key: rpr_integ.id
          ->  Seq Scan on rpr_integ
-(7 rows)
+(8 rows)
 
 -- Result must match the baseline row-for-row.
 WITH rpr_result AS (
@@ -1539,6 +1562,7 @@ ORDER BY r1.id;
      ->  WindowAgg
            Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
            Pattern: a b+
+           Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
            Nav Mark Lookback: 1
            ->  Sort
                  Sort Key: rpr_integ.id
@@ -1551,7 +1575,7 @@ ORDER BY r1.id;
          Sort Key: r1.id, r1.cnt
          ->  CTE Scan on rpr_result r1
                Filter: (cnt > 0)
-(18 rows)
+(19 rows)
 
 -- Result: both references see the same match counts, so the self-join
 -- preserves all matched rows from the baseline.
@@ -1634,6 +1658,7 @@ ORDER BY r.id;
          ->  WindowAgg
                Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                Pattern: a b+
+               Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
                Nav Mark Lookback: 1
                ->  Sort
                      Sort Key: rpr_integ.id
@@ -1641,7 +1666,7 @@ ORDER BY r.id;
    ->  Sort
          Sort Key: j.id
          ->  Seq Scan on rpr_integ2 j
-(14 rows)
+(15 rows)
 
 -- Result: matched RPR rows align with dimension rows on id, showing
 -- the join correctly pairs per-row match counts with their labels.
@@ -1700,6 +1725,7 @@ ORDER BY source, id;
                ->  WindowAgg
                      Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                      Pattern: a b+
+                     Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
                      Nav Mark Lookback: 1
                      ->  Sort
                            Sort Key: rpr_integ.id
@@ -1709,7 +1735,7 @@ ORDER BY source, id;
                ->  Sort
                      Sort Key: rpr_integ_1.id
                      ->  Seq Scan on rpr_integ rpr_integ_1
-(17 rows)
+(18 rows)
 
 -- Result: rows from both branches are present in the unioned output.
 -- The RPR branch emits only matched rows (cnt > 0), while the
@@ -1774,11 +1800,12 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_prev(1);
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val > PREV(val, '1'::bigint))
    Nav Mark Lookback: 1
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_integ
-(7 rows)
+(8 rows)
 
 EXECUTE rpr_prev(1);
  id | val | cnt 
@@ -1805,11 +1832,12 @@ EXPLAIN (COSTS OFF) EXECUTE rpr_prev(1);
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val > PREV(val, ($1)::bigint))
    Nav Mark Lookback: runtime
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_integ
-(7 rows)
+(8 rows)
 
 EXECUTE rpr_prev(1);
  id | val | cnt 
@@ -1861,13 +1889,14 @@ ORDER BY id;
  WindowAgg
    Window: w AS (ORDER BY rpr_part.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (rpr_part.val > PREV(rpr_part.val))
    Nav Mark Lookback: 1
    ->  Sort
          Sort Key: rpr_part.id
          ->  Append
                ->  Seq Scan on rpr_part_1
                ->  Seq Scan on rpr_part_2
-(9 rows)
+(10 rows)
 
 -- Baseline: the same query against the non-partitioned rpr_integ
 -- produces the per-row reference output.
@@ -1955,12 +1984,13 @@ ORDER BY o.id, r.id;
                ->  WindowAgg
                      Window: w AS (ORDER BY rpr_integ.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                      Pattern: a b+
+                     Define: b AS (rpr_integ.val > PREV(rpr_integ.val))
                      Nav Mark Lookback: 1
                      ->  Sort
                            Sort Key: rpr_integ.id
                            ->  Seq Scan on rpr_integ
                                  Filter: (id <= o.id)
-(15 rows)
+(16 rows)
 
 -- Result: for each of the two outer ids (5 and 10), the LATERAL
 -- subquery produces RPR match counts over the restricted input.
@@ -2019,12 +2049,13 @@ LATERAL (
          Output: NULL::integer, count(*) OVER w, rpr_lat_i.x
          Window: w AS (ORDER BY rpr_lat_i.x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+#
+         Define: a AS (rpr_lat_i.y > 0)
          ->  Sort
                Output: rpr_lat_i.x, rpr_lat_i.y
                Sort Key: rpr_lat_i.x
                ->  Seq Scan on public.rpr_lat_i
                      Output: rpr_lat_i.x, rpr_lat_i.y
-(13 rows)
+(14 rows)
 
 SELECT o.a, s.c
 FROM rpr_lat_o o,
@@ -2065,12 +2096,13 @@ LATERAL (
          Output: NULL::integer, count(*) OVER w, rpr_lat_i.x
          Window: w AS (ORDER BY rpr_lat_i.x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: a+#
+         Define: a AS (rpr_lat_i.y > 0)
          ->  Sort
                Output: rpr_lat_i.x, rpr_lat_i.y
                Sort Key: rpr_lat_i.x
                ->  Seq Scan on public.rpr_lat_i
                      Output: rpr_lat_i.x, rpr_lat_i.y
-(13 rows)
+(14 rows)
 
 SELECT o.a, s.c
 FROM rpr_lat_o o,
@@ -2150,12 +2182,13 @@ WINDOW w AS (ORDER BY id, val
  WindowAgg
    Window: w AS (ORDER BY id, val ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: b AS (val > PREV(val))
    Nav Mark Lookback: 1
    ->  Incremental Sort
          Sort Key: id, val
          Presorted Key: id
          ->  Index Scan using rpr_integ_id_idx on rpr_integ
-(8 rows)
+(9 rows)
 
 -- Result: RPR over the incrementally sorted stream produces match
 -- counts per row.
@@ -2259,12 +2292,13 @@ ORDER BY o.id;
                  ->  WindowAgg
                        Window: w AS (ORDER BY i.id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                        Pattern: a b+
+                       Define: b AS (i.val > PREV(i.val))
                        Nav Mark Lookback: 1
                        ->  Sort
                              Sort Key: i.id
                              ->  Seq Scan on rpr_integ i
                                    Filter: (id <= o.id)
-(13 rows)
+(14 rows)
 
 -- Result: each outer row receives the first_cnt from its own
 -- correlated RPR subquery.
@@ -2322,6 +2356,7 @@ SELECT cnt FROM (
          Output: rpr_over1.a, NULL::integer, count(*) OVER w
          Window: w AS (ORDER BY rpr_over1.a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
          Pattern: x+#
+         Define: x AS (rpr_over1.a > 0)
          ->  Sort
                Output: rpr_over1.a
                Sort Key: rpr_over1.a
@@ -2331,7 +2366,7 @@ SELECT cnt FROM (
                            Output: rpr_over1.a
                      ->  Materialize
                            ->  Seq Scan on public.rpr_over2
-(15 rows)
+(16 rows)
 
 DROP TABLE rpr_over1, rpr_over2;
 -- A DEFINE clause can come to hold a Var of an outer query level, although
@@ -2680,11 +2715,12 @@ GROUP BY g.n ORDER BY g.n;
                ->  WindowAgg
                      Window: w AS (ORDER BY rpr_srf.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                      Pattern: a+#
+                     Define: a AS (rpr_srf.v > PREV(rpr_srf.v, ("*VALUES*".column1)::bigint))
                      Nav Mark Lookback: runtime
                      ->  Sort
                            Sort Key: rpr_srf.v
                            ->  Seq Scan on rpr_srf
-(13 rows)
+(14 rows)
 
 -- Each outer row uses its own offset (counts 9, 8, 7), not one frozen value.
 SELECT g.n, max(s) AS m FROM (VALUES (1), (2), (3)) g(n), LATERAL rpr_srf_prev(g.n) s
@@ -2722,11 +2758,12 @@ GROUP BY g.n ORDER BY g.n;
                ->  WindowAgg
                      Window: w AS (ORDER BY rpr_srf.v ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                      Pattern: b a+
+                     Define: a AS (rpr_srf.v > FIRST(rpr_srf.v, ("*VALUES*".column1)::bigint))
                      Nav Mark Lookahead: runtime
                      ->  Sort
                            Sort Key: rpr_srf.v
                            ->  Seq Scan on rpr_srf
-(13 rows)
+(14 rows)
 
 -- Result: k=0 matches all ten rows and k>=1 makes the first A fail,
 -- so the forward offset is not frozen at ExecInit.

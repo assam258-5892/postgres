@@ -736,6 +736,7 @@ WINDOW w AS (
  WindowAgg
    Window: w AS (PARTITION BY company ORDER BY tdate ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: (up~ down~)+#
+   Define: up AS (price &gt; PREV(price)), down AS (price &lt; PREV(price))
    Nav Mark Lookback: 1
    -&gt;  Sort
          Sort Key: company, tdate
@@ -745,7 +746,9 @@ WINDOW w AS (
     Here the tildes mark <literal>up</literal> and
     <literal>down</literal> as lying within the absorbable region, while
     the trailing number sign marks the repeated group as the comparison
-    point.
+    point.  The <literal>Define</literal> line shows the condition of each
+    pattern variable as the window node evaluates it, after planning has
+    simplified it.
    </para>
 
    <para>

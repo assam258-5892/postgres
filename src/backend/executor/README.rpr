@@ -2461,8 +2461,9 @@ compiled element array instead, so it shows the pattern after the Phase 1
 rewrites of V-3: PATTERN (A A) is stored as written but explains as "a{2}".
 EXPLAIN also parenthesizes every group and every alternation for
 self-consistency, so a top-level A | B explains as "(a | b)" where
-pg_get_viewdef() prints it bare.  Only the pattern is shown; the DEFINE
-clause and the skip mode do not appear in EXPLAIN output.
+pg_get_viewdef() prints it bare.  The DEFINE conditions are deparsed from
+the plan as well, after planning has folded them, the way a Filter is
+shown.  The skip mode does not appear in EXPLAIN output.
 
 XIII-2. Reading the Compiled Array
 

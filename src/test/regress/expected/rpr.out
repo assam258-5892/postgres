@@ -3187,11 +3187,12 @@ EXPLAIN (COSTS OFF) EXECUTE test_compound_illegal(99, 1);
  WindowAgg
    Window: w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
    Pattern: a b+
+   Define: a AS true, b AS (PREV(FIRST(val, $1), $2) IS NULL)
    Nav Mark Lookahead: runtime
    ->  Sort
          Sort Key: id
          ->  Seq Scan on rpr_nav_cycle
-(7 rows)
+(8 rows)
 
 EXECUTE test_compound_illegal(99, 1);
  id | val | count 

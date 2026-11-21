@@ -3213,6 +3213,28 @@ show_window_def(WindowAggState *planstate, List *ancestors, ExplainState *es)
 
 		pfree(patternStr);
 
+		/* Show the condition of each pattern variable DEFINE names */
+		if (wagg->defineClause != NIL)
+		{
+			List	   *context;
+			bool		useprefix;
+			List	   *result = NIL;
+
+			context = set_deparse_context_plan(es->deparse_cxt,
+											   (Plan *) wagg,
+											   ancestors);
+			useprefix = (es->rtable_size > 1 || es->verbose);
+			foreach_node(TargetEntry, te, wagg->defineClause)
+				result = lappend(result,
+								 psprintf("%s AS %s",
+										  quote_identifier(te->resname),
+										  deparse_expression((Node *) te->expr,
+															 context,
+															 useprefix,
+															 false)));
+			ExplainPropertyList("Define", result, es);
+		}
+
 		/*
 		 * Navigation offsets for tuplestore trim are resolved at executor
 		 * init, which runs even for plain EXPLAIN, so read the resolved value
