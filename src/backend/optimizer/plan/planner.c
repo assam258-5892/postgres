@@ -6557,20 +6557,6 @@ add_define_inputs_walker(Node *node, PathTarget *input_target)
 	if (node == NULL)
 		return false;
 
-	/*
-	 * XXX this list_member() match can miss a DEFINE expression that is
-	 * semantically the same as one already in input_target, producing a
-	 * redundant column below the WindowAgg.  Seen with a join-alias
-	 * expression exposed through a pulled-up subquery: flattening it once for
-	 * the target list and once for this DEFINE clause each wraps a fresh,
-	 * independently-numbered PlaceHolderVar around an otherwise identical
-	 * copy (make_placeholder_expr() never checks for an existing equivalent
-	 * one), and PlaceHolderVar's equal() compares that number, not the
-	 * wrapped expression, so the two never match.  Wasteful, not known to be
-	 * incorrect.  Not specific to DEFINE -- make_group_input_target() can
-	 * build the same kind of duplicate for GROUP BY/HAVING with no RPR
-	 * involved.
-	 */
 	if (list_member(input_target->exprs, node))
 		return false;
 
