@@ -2131,60 +2131,15 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTER
   2 |   0
 (2 rows)
 
--- Pulling up the VALUES substitutes 10 for v, which is not what the column
--- stood for under a navigation: the argument reads the row the navigation
--- lands on, not this one.  The replacement is wrapped in a PlaceHolderVar
--- rather than folded through.
-WITH t(id, v) AS (VALUES (1, 10))
-SELECT id, count(*) OVER w AS cnt
-FROM t
-WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
- id | cnt 
-----+-----
-  1 |   0
-(1 row)
-
--- That wrapping is what keeps this one from raising: the divisor is constant
--- but the dividend is not folded through, so the division stands until
--- execution, where PREV has no row to navigate to and never reaches it.
+-- Pulling up the VALUES puts 10 in place of v, and the division is folded at
+-- plan time although PREV has no row to land on.
 WITH t(id, v) AS (VALUES (1, 10))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
- id | cnt 
-----+-----
-  1 |   0
-(1 row)
-
--- A pulled-up subquery and a function RTE that folded to a constant reach a
--- navigation argument the same way, so both are wrapped as well.
-SELECT id, count(*) OVER w AS cnt
-FROM (SELECT 1 AS id, 10 AS v) t
-WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
- id | cnt 
-----+-----
-  1 |   0
-(1 row)
-
-SELECT count(*) OVER w AS cnt
-FROM abs(-10) AS v
-WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
- cnt 
------
-   0
-(1 row)
-
--- Only the argument is protected.  One level outside the navigation the same
--- column is replaced and folded as it is anywhere else, and the division
--- raises at plan time -- as it does for the same WHERE clause over the same
--- one-row VALUES, with no pattern in sight.
-WITH t(id, v) AS (VALUES (1, 10))
-SELECT id, count(*) OVER w AS cnt
-FROM t
-WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS v / 0 > 0);
 ERROR:  division by zero
--- A replacement that still depends on the row is left unwrapped, because it
--- is what the column meant at whichever row the navigation lands on.
+-- A pulled-up expression that depends on the row is read at the row the
+-- navigation lands on.
 SELECT id, count(*) OVER w AS cnt
 FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -2197,18 +2152,6 @@ WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
   4 |   0
   5 |   0
 (5 rows)
-
--- Nesting: the inner navigation's argument is below the outer one's, so the
--- column there is wrapped too.
-WITH t(id, v) AS (VALUES (1, 10))
-SELECT id, count(*) OVER w AS cnt
-FROM t
-WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-             PATTERN (A) DEFINE A AS PREV(LAST(v / 0, 1), 2) > 0);
- id | cnt 
-----+-----
-  1 |   0
-(1 row)
 
 -- eval_const_expressions() must perform a few rewrites on every expression it
 -- is handed -- a CollateExpr becomes a RelabelType, named arguments become
@@ -10970,8 +10913,8 @@ WINDOW w AS (
 (4 rows)
 
 DROP TABLE rpr_join1, rpr_join2;
--- A mismatched-type USING merge column used to let the other side's
--- pulled-up constant fold into a navigation argument at plan time.
+-- A merged USING column built over a pulled-up constant is folded into the
+-- navigation argument at plan time as well.
 CREATE TABLE rpr_join4 (k bigint);
 INSERT INTO rpr_join4 VALUES (10);
 SELECT count(*) OVER w AS cnt
@@ -10981,25 +10924,7 @@ WINDOW w AS (
     PATTERN (A)
     DEFINE A AS PREV(k / 0) > 0
 );
- cnt 
------
-   0
-(1 row)
-
--- Same, but RIGHT JOIN with the constant subquery on its preserved
--- (right) side.
-SELECT count(*) OVER w AS cnt
-FROM rpr_join4 RIGHT JOIN (SELECT 10 AS k) a USING (k)
-WINDOW w AS (
-    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-    PATTERN (A)
-    DEFINE A AS PREV(k / 0) > 0
-);
- cnt 
------
-   0
-(1 row)
-
+ERROR:  division by zero
 DROP TABLE rpr_join4;
 -- Same shape with real per-row data, confirming navigation still sees
 -- each row's own value.
