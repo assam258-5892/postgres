@@ -861,6 +861,15 @@ subquery_planner(PlannerGlobal *glob, Query *parse, char *plan_name,
 	transform_MERGE_to_join(parse);
 
 	/*
+	 * Fold the row pattern navigation arguments before the steps below can
+	 * replace their columns with constants; nothing below a navigation
+	 * argument is evaluated after this.
+	 */
+	foreach_node(WindowClause, wc, parse->windowClause)
+		wc->defineClause = (List *)
+		eval_const_navigation_arguments(root, (Node *) wc->defineClause);
+
+	/*
 	 * Scan the rangetable for relation RTEs and retrieve the necessary
 	 * catalog information for each relation.  Using this information, clear
 	 * the inh flag for any relation that has no children, collect not-null

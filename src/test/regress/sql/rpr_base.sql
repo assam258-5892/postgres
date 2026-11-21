@@ -1488,13 +1488,535 @@ SELECT id, count(*) OVER w AS cnt
 FROM rpr_nav t
 WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val is null) is null);
 
+-- Skipping the argument is data-dependent: on a single row PREV misses and a
+-- division by zero in it never runs, while LAST on the same row raises it at
+-- execution; over the whole table NEXT reaches a row for all but the last.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val / 0) > 0);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS LAST(val / 0) > 0);
+
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS NEXT(val / 0) > 0);
+
+-- A constant subexpression of the argument is folded away, so the pattern
+-- does not recompute it per row.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(val + 2 * 3) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(val + 2 * 3) > 0);
+
+-- An argument that folds to a constant still navigates:
+-- PREV(COALESCE(1, val) + 1) is null on the first row, like PREV(val).
+EXPLAIN (COSTS OFF)
+SELECT id,
+       count(*) OVER w1 AS folded,
+       count(*) OVER w2 AS plain
+FROM rpr_nav
+WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A+) DEFINE A AS PREV(COALESCE(1, val) + 1) IS NULL),
+       w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A+) DEFINE A AS PREV(val) IS NULL)
+ORDER BY id;
+SELECT id,
+       count(*) OVER w1 AS folded,
+       count(*) OVER w2 AS plain
+FROM rpr_nav
+WINDOW w1 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A+) DEFINE A AS PREV(COALESCE(1, val) + 1) IS NULL),
+       w2 AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+              PATTERN (A+) DEFINE A AS PREV(val) IS NULL)
+ORDER BY id;
+
+-- COALESCE keeps the column after the constant, so the division is not
+-- evaluated.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(COALESCE(1, val) / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(COALESCE(1, val) / 0) > 0);
+
+-- Nor do CASE, AND, OR, a strict function given a null, a field of a row or
+-- a null test on a row drop the column.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(CASE WHEN true THEN 1 ELSE val END / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(CASE WHEN true THEN 1 ELSE val END / 0) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(CASE WHEN false THEN val ELSE 1 END / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(CASE WHEN false THEN val ELSE 1 END / 0) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(1 / (val > 0 AND false)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(1 / (val > 0 AND false)::int) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(1 / (NOT (val > 0 OR true))::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(1 / (NOT (val > 0 OR true))::int) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(COALESCE(val + NULL, 1) / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(COALESCE(val + NULL, 1) / 0) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV((ROW(1, val)::rpr_nav).id / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV((ROW(1, val)::rpr_nav).id / 0) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(1 / (ROW(val, NULL) IS NOT NULL)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(1 / (ROW(val, NULL) IS NOT NULL)::int) > 0);
+
+-- Folding a constant subexpression can raise where the whole argument would
+-- not have: unlike val / 0 above, 1 / 0 does not depend on the row, so it is
+-- reached at plan time even on the row PREV misses on.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(val + 1 / 0) > 0);
+
+-- Hidden in a SQL function that drops its argument, 1 / 0 is not folded.
+CREATE FUNCTION rpr_nav_drop(x int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT 1 / 0';
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(rpr_nav_drop(val)) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(rpr_nav_drop(val)) > 0);
+
+-- Outside a navigation it is inlined and folded, raising at plan time.
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS rpr_nav_drop(val) > 0);
+DROP FUNCTION rpr_nav_drop(int);
+
+-- A SQL function that uses its argument is inlined, and 1 / 0 in its body
+-- is folded, raising at plan time.
+CREATE FUNCTION rpr_nav_err(x int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT x + 1 / 0';
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav t
+WHERE id = 1
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(rpr_nav_err(val)) > 0);
+DROP FUNCTION rpr_nav_err(int);
+
+-- The constant in the body of such a function folds before a column is
+-- replaced, so a replaced column leaves 10 + 6 unevaluated.
+CREATE FUNCTION rpr_nav_inc(x int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT x + 2 * 3';
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_inc(val)) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_inc(val)) > 0);
+EXPLAIN (COSTS OFF)
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(rpr_nav_inc(v)) > 0);
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(rpr_nav_inc(v)) > 0);
+DROP FUNCTION rpr_nav_inc(int);
+
+-- A parameter is a constant to the function body, so a constant argument
+-- reaching the body's navigation argument is folded, raising at plan time.
+CREATE FUNCTION rpr_nav_param(x int) RETURNS SETOF bigint LANGUAGE sql STABLE AS $$
+  SELECT count(*) OVER w FROM rpr_nav WHERE id = 1
+  WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A) DEFINE A AS PREV(val + x / 0) > 0) $$;
+SELECT f FROM rpr_nav_param(10) f;
+DROP FUNCTION rpr_nav_param(int);
+
+-- A custom plan folds a bound parameter the same way; a generic plan keeps it.
+PREPARE rpr_nav_prep(int) AS
+  SELECT count(*) OVER w FROM rpr_nav WHERE id = 1
+  WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A) DEFINE A AS PREV(val + $1 / 0) > 0);
+SET plan_cache_mode = force_custom_plan;
+EXECUTE rpr_nav_prep(10);
+SET plan_cache_mode = force_generic_plan;
+EXPLAIN (COSTS OFF) EXECUTE rpr_nav_prep(10);
+EXECUTE rpr_nav_prep(10);
+RESET plan_cache_mode;
+DEALLOCATE rpr_nav_prep;
+
+-- A domain cast in the argument ties the cached plan to the domain, so a
+-- constraint added to the domain later is checked.
+CREATE DOMAIN rpr_nav_dom AS int;
+PREPARE rpr_nav_dom_q AS
+  SELECT count(*) OVER w FROM rpr_nav
+  WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A+) DEFINE A AS PREV(val::rpr_nav_dom) > 0);
+EXPLAIN (COSTS OFF) EXECUTE rpr_nav_dom_q;
+EXECUTE rpr_nav_dom_q;
+ALTER DOMAIN rpr_nav_dom ADD CONSTRAINT rpr_nav_dom_neg CHECK (VALUE < 0);
+EXECUTE rpr_nav_dom_q;
+DEALLOCATE rpr_nav_dom_q;
+DROP DOMAIN rpr_nav_dom;
+
+-- A null test on a NOT NULL column folds to a constant, but the division
+-- over it is not evaluated either.
+CREATE TABLE rpr_nav_nn (id int, v int NOT NULL, b bool NOT NULL);
+INSERT INTO rpr_nav_nn VALUES (1, 10, true);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (v IS NULL)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (v IS NULL)::int) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (b IS UNKNOWN)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (b IS UNKNOWN)::int) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (ROW(v, id) IS NULL)::int) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_nn
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(1 / (ROW(v, id) IS NULL)::int) > 0);
+
+-- On a partitioned table, whose NOT NULL columns the outer query has already
+-- looked up, the proof is still not used before preprocessing.
+CREATE TABLE rpr_nav_nnp (id int, v int NOT NULL) PARTITION BY RANGE (id);
+CREATE TABLE rpr_nav_nnp1 PARTITION OF rpr_nav_nnp FOR VALUES FROM (1) TO (10);
+INSERT INTO rpr_nav_nnp VALUES (1, 10);
+EXPLAIN (COSTS OFF)
+SELECT s.id, s.cnt
+FROM rpr_nav_nnp o,
+     (SELECT id, count(*) OVER w AS cnt
+      FROM rpr_nav_nnp
+      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                   PATTERN (A) DEFINE A AS PREV(1 / (v IS NULL)::int) > 0)) s;
+SELECT s.id, s.cnt
+FROM rpr_nav_nnp o,
+     (SELECT id, count(*) OVER w AS cnt
+      FROM rpr_nav_nnp
+      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                   PATTERN (A) DEFINE A AS PREV(1 / (v IS NULL)::int) > 0)) s;
+EXPLAIN (COSTS OFF)
+SELECT s.id, s.cnt
+FROM rpr_nav_nnp o,
+     (SELECT id, count(*) OVER w AS cnt
+      FROM rpr_nav_nnp
+      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                   PATTERN (A) DEFINE A AS PREV(1 / (v IS NOT DISTINCT FROM NULL::int)::int) > 0)) s;
+SELECT s.id, s.cnt
+FROM rpr_nav_nnp o,
+     (SELECT id, count(*) OVER w AS cnt
+      FROM rpr_nav_nnp
+      WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+                   PATTERN (A) DEFINE A AS PREV(1 / (v IS NOT DISTINCT FROM NULL::int)::int) > 0)) s;
+DROP TABLE rpr_nav_nnp;
+
+DROP TABLE rpr_nav_nn;
+
 -- Here the null reaches the DEFINE predicate itself instead of an IS NULL
 -- An all-NULL target row would have made v IS NULL true and matched the
 -- first row, so this pins the predicate side of the same behaviour.
+EXPLAIN (COSTS OFF)
 WITH t(id, v) AS (VALUES (1, 10), (2, 20))
 SELECT id, count(*) OVER w AS cnt
 FROM t
 WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+WITH t(id, v) AS (VALUES (1, 10), (2, 20))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+
+-- The VALUES is pulled up and v becomes a constant in the argument, which
+-- is not evaluated; PREV yields NULL where there is no row to land on.
+EXPLAIN (COSTS OFF)
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v IS NULL));
+
+-- Nor is the division by that constant, so it stands until execution,
+-- where PREV has no row to land on.
+EXPLAIN (COSTS OFF)
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
+-- The same for a subquery and a function RTE that folds to a constant.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT 1 AS id, 10 AS v) t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT 1 AS id, 10 AS v) t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
+EXPLAIN (COSTS OFF)
+SELECT count(*) OVER w AS cnt
+FROM abs(-10) AS v
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+SELECT count(*) OVER w AS cnt
+FROM abs(-10) AS v
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(v / 0) > 0);
+
+-- A virtual generated column with a constant expression reaches the
+-- argument as that constant, and is not evaluated either.
+CREATE TABLE rpr_nav_gen (id int, g int GENERATED ALWAYS AS (10) VIRTUAL,
+                          h int GENERATED ALWAYS AS (COALESCE(10, id)) VIRTUAL);
+INSERT INTO rpr_nav_gen (id) VALUES (1);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+
+-- What is written folds before the column is replaced, leaving 10 / 0 + 6.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0 + 2 * 3) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0 + 2 * 3) > 0);
+
+-- The same on the nullable side of an outer join.
+EXPLAIN (COSTS OFF)
+SELECT i, count(*) OVER w AS cnt
+FROM generate_series(1, 1) i LEFT JOIN rpr_nav_gen ON id = 99
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT i, count(*) OVER w AS cnt
+FROM generate_series(1, 1) i LEFT JOIN rpr_nav_gen ON id = 99
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+
+-- The same for an expression with a Var that folds to a constant.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(h / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(h / 0) > 0);
+
+-- A merged column whose USING coerces the side carries the constant through
+-- the join alias, on either side of the outer join and through a nested join.
+CREATE TABLE rpr_nav_gen8 (g bigint);
+INSERT INTO rpr_nav_gen8 VALUES (10);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen8 RIGHT JOIN rpr_nav_gen USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_gen8 RIGHT JOIN rpr_nav_gen USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM (rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g))
+     LEFT JOIN rpr_nav_gen8 r USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM (rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g))
+     LEFT JOIN rpr_nav_gen8 r USING (g)
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g / 0) > 0);
+-- Outside the argument the merged column folds as usual.
+EXPLAIN (COSTS OFF)
+SELECT id FROM rpr_nav_gen LEFT JOIN rpr_nav_gen8 USING (g) WHERE g = 11;
+DROP TABLE rpr_nav_gen8;
+
+-- Read also outside the argument on the nullable side, the column is
+-- computed once at the scan.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT i, g, count(*) OVER w AS cnt
+FROM generate_series(1, 2) i LEFT JOIN rpr_nav_gen ON id = i
+WINDOW w AS (ORDER BY i ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g) IS NULL);
+SELECT i, g, count(*) OVER w AS cnt
+FROM generate_series(1, 2) i LEFT JOIN rpr_nav_gen ON id = i
+WINDOW w AS (ORDER BY i ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS PREV(g) IS NULL);
+DROP TABLE rpr_nav_gen;
+
+-- A constant virtual generated column on the nullable side under GROUP BY:
+-- the same matches as without GROUP BY.
+CREATE TABLE rpr_nav_o3 (oid3 int PRIMARY KEY);
+INSERT INTO rpr_nav_o3 SELECT generate_series(1, 4);
+CREATE TABLE rpr_nav_gy (gyid int PRIMARY KEY,
+                         gyc int GENERATED ALWAYS AS (10) VIRTUAL);
+INSERT INTO rpr_nav_gy (gyid) VALUES (1), (3);
+EXPLAIN (COSTS OFF)
+SELECT oid3, count(*) OVER w AS cnt
+FROM rpr_nav_o3 LEFT JOIN rpr_nav_gy ON oid3 = gyid GROUP BY oid3, gyid
+WINDOW w AS (ORDER BY oid3 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(gyc) IS NULL);
+SELECT oid3, count(*) OVER w AS cnt
+FROM rpr_nav_o3 LEFT JOIN rpr_nav_gy ON oid3 = gyid GROUP BY oid3, gyid
+WINDOW w AS (ORDER BY oid3 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(gyc) IS NULL);
+EXPLAIN (COSTS OFF)
+SELECT oid3, count(*) OVER w AS cnt
+FROM rpr_nav_o3 LEFT JOIN rpr_nav_gy ON oid3 = gyid
+WINDOW w AS (ORDER BY oid3 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(gyc) IS NULL);
+SELECT oid3, count(*) OVER w AS cnt
+FROM rpr_nav_o3 LEFT JOIN rpr_nav_gy ON oid3 = gyid
+WINDOW w AS (ORDER BY oid3 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A B+) DEFINE B AS PREV(gyc) IS NULL);
+DROP TABLE rpr_nav_o3, rpr_nav_gy;
+
+-- Without a navigation the VALUES is pulled up, and the division is folded
+-- and raises at plan time -- as it does for the same WHERE clause.
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING PATTERN (A) DEFINE A AS v / 0 > 0);
+
+-- A subquery whose column depends on the row is pulled up as usual; the
+-- argument reads it at whichever row the navigation lands on.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(v) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM (SELECT id, val + 1 AS v FROM rpr_nav) t
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(v) > 0);
+
+-- Nesting: the inner navigation's argument is below the outer one's, so
+-- nothing in it is evaluated either.
+EXPLAIN (COSTS OFF)
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(LAST(v / 0, 1), 2) > 0);
+WITH t(id, v) AS (VALUES (1, 10))
+SELECT id, count(*) OVER w AS cnt
+FROM t
+WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A) DEFINE A AS PREV(LAST(v / 0, 1), 2) > 0);
+
+-- eval_const_expressions() must perform a few rewrites on every expression it
+-- is handed -- a CollateExpr becomes a RelabelType, named arguments become
+-- positional, omitted defaults are inserted -- and the executor depends on
+-- all three, so they are mandatory, not optimizations.  Each of the three
+-- below reaches the executor only if those rewrites reach inside a navigation
+-- argument, and each returns what the same expression one level outside the
+-- navigation returns.
+CREATE TABLE rpr_nav_txt (id int, s text);
+INSERT INTO rpr_nav_txt VALUES (1, 'b'), (2, 'c'), (3, 'a');
+CREATE FUNCTION rpr_nav_named(a int, b int) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT $1 * 10 + $2';
+CREATE FUNCTION rpr_nav_dflt(a int, b int DEFAULT 100) RETURNS int
+    LANGUAGE sql IMMUTABLE AS 'SELECT $2';
+
+-- COLLATE under a navigation: the executor has no CollateExpr step, so the
+-- RelabelType rewrite has to reach here.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_txt
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(s COLLATE "C") > 'a');
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav_txt
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(s COLLATE "C") > 'a');
+
+-- Named arguments under a navigation: the executor has no NamedArgExpr step.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_named(b => 7, a => val)) > 0);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_named(b => 7, a => val)) > 0);
+
+-- An omitted default under a navigation: without the insertion the call is
+-- initialized with one fewer argument than the callee reads.
+EXPLAIN (COSTS OFF)
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_dflt(val)) = 100);
+SELECT id, count(*) OVER w AS cnt
+FROM rpr_nav
+WINDOW w AS (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+             PATTERN (A+) DEFINE A AS PREV(rpr_nav_dflt(val)) = 100);
+
+DROP FUNCTION rpr_nav_dflt(int, int);
+DROP FUNCTION rpr_nav_named(int, int);
+DROP TABLE rpr_nav_txt;
 
 -- A navigation offset is resolved once at the top of the scan, before any
 -- input row has been read, so it must not be matched to the window input the
@@ -6115,6 +6637,47 @@ WINDOW w AS (
 );
 
 DROP TABLE rpr_join1, rpr_join2;
+
+-- A navigation argument reading a mismatched-type USING merge column gets
+-- the constant side through the join alias, and it is not evaluated.
+CREATE TABLE rpr_join4 (k bigint);
+INSERT INTO rpr_join4 VALUES (10);
+
+EXPLAIN (COSTS OFF)
+SELECT count(*) OVER w AS cnt
+FROM (SELECT 10 AS k) a LEFT JOIN rpr_join4 USING (k)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS PREV(k / 0) > 0
+);
+SELECT count(*) OVER w AS cnt
+FROM (SELECT 10 AS k) a LEFT JOIN rpr_join4 USING (k)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS PREV(k / 0) > 0
+);
+
+-- Same, but RIGHT JOIN with the constant subquery on its preserved
+-- (right) side.
+EXPLAIN (COSTS OFF)
+SELECT count(*) OVER w AS cnt
+FROM rpr_join4 RIGHT JOIN (SELECT 10 AS k) a USING (k)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS PREV(k / 0) > 0
+);
+SELECT count(*) OVER w AS cnt
+FROM rpr_join4 RIGHT JOIN (SELECT 10 AS k) a USING (k)
+WINDOW w AS (
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    PATTERN (A)
+    DEFINE A AS PREV(k / 0) > 0
+);
+
+DROP TABLE rpr_join4;
 
 -- Same shape with real per-row data, confirming navigation still sees
 -- each row's own value.

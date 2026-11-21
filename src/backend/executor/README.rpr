@@ -42,6 +42,7 @@
       - src/backend/optimizer/path/allpaths.c      (keeping DEFINE columns)
       - src/backend/optimizer/path/costsize.c      (DEFINE evaluation cost)
       - src/backend/optimizer/prep/prepjointree.c  (DEFINE pull-up substitution)
+      - src/backend/optimizer/util/clauses.c       (navigation argument folding)
 
     Executor
       - src/backend/executor/nodeWindowAgg.c       (reduced frame and nav trim)
@@ -312,7 +313,7 @@ Parse analysis puts nothing in the query targetlist for a DEFINE clause.
 Getting what it reads to the WindowAgg is the planner's job, and it is done
 the way havingQual's is: build_base_rel_tlists() marks the columns needed so
 they reach the top of the join tree, and make_window_input_target() asks for
-them again in the node's own input target (IV-6).
+them again in the node's own input target (IV-7).
 
 After all variables are processed:
   (4) Validates navigation nesting and offsets (define_walker)
@@ -514,31 +515,99 @@ grouping_planner() (planner.c): it empties defineClause in every window
 clause that is not in activeWindows, which also covers a query whose window
 functions were all folded away and so has no active window at all.  The
 generic walkers are not the only reader: build_base_rel_tlists() marks what
-a DEFINE clause reads as needed at relation 0 (IV-6), and a column needed
+a DEFINE clause reads as needed at relation 0 (IV-7), and a column needed
 by nothing that runs would keep an outer join from being removed.
 grouping_planner() runs for a subquery too, when that subquery is planned,
 and so before the subquery's own query_planner() builds its relation
 targetlists or removes any join.  Planning the outer query does not touch a
-subquery's DEFINE clause (IV-6).  Only defineClause is cleared, never the
+subquery's DEFINE clause (IV-7).  Only defineClause is cleared, never the
 WindowClause itself: winref is a one-based index into windowClause, so the
 list must keep its length and its order.  rpPattern stays as well.  It
 holds no Vars, an undefined pattern variable simply matches TRUE, and it is
-what marks the clause as a row pattern window (IV-5).
+what marks the clause as a row pattern window (IV-6).
 
-IV-2. Subquery Pull-up and Join Aliases
+IV-2. Constant Folding of Navigation Arguments
+
+A navigation's argument is read at the row the navigation lands on, and
+not at all when there is no such row (VII-3), so planning must not raise
+an error there that execution would never reach.  Planning does replace
+the columns of such an argument: subquery pull-up, virtual generated
+column expansion, join alias expansion and the inlining of a SQL function
+in FROM each put in an expression over the same row, or a value that is
+the same on every row (IV-3).  Where the navigation lands, the result is
+the same either way, and where it does not, the argument is not evaluated.
+So the replacement is let happen, and only the evaluation is left to
+execution.  Constants written in the argument must still fold, and raise,
+at plan time as they do anywhere else.
+
+subquery_planner() (planner.c) handles a navigation argument in three
+steps, each with its own role:
+
+  1. Before any column can be replaced, eval_const_navigation_arguments()
+     (clauses.c) folds each argument with eval_const_expressions_mutator()
+     under nav_prepass.  Every constant in it is still one written there
+     or a bound parameter, so it is evaluated as usual.  What this pass
+     does not do is drop a column without evaluating it, for what is left
+     would then fold as a constant: a SQL function that does not use such
+     an argument is not inlined; COALESCE, CASE, AND and OR keep the
+     arguments that read one beside a deciding constant, as do a strict
+     function given a null, a field taken from a row and a null test on a
+     row; and no not-null proof is used.  Each of these only defers a
+     simplification to step 3.  A nested navigation is folded the same
+     way.
+
+  2. preprocess_relation_rtes(), the pull-up of subqueries and of
+     functions in FROM, and join alias expansion replace columns (IV-3).
+     None of them knows about navigation arguments.
+
+  3. preprocess_expression() folds the DEFINE clause as a qual (IV-4).
+     eval_const_expressions_mutator() sets in_nav_arg while it walks a
+     navigation argument, and evaluate_function() and ece_evaluate_expr,
+     the only places that evaluate outside estimation, then return the
+     node unevaluated.  Estimation never sees DEFINE.  Everything else
+     still happens: named and default arguments are expanded, which the
+     executor needs, SQL functions are inlined, and the columns step 1
+     kept may be dropped, since nothing below is evaluated.  A call on
+     constants that a replacement or a drop has produced is left as it
+     is even where evaluating it could not fail, as for 1 + 1: nothing
+     tells such a call from 1 / 0.
+
+offset_arg and compound_offset_arg are run-time constants and are folded
+as usual in both passes.
+
+A change elsewhere in clauses.c has to keep this in mind.  A new place in
+eval_const_expressions() that evaluates must check in_nav_arg; one that
+does not raises at plan time on a constant a replacement brought in.  A
+new simplification that drops a column should be refused under
+nav_prepass; one that is not makes an argument that drops its own column,
+as written, raise at plan time, as the same expression does outside a
+navigation.  A new step that replaces columns needs nothing, as long as it
+runs between the two passes.
+
+IV-3. Subquery Pull-up and Join Aliases
 
 The pull-up does not reach the DEFINE clause through query_tree_mutator().
 perform_pullup_replace_vars() (prepjointree.c) names each part of the upper
 query it rewrites, and among them a loop over windowClause passes every
 non-empty defineClause to pullup_replace_vars().  subquery_planner() does
-the same for flatten_group_exprs() (IV-4).  The guarantee of IV-1 covers
+the same for flatten_group_exprs() (IV-5).  The guarantee of IV-1 covers
 only the generic walkers; a pass that rewrites the upper query field by
 field has to list defineClause itself.
 
 Join alias expansion substitutes into a DEFINE clause as well: a Var naming
 a join output column is replaced by the expression behind it.
 
-IV-3. Preprocessing a DEFINE Clause as a Qual
+These substitutions can leave a constant where a navigation argument read
+a column: a one-row VALUES, a constant subquery output or a function RTE
+folded to a constant is pulled up, a virtual generated column is replaced
+by a generation expression without Vars, and a merged column of an outer
+join carries either of those.  They are left to happen; nothing below a
+navigation argument is evaluated after they run (IV-2).  When a SQL
+function in FROM is inlined, a constant argument that its body passes to a
+navigation takes the parameter's place and so counts as a constant written
+there, as a bound parameter does in a custom plan.
+
+IV-4. Preprocessing a DEFINE Clause as a Qual
 
 A DEFINE condition is a search condition in the sense WHERE is one: the
 parser coerces it to boolean through transformWhereClause() (III-3), and a
@@ -546,19 +615,20 @@ row for which it yields FALSE or NULL is not a match.  subquery_planner()
 (planner.c) therefore hands each condition to preprocess_expression() as
 EXPRKIND_QUAL, in the loop that preprocesses the window clause's frame
 offsets.  That is after subquery pull-up, and before the GROUP Vars of
-IV-4 are expanded and before grouping_planner() empties the DEFINE clause
+IV-5 are expanded and before grouping_planner() empties the DEFINE clause
 of a window it will not run (IV-1).
 
 As a qual the condition goes through every step a WHERE clause does.  Join
-alias Vars are flattened first (IV-2).  eval_const_expressions() then folds
+alias Vars are flattened first (IV-3).  eval_const_expressions() then folds
 constants, inlines SQL functions and inserts the actual values of default
-arguments.  canonicalize_qual() runs with is_check false, so a NULL
-constant at the top level of an AND or OR is treated as FALSE, which is
-sound only because a NULL result and a FALSE one are told apart nowhere
-downstream.  Uplevel Vars become Params, and the result comes back as an
-implicit-AND list.  A TargetEntry holds one expression, so the loop turns
-the list straight back into one with make_ands_explicit(); a condition that
-folds to TRUE is left as a constant TRUE.
+arguments.  Below a navigation argument it simplifies but evaluates nothing
+(IV-2).  canonicalize_qual() runs with is_check false, so a NULL constant
+at the top level of an AND or OR is treated as FALSE, which is sound only
+because a NULL result and a FALSE one are told apart nowhere downstream.
+Uplevel Vars become Params, and the result comes back as an implicit-AND
+list.  A TargetEntry holds one expression, so the loop turns the list
+straight back into one with make_ands_explicit(); a condition that folds to
+TRUE is left as a constant TRUE.
 
 The NFA evaluates a DEFINE at most once per row and caches the result
 (VII-3), re-evaluating only the match_start dependent variables of VII-5.
@@ -583,13 +653,13 @@ rejected, as it is at the top level.
 
 A volatile expression the DEFINE clause shares with GROUP BY passes the
 check, and rightly so.  Parse analysis has replaced the DEFINE copy with a
-GROUP Var (IV-4), and although that Var is expanded back after the check,
+GROUP Var (IV-5), and although that Var is expanded back after the check,
 setrefs.c resolves the expansion against the grouping step's output: the
 pattern match reads the value GROUP BY computed once per input row, and no
 volatile evaluation is left in the DEFINE clause.
 
 Downstream the condition is an ordinary expression again.
-set_upper_references() (setrefs.c) fixes its Vars to OUTER_VAR (IV-7).
+set_upper_references() (setrefs.c) fixes its Vars to OUTER_VAR (IV-8).
 ExecInitWindowAgg() (nodeWindowAgg.c) splits it back into an implicit-AND
 list with make_ands_implicit() and compiles it with ExecInitQual(), which
 builds no ExprState at all for a constant TRUE.  nfa_eval_var_match()
@@ -606,7 +676,7 @@ nothing to show for it.  ExecInitWindowAgg() therefore asserts, for each
 entry, that its index is below numVars and that varNames holds the entry's
 resname at that index.
 
-IV-4. A DEFINE Clause That Takes Part in Grouping
+IV-5. A DEFINE Clause That Takes Part in Grouping
 
 A DEFINE expression may reference a GROUP BY column, so parseCheckAggregates()
 puts GROUP Vars into defineClause the same way it puts them into the
@@ -627,7 +697,7 @@ for columns it cannot produce.  This is the one rule the havingQual handling
 it is modelled on does not need: make_group_input_target() builds the input
 of the grouping step, while the window input target sits above it.
 
-IV-5. Optimizations an RPR Window Is Excluded From
+IV-6. Optimizations an RPR Window Is Excluded From
 
 Two prosupport-driven optimizations skip a row pattern window.  Both
 recognize it by a non-null rpPattern, not by a non-empty defineClause,
@@ -646,7 +716,7 @@ Chapter I; skipping the clause outright is what keeps one from replacing the
 frame with a shape RPR cannot run.  The duplicate-clause check that follows
 a successful rewrite still compares rpSkipTo, defineClause and rpPattern.
 
-IV-6. Keeping a DEFINE-only Column Alive
+IV-7. Keeping a DEFINE-only Column Alive
 
 A column that nothing reads except a DEFINE expression still has to reach
 the WindowAgg, and nothing in subquery pruning has to protect it for that.
@@ -671,7 +741,7 @@ A window clause that will not run gets no such mark: grouping_planner()
 empties its DEFINE clause before query_planner() calls
 build_base_rel_tlists() (IV-1).
 
-IV-7. Var Fixup and Costing
+IV-8. Var Fixup and Costing
 
 The DEFINE expressions cross the plan-node interface inside the WindowAgg,
 so set_upper_references() (setrefs.c) rewrites their Vars to OUTER_VAR
@@ -1379,7 +1449,7 @@ variable that no active state tests at this row is never evaluated.
 nfaVarMatched is a tri-state array (RPRVarMatch): RPR_VAR_UNEVALUATED,
 RPR_VAR_TRUE, or RPR_VAR_FALSE.  nfa_eval_var_match() evaluates a
 variable's DEFINE with ExecQual() on first consumption and caches the
-result, so a NULL result is cached as RPR_VAR_FALSE (IV-3).  The caller
+result, so a NULL result is cached as RPR_VAR_FALSE (IV-4).  The caller
 (advance_reduced_frame_nfa) holds winstate->currentpos at the scan
 position for the whole row (restored after the loop) because the deferred
 navigation opcodes read currentpos.
@@ -2462,8 +2532,8 @@ rewrites of V-3: PATTERN (A A) is stored as written but explains as "a{2}".
 EXPLAIN also parenthesizes every group and every alternation for
 self-consistency, so a top-level A | B explains as "(a | b)" where
 pg_get_viewdef() prints it bare.  The DEFINE conditions are deparsed from
-the plan as well, after planning has folded them, the way a Filter is
-shown.  The skip mode does not appear in EXPLAIN output.
+the plan as well, after planning has folded them (IV-2), the way a Filter
+is shown.  The skip mode does not appear in EXPLAIN output.
 
 XIII-2. Reading the Compiled Array
 
@@ -2585,7 +2655,7 @@ When a query groups, parse analysis replaces grouped expressions with Vars of
 a GROUP RTE, and the deparser expands those back with flatten_group_exprs()
 before printing.  The targetlist and havingQual expansion does not reach a
 window's DEFINE clause, yet that clause carries GROUP Vars of its own whenever
-it references a subexpression the grouping step computes (IV-4).
+it references a subexpression the grouping step computes (IV-5).
 get_query_def() therefore runs flatten_group_exprs() over each window's
 defineClause as well.  Without it the deparsed DEFINE would name the grouping
 step's output rather than the expression the user wrote, and the view would
@@ -2650,7 +2720,7 @@ XIV-1. Flat Array vs Tree-Based NFA
   other by 2-byte index instead of by pointer, and the whole array can
   be copied with a single memcpy when the plan node is copied.
 
-XIV-2. Forward-only Execution vs Backtracking
+XIV-3. Forward-only Execution vs Backtracking
 
   The NFA is simulated forward-only, tracking a set of live states,
   rather than by backtracking.
@@ -2665,7 +2735,7 @@ XIV-2. Forward-only Execution vs Backtracking
   naturally, with greedy or reluctant behavior per quantifier obtained by
   reversing that order.
 
-XIV-3. Per-Context Management
+XIV-4. Per-Context Management
 
   A separate match context is maintained for each start row.
 
@@ -2673,7 +2743,7 @@ XIV-3. Per-Context Management
   each row's frame independently, and lets the absorption optimization
   eliminate redundant contexts in O(n).
 
-XIV-4. Memory Pool Management
+XIV-5. Memory Pool Management
 
   NFA states are managed through a custom free list, and both RPRNFAState
   and RPRNFAContext are allocated in a partition-lifespan memory context
@@ -2684,7 +2754,7 @@ XIV-4. Memory Pool Management
   counts[] array), but maxDepth is fixed within a single query, so all
   states have the same size.
 
-XIV-5. Execution Optimization Summary
+XIV-6. Execution Optimization Summary
 
   The following optimizations make the NFA simulation practical.
 

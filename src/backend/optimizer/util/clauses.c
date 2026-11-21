@@ -71,6 +71,9 @@ typedef struct
 	List	   *active_fns;
 	Node	   *case_val;
 	bool		estimate;
+	bool		in_nav_arg;		/* below an RPRNavExpr argument? */
+	bool		nav_prepass;	/* folding a navigation argument before
+								 * preprocessing? */
 } eval_const_expressions_context;
 
 typedef struct
@@ -137,6 +140,7 @@ static bool grouping_check_operands(Oid opno, Oid inputcollid,
 									List *args, grouping_walker_ctx *ctx);
 static bool grouping_check_operand(Node *arg, Oid opno, Oid inputcollid,
 								   grouping_walker_ctx *ctx);
+static Node *eval_const_nav_args_mutator(Node *node, void *context);
 static Node *eval_const_expressions_mutator(Node *node,
 											eval_const_expressions_context *context);
 static bool contain_non_const_walker(Node *node, void *context);
@@ -2652,7 +2656,55 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
+	context.in_nav_arg = false;
+	context.nav_prepass = false;
 	return eval_const_expressions_mutator(node, &context);
+}
+
+/*
+ * eval_const_navigation_arguments
+ *
+ * Fold each row pattern navigation argument in node, before preprocessing
+ * can replace the columns there.  Later passes evaluate nothing in a
+ * navigation argument, so this is where constants written there, bound
+ * parameters included, are folded, as they are anywhere else.  A column is
+ * not dropped unevaluated here: a SQL function that does not use such an
+ * argument is not inlined; COALESCE, CASE, AND and OR keep the arguments
+ * that read one beside a deciding constant, as do a strict function given
+ * a null, a field taken from a row and a null test on a row; and no
+ * not-null proof is used.
+ */
+Node *
+eval_const_navigation_arguments(PlannerInfo *root, Node *node)
+{
+	eval_const_expressions_context context;
+
+	context.boundParams = root ? root->glob->boundParams : NULL;
+	context.root = root;
+	context.active_fns = NIL;
+	context.case_val = NULL;
+	context.estimate = false;
+	context.in_nav_arg = false;
+	context.nav_prepass = true;
+	return eval_const_nav_args_mutator(node, &context);
+}
+
+static Node *
+eval_const_nav_args_mutator(Node *node, void *context)
+{
+	if (node == NULL)
+		return NULL;
+	if (IsA(node, RPRNavExpr))
+	{
+		RPRNavExpr *newnav = (RPRNavExpr *) palloc(sizeof(RPRNavExpr));
+
+		memcpy(newnav, node, sizeof(RPRNavExpr));
+		newnav->arg = (Expr *)
+			eval_const_expressions_mutator((Node *) newnav->arg,
+										   (eval_const_expressions_context *) context);
+		return (Node *) newnav;
+	}
+	return expression_tree_mutator(node, eval_const_nav_args_mutator, context);
 }
 
 #define MIN_ARRAY_SIZE_FOR_HASHED_SAOP 9
@@ -2794,6 +2846,8 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = true;	/* unsafe transformations OK */
+	context.in_nav_arg = false;
+	context.nav_prepass = false;
 	return eval_const_expressions_mutator(node, &context);
 }
 
@@ -2818,9 +2872,16 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 #define ece_all_arguments_const(node) \
 	(!expression_tree_walker((Node *) (node), contain_non_const_walker, NULL))
 
-/* Generic macro for applying evaluate_expr */
+/*
+ * Generic macro for applying evaluate_expr.  Below a navigation argument the
+ * node is returned as is: the argument is evaluated only at the row the
+ * navigation lands on.  This and evaluate_function() are the only places
+ * that evaluate there outside estimation; any new one must check
+ * in_nav_arg as well.
+ */
 #define ece_evaluate_expr(node) \
-	((Node *) evaluate_expr((Expr *) (node), \
+	(context->in_nav_arg ? (Node *) (node) : \
+	 (Node *) evaluate_expr((Expr *) (node), \
 							exprType((Node *) (node)), \
 							exprTypmod((Node *) (node)), \
 							exprCollation((Node *) (node))))
@@ -3117,9 +3178,10 @@ eval_const_expressions_mutator(Node *node,
 						all_null_input = false;
 
 						if (!has_nullable_nonconst &&
-							!expr_is_nonnullable(context->root,
-												 (Expr *) lfirst(arg),
-												 NOTNULL_SOURCE_HASHTABLE))
+							(context->nav_prepass ||
+							 !expr_is_nonnullable(context->root,
+												  (Expr *) lfirst(arg),
+												  NOTNULL_SOURCE_HASHTABLE)))
 							has_nullable_nonconst = true;
 					}
 				}
@@ -3683,6 +3745,8 @@ eval_const_expressions_mutator(Node *node,
 				CaseExpr   *newcase;
 				Node	   *save_case_val;
 				Node	   *newarg;
+				Node	   *const_arg = NULL;
+				bool		keep_arg;
 				List	   *newargs;
 				bool		const_true_cond;
 				Node	   *defresult = NULL;
@@ -3692,11 +3756,20 @@ eval_const_expressions_mutator(Node *node,
 				newarg = eval_const_expressions_mutator((Node *) caseexpr->arg,
 														context);
 
+				/*
+				 * The navigation pre-pass drops no part of the CASE that
+				 * reads a column; one reading the test expression keeps every
+				 * alternative.
+				 */
+				keep_arg = context->nav_prepass && newarg &&
+					contain_var_clause(newarg);
+
 				/* Set up for contained CaseTestExpr nodes */
 				save_case_val = context->case_val;
 				if (newarg && IsA(newarg, Const))
 				{
 					context->case_val = newarg;
+					const_arg = newarg;
 					newarg = NULL;	/* not needed anymore, see above */
 				}
 				else
@@ -3726,7 +3799,21 @@ eval_const_expressions_mutator(Node *node,
 
 						if (const_input->constisnull ||
 							!DatumGetBool(const_input->constvalue))
+						{
+							/* Keep its result as written, if needed */
+							if (context->nav_prepass &&
+								(keep_arg ||
+								 contain_var_clause((Node *) oldcasewhen->result)))
+							{
+								CaseWhen   *newcasewhen = makeNode(CaseWhen);
+
+								newcasewhen->expr = (Expr *) casecond;
+								newcasewhen->result = oldcasewhen->result;
+								newcasewhen->location = oldcasewhen->location;
+								newargs = lappend(newargs, newcasewhen);
+							}
 							continue;	/* drop alternative with FALSE cond */
+						}
 						/* Else it's constant TRUE */
 						const_true_cond = true;
 					}
@@ -3750,8 +3837,32 @@ eval_const_expressions_mutator(Node *node,
 					/*
 					 * Found a TRUE condition, so none of the remaining
 					 * alternatives can be reached.  We treat the result as
-					 * the default result.
+					 * the default result.  The navigation pre-pass keeps the
+					 * rest as written instead, if it reads a column; the test
+					 * expression goes back for the CaseTestExpr nodes there.
 					 */
+					if (context->nav_prepass)
+					{
+						List	   *rest;
+
+						rest = list_copy_tail(caseexpr->args,
+											  foreach_current_index(arg) + 1);
+						if (keep_arg || contain_var_clause((Node *) rest) ||
+							contain_var_clause((Node *) caseexpr->defresult))
+						{
+							CaseWhen   *newcasewhen = makeNode(CaseWhen);
+
+							newcasewhen->expr = (Expr *) casecond;
+							newcasewhen->result = (Expr *) caseresult;
+							newcasewhen->location = oldcasewhen->location;
+							newargs = lappend(newargs, newcasewhen);
+							newargs = list_concat(newargs, rest);
+							defresult = (Node *) caseexpr->defresult;
+							if (rest != NIL && newarg == NULL)
+								newarg = const_arg;
+							break;
+						}
+					}
 					defresult = caseresult;
 					break;
 				}
@@ -3850,9 +3961,24 @@ eval_const_expressions_mutator(Node *node,
 						if (((Const *) e)->constisnull)
 							continue;	/* drop null constant */
 						newargs = lappend(newargs, e);
+
+						/*
+						 * The navigation pre-pass keeps the arguments not
+						 * reached, as written, if they read a column.
+						 */
+						if (context->nav_prepass)
+						{
+							List	   *rest;
+
+							rest = list_copy_tail(coalesceexpr->args,
+												  foreach_current_index(arg) + 1);
+							if (contain_var_clause((Node *) rest))
+								newargs = list_concat(newargs, rest);
+						}
 						break;
 					}
-					if (expr_is_nonnullable(context->root, (Expr *) e,
+					if (!context->nav_prepass &&
+						expr_is_nonnullable(context->root, (Expr *) e,
 											NOTNULL_SOURCE_HASHTABLE))
 					{
 						newargs = lappend(newargs, e);
@@ -3985,7 +4111,22 @@ eval_const_expressions_mutator(Node *node,
 				{
 					RowExpr    *rowexpr = (RowExpr *) arg;
 
-					if (fselect->fieldnum > 0 &&
+					/*
+					 * The navigation pre-pass does not drop the other fields
+					 * if they read a column.
+					 */
+					if (context->nav_prepass && contain_var_clause(arg) &&
+						fselect->fieldnum > 0 &&
+						fselect->fieldnum <= list_length(rowexpr->args))
+					{
+						RowExpr    *others = copyObject(rowexpr);
+
+						others->args = list_delete_nth_cell(others->args,
+															fselect->fieldnum - 1);
+						if (contain_var_clause((Node *) others))
+							rowexpr = NULL;
+					}
+					if (rowexpr && fselect->fieldnum > 0 &&
 						fselect->fieldnum <= list_length(rowexpr->args))
 					{
 						Node	   *fld = (Node *) list_nth(rowexpr->args,
@@ -4029,7 +4170,8 @@ eval_const_expressions_mutator(Node *node,
 
 				arg = eval_const_expressions_mutator((Node *) ntest->arg,
 													 context);
-				if (ntest->argisrow && arg && IsA(arg, RowExpr))
+				if (ntest->argisrow && arg && IsA(arg, RowExpr) &&
+					!(context->nav_prepass && contain_var_clause(arg)))
 				{
 					/*
 					 * We break ROW(...) IS [NOT] NULL into separate tests on
@@ -4065,7 +4207,7 @@ eval_const_expressions_mutator(Node *node,
 						 * NullTest if the test is IS NULL; else we can
 						 * discard it.
 						 */
-						if (relem &&
+						if (relem && !context->nav_prepass &&
 							expr_is_nonnullable(context->root, (Expr *) relem,
 												NOTNULL_SOURCE_HASHTABLE))
 						{
@@ -4118,7 +4260,7 @@ eval_const_expressions_mutator(Node *node,
 
 					return makeBoolConst(result, false);
 				}
-				if (!ntest->argisrow && arg &&
+				if (!ntest->argisrow && arg && !context->nav_prepass &&
 					expr_is_nonnullable(context->root, (Expr *) arg,
 										NOTNULL_SOURCE_HASHTABLE))
 				{
@@ -4205,7 +4347,7 @@ eval_const_expressions_mutator(Node *node,
 
 					return makeBoolConst(result, false);
 				}
-				if (arg &&
+				if (arg && !context->nav_prepass &&
 					expr_is_nonnullable(context->root, (Expr *) arg,
 										NOTNULL_SOURCE_HASHTABLE))
 				{
@@ -4312,6 +4454,34 @@ eval_const_expressions_mutator(Node *node,
 														  context);
 			}
 			break;
+		case T_RPRNavExpr:
+			{
+				RPRNavExpr *nav = (RPRNavExpr *) node;
+				RPRNavExpr *newnav;
+				bool		save_in_nav_arg = context->in_nav_arg;
+
+				/*
+				 * The argument is evaluated only at the row the navigation
+				 * lands on, so nothing in it is evaluated here; constants
+				 * written in it were folded by
+				 * eval_const_navigation_arguments().  The offsets are
+				 * run-time constants.
+				 */
+				newnav = (RPRNavExpr *) palloc(sizeof(RPRNavExpr));
+				memcpy(newnav, nav, sizeof(RPRNavExpr));
+				if (!context->nav_prepass)
+					context->in_nav_arg = true;
+				newnav->arg = (Expr *)
+					eval_const_expressions_mutator((Node *) nav->arg, context);
+				context->in_nav_arg = save_in_nav_arg;
+				newnav->offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) nav->offset_arg,
+												   context);
+				newnav->compound_offset_arg = (Expr *)
+					eval_const_expressions_mutator((Node *) nav->compound_offset_arg,
+												   context);
+				return (Node *) newnav;
+			}
 		case T_ConvertRowtypeExpr:
 			{
 				ConvertRowtypeExpr *cre = castNode(ConvertRowtypeExpr, node);
@@ -4502,6 +4672,18 @@ simplify_or_arguments(List *args,
 				*haveNull = true;
 			else if (DatumGetBool(const_input->constvalue))
 			{
+				/*
+				 * The navigation pre-pass keeps the other arguments if they
+				 * read a column, the unprocessed ones as written.
+				 */
+				if (context->nav_prepass &&
+					(contain_var_clause((Node *) newargs) ||
+					 contain_var_clause((Node *) unprocessed_args)))
+				{
+					newargs = lappend(newargs, arg);
+					return list_concat(newargs, unprocessed_args);
+				}
+
 				*forceTrue = true;
 
 				/*
@@ -4598,6 +4780,18 @@ simplify_and_arguments(List *args,
 				*haveNull = true;
 			else if (!DatumGetBool(const_input->constvalue))
 			{
+				/*
+				 * The navigation pre-pass keeps the other arguments if they
+				 * read a column, the unprocessed ones as written.
+				 */
+				if (context->nav_prepass &&
+					(contain_var_clause((Node *) newargs) ||
+					 contain_var_clause((Node *) unprocessed_args)))
+				{
+					newargs = lappend(newargs, arg);
+					return list_concat(newargs, unprocessed_args);
+				}
+
 				*forceFalse = true;
 
 				/*
@@ -5441,7 +5635,8 @@ evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
 	 * if there are other inputs that aren't constant, and even if the
 	 * function is not otherwise immutable.
 	 */
-	if (funcform->proisstrict && has_null_input)
+	if (funcform->proisstrict && has_null_input &&
+		!(context->nav_prepass && contain_var_clause((Node *) args)))
 		return (Expr *) makeNullConst(result_type, result_typmod,
 									  result_collid);
 
@@ -5451,6 +5646,10 @@ evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
 	 * constant non-NULL inputs.)
 	 */
 	if (has_nonconst_input)
+		return NULL;
+
+	/* A navigation argument is evaluated only at the row it lands on */
+	if (context->in_nav_arg)
 		return NULL;
 
 	/*
@@ -5781,6 +5980,9 @@ inline_function(Oid funcid, Oid result_type, Oid result_collid,
 		{
 			/* Param not used at all: uncool if func is strict */
 			if (funcform->proisstrict)
+				goto fail;
+			/* The navigation pre-pass drops no column unevaluated */
+			if (context->nav_prepass && contain_var_clause(param))
 				goto fail;
 		}
 		else if (usecounts[i] != 1)
