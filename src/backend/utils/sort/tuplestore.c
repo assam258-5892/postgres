@@ -184,15 +184,14 @@ struct Tuplestorestate
 	bool		growmemtuples;	/* memtuples' growth still underway? */
 
 	/*
-	 * rowstrimmed is the absolute row number of memtuples[0] while we're in
-	 * INMEM state; when we switch to file state, it becomes the absolute row
-	 * number of the first row in the file.  This is redundant information
-	 * while we're in INMEM state, because state->tuples is always the total
-	 * number of tuples inserted into the tuplestore, so that the last valid
-	 * array entry always has absolute row number state->tuples - 1.  However,
-	 * once we switch to a file state it's not redundant.
+	 * rowstrimmed is the total number of rows removed by tuplestore_trim(),
+	 * which is also the absolute row number of the oldest row still stored.
+	 * In INMEM state it includes rows whose memtuples[] slots are counted in
+	 * memtupdeleted but not yet slid out, so memtuples[0] has absolute row
+	 * number rowstrimmed - memtupdeleted.  In file states it is the absolute
+	 * row number of the first row in the file.
 	 */
-	int64		rowstrimmed;	/* reference point for tuple row numbers */
+	int64		rowstrimmed;	/* number of rows trimmed so far */
 
 	/*
 	 * These variables are used to keep track of the current positions.
@@ -1267,8 +1266,6 @@ tuplestore_skiptuples(Tuplestorestate *state, int64 ntuples, bool forward)
 	else
 	{
 		lowest = state->rowstrimmed;
-		if (state->status == TSS_INMEM)
-			lowest += state->memtupdeleted;
 		if (ntuples < cur - lowest)
 			return tuplestore_seek(state, cur - ntuples);
 		/* Ran out of tuples: go to the lowest position seek accepts */
@@ -1319,8 +1316,6 @@ tuplestore_seek(Tuplestorestate *state, int64 row)
 
 	/* Lowest position; after a trim, the tuple kept for a slot is not one */
 	lowest = state->rowstrimmed;
-	if (state->status == TSS_INMEM)
-		lowest += state->memtupdeleted;
 	if (state->truncated)
 		lowest++;
 
@@ -1404,9 +1399,6 @@ static void
 dumptuples(Tuplestorestate *state)
 {
 	int			i;
-
-	/* Make rowstrimmed = row number of the oldest tuple we still have */
-	state->rowstrimmed += state->memtupdeleted;
 
 	for (i = state->memtupdeleted;; i++)
 	{
@@ -1707,6 +1699,7 @@ tuplestore_trim(Tuplestorestate *state)
 		state->memtuples[i] = NULL;
 		/* As in dumptuples(), increment memtupdeleted synchronously */
 		state->memtupdeleted++;
+		state->rowstrimmed++;
 	}
 	Assert(state->memtupdeleted == nremove);
 
@@ -1736,7 +1729,6 @@ tuplestore_trim(Tuplestorestate *state)
 
 	state->memtupdeleted = 0;
 	state->memtupcount -= nremove;
-	state->rowstrimmed += nremove;
 	for (i = 0; i < state->readptrcount; i++)
 	{
 		if (!state->readptrs[i].eof_reached)
@@ -1755,16 +1747,10 @@ check_read_pointer_rows(Tuplestorestate *state)
 {
 	/* base is the row number of memtuples[0], if we're in INMEM state */
 	int64		base = state->tuples - state->memtupcount;
-	int64		oldest;
+	int64		oldest = state->rowstrimmed;
 
-	/* calculate row number of oldest still-accessible tuple */
 	if (state->status == TSS_INMEM)
-	{
-		Assert(base == state->rowstrimmed);
-		oldest = base + state->memtupdeleted;
-	}
-	else
-		oldest = state->rowstrimmed;
+		Assert(base == state->rowstrimmed - state->memtupdeleted);
 
 	for (int i = 0; i < state->readptrcount; i++)
 	{
