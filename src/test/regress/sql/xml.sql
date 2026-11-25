@@ -271,6 +271,28 @@ CREATE VIEW xmlview11 AS SELECT xmlserialize(document '<foo><bar>42</bar></foo>'
 SELECT table_name, view_definition FROM information_schema.views
   WHERE table_name LIKE 'xmlview%' ORDER BY 1;
 
+-- XML names with a code point above U+FFFF must survive a read-back
+DO $$
+DECLARE
+  orig text;
+  copy text;
+BEGIN
+  IF getdatabaseencoding() = 'UTF8' THEN
+    EXECUTE 'CREATE TEMP VIEW xml_nonbmp_v AS SELECT xmlelement(name '
+      || quote_ident(chr(128512)) || ', xmlattributes(1 AS '
+      || quote_ident('a' || chr(128512)) || ')) AS e';
+    EXECUTE 'CREATE TEMP VIEW xml_nonbmp_v_re AS '
+      || pg_get_viewdef('xml_nonbmp_v');
+    SELECT e::text INTO orig FROM xml_nonbmp_v;
+    SELECT e::text INTO copy FROM xml_nonbmp_v_re;
+    IF orig <> copy THEN
+      RAISE WARNING 'XML name changed on read-back: % became %', orig, copy;
+    END IF;
+    DROP VIEW xml_nonbmp_v, xml_nonbmp_v_re;
+  END IF;
+END
+$$;
+
 -- Text XPath expressions evaluation
 
 SELECT xpath('/value', data) FROM xmltest;
