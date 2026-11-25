@@ -779,3 +779,20 @@ DROP TABLE wrv_holder, wrv_holderd, wrv_holdert CASCADE;
 RESET client_min_messages;
 DROP DOMAIN wrv_pd;
 DROP TABLE wrv_c, wrv_p;
+
+-- a ROW() coerced implicitly to a composite must keep the coercion of its
+-- fields as an assignment, not as a cast
+create type rowtypes_vc as (a varchar(2));
+create table rowtypes_vc_t (x text);
+insert into rowtypes_vc_t values ('abc');
+create function rowtypes_vc_f(rowtypes_vc) returns text
+  language sql as 'select ($1).a';
+create view rowtypes_vc_v as select rowtypes_vc_f(row(x)) as r from rowtypes_vc_t;
+select pg_get_viewdef('rowtypes_vc_v'::regclass, true) as def \gset
+\echo :def
+create view rowtypes_vc_v_re as :def
+select * from rowtypes_vc_v;
+select * from rowtypes_vc_v_re;
+drop table rowtypes_vc_t cascade;
+drop function rowtypes_vc_f(rowtypes_vc);
+drop type rowtypes_vc;
