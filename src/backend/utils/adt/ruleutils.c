@@ -11566,6 +11566,20 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 					else
 						appendStringInfoString(buf, ", ");
 				}
+
+				/*
+				 * The grammar has no DISTINCT VARIADIC, so with DISTINCT the
+				 * parser must have built the array from separate arguments;
+				 * print those, and the parser builds the same array again.
+				 */
+				if (use_variadic && i == nargs &&
+					aggref->aggdistinct != NIL &&
+					IsA(arg, ArrayExpr) && !((ArrayExpr *) arg)->multidims)
+				{
+					get_rule_expr((Node *) ((ArrayExpr *) arg)->elements,
+								  context, true);
+					continue;
+				}
 				if (use_variadic && i == nargs)
 					appendStringInfoString(buf, "VARIADIC ");
 				if (is_json_objectagg && i == 2)
