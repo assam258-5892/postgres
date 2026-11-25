@@ -1474,6 +1474,24 @@ SELECT * FROM xmltableview2;
 CREATE OR REPLACE VIEW public.xmltableview2 AS
  SELECT a
    FROM XMLTABLE(XMLNAMESPACES ('http://x.y'::text AS "Zz"), ('/Zz:rows/Zz:row'::text) PASSING ('<rows xmlns="http://x.y"><row><a>10</a></row></rows>'::xml) COLUMNS a integer PATH ('Zz:a'::text))
+-- a column DEFAULT must keep its assignment coercion on read-back
+CREATE VIEW xmltableview_default AS
+  SELECT * FROM XMLTABLE('/r' PASSING '<r/>'
+                         COLUMNS a varchar(3) PATH 'a' DEFAULT lower('ABCDEF'));
+SELECT pg_get_viewdef('xmltableview_default'::regclass, true) AS def \gset
+\echo :def
+ SELECT a
+   FROM XMLTABLE(('/r'::text) PASSING ('<r/>'::xml) COLUMNS a character varying(3) DEFAULT (lower('ABCDEF'::text)::character varying(3)) PATH ('a'::text));
+CREATE VIEW xmltableview_default_re AS :def
+SELECT * FROM xmltableview_default;
+ERROR:  value too long for type character varying(3)
+SELECT * FROM xmltableview_default_re;
+  a  
+-----
+ abc
+(1 row)
+
+DROP VIEW xmltableview_default, xmltableview_default_re;
 SELECT * FROM XMLTABLE(XMLNAMESPACES(DEFAULT 'http://x.y'),
                       '/rows/row'
                       PASSING '<rows xmlns="http://x.y"><row><a>10</a></row></rows>'

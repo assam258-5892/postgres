@@ -519,6 +519,17 @@ SELECT * FROM xmltableview2;
 
 \sv xmltableview2
 
+-- a column DEFAULT must keep its assignment coercion on read-back
+CREATE VIEW xmltableview_default AS
+  SELECT * FROM XMLTABLE('/r' PASSING '<r/>'
+                         COLUMNS a varchar(3) PATH 'a' DEFAULT lower('ABCDEF'));
+SELECT pg_get_viewdef('xmltableview_default'::regclass, true) AS def \gset
+\echo :def
+CREATE VIEW xmltableview_default_re AS :def
+SELECT * FROM xmltableview_default;
+SELECT * FROM xmltableview_default_re;
+DROP VIEW xmltableview_default, xmltableview_default_re;
+
 SELECT * FROM XMLTABLE(XMLNAMESPACES(DEFAULT 'http://x.y'),
                       '/rows/row'
                       PASSING '<rows xmlns="http://x.y"><row><a>10</a></row></rows>'
