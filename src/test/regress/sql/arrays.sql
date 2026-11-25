@@ -920,3 +920,20 @@ drop rule arr_slice_op_r on arr_slice_op;
 select pg_get_ruledef(oid, true) from pg_rewrite where rulename = 'arr_slice_op_r';
 drop table arr_slice_op cascade;
 drop operator =~ (none, int4);
+
+-- an ARRAY[] cast to int2vector or oidvector must keep its type
+create table arr_vector (x int);
+create view arr_vector_v as
+  select array[1, 2]::int2vector as a, array[1]::oidvector as o from arr_vector;
+select pg_get_viewdef('arr_vector_v'::regclass, true) as def \gset
+\echo :def
+create view arr_vector_v_re as :def
+select attname, atttypid::regtype from pg_attribute
+  where attrelid = 'arr_vector_v_re'::regclass and attnum > 0 order by attnum;
+create table arr_vector_d (v int2vector default array[1, 2]::int2vector);
+select pg_get_expr(adbin, adrelid) as def from pg_attrdef
+  where adrelid = 'arr_vector_d'::regclass \gset
+\echo :def
+create table arr_vector_d2 (v int2vector default :def);
+drop table arr_vector, arr_vector_d cascade;
+drop table if exists arr_vector_d2;
