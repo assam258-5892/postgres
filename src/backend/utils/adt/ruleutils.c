@@ -12438,7 +12438,8 @@ get_json_returning(JsonReturning *returning, StringInfo buf,
 
 	if (!json_format_by_default ||
 		returning->format->format_type !=
-		(returning->typid == JSONBOID ? JS_FORMAT_JSONB : JS_FORMAT_JSON))
+		(returning->typid == JSONBOID ? JS_FORMAT_JSONB : JS_FORMAT_JSON) ||
+		returning->format->encoding != JS_ENC_DEFAULT)
 		get_json_format(returning->format, buf);
 }
 
