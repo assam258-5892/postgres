@@ -825,3 +825,23 @@ select * from a, coalesce(b) as c(d int, e int, f int, g int);  -- fail
 with a(b) as (values (row(1,2,3)))
 select * from a, coalesce(b) as c(d int, e int, f float);  -- fail
 select * from int8_tbl, coalesce(row(1)) as (a int, b int);  -- fail
+
+-- a user function named unnest with several arguments must stay
+-- qualified in FROM, where the parser reads unnest(a, b) specially
+create schema rangefuncs_unnest;
+create function rangefuncs_unnest.unnest(a int[], b int[]) returns setof int
+  language sql immutable
+  as 'select x * 10 + y from pg_catalog.unnest(a) x, pg_catalog.unnest(b) y';
+create table rangefuncs_unnest_t (a int[], b int[]);
+insert into rangefuncs_unnest_t values ('{1,2}', '{1,2}');
+set search_path = rangefuncs_unnest, public;
+create view rangefuncs_unnest_v as
+  select u from rangefuncs_unnest_t t, rangefuncs_unnest.unnest(t.a, t.b) u;
+select pg_get_viewdef('rangefuncs_unnest_v'::regclass, true) as def \gset
+\echo :def
+create view rangefuncs_unnest_v_re as :def
+select * from rangefuncs_unnest_v;
+select * from rangefuncs_unnest_v_re;
+reset search_path;
+drop schema rangefuncs_unnest cascade;
+drop table rangefuncs_unnest_t cascade;
