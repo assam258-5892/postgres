@@ -890,6 +890,35 @@ SELECT table_name, view_definition FROM information_schema.views
  xmlview9   |  SELECT XMLSERIALIZE(CONTENT 'good'::xml AS text NO INDENT) AS "xmlserialize";
 (11 rows)
 
+-- names taken from columns are escaped more than names given with AS
+CREATE TABLE xmlview_implicit_t (xmlcol int, "a:b" int);
+INSERT INTO xmlview_implicit_t VALUES (1, 2);
+CREATE VIEW xmlview_implicit AS
+  SELECT xmlforest(xmlcol, "a:b") AS f,
+         xmlelement(name e, xmlattributes(xmlcol)) AS e
+  FROM xmlview_implicit_t;
+SELECT pg_get_viewdef('xmlview_implicit'::regclass, true) AS def \gset
+\echo :def
+ SELECT XMLFOREST(xmlcol AS xmlcol, "a:b" AS "a:b") AS f,
+    XMLELEMENT(NAME e, XMLATTRIBUTES(xmlcol AS xmlcol)) AS e
+   FROM xmlview_implicit_t;
+CREATE VIEW xmlview_implicit_re AS :def
+SELECT * FROM xmlview_implicit;
+                           f                            |           e           
+--------------------------------------------------------+-----------------------
+ <_x0078_mlcol>1</_x0078_mlcol><a_x003A_b>2</a_x003A_b> | <e _x0078_mlcol="1"/>
+(1 row)
+
+SELECT * FROM xmlview_implicit_re;
+               f                |        e        
+--------------------------------+-----------------
+ <xmlcol>1</xmlcol><a:b>2</a:b> | <e xmlcol="1"/>
+(1 row)
+
+DROP TABLE xmlview_implicit_t CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view xmlview_implicit
+drop cascades to view xmlview_implicit_re
 -- XML names with a code point above U+FFFF must survive a read-back
 DO $$
 DECLARE

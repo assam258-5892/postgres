@@ -271,6 +271,20 @@ CREATE VIEW xmlview11 AS SELECT xmlserialize(document '<foo><bar>42</bar></foo>'
 SELECT table_name, view_definition FROM information_schema.views
   WHERE table_name LIKE 'xmlview%' ORDER BY 1;
 
+-- names taken from columns are escaped more than names given with AS
+CREATE TABLE xmlview_implicit_t (xmlcol int, "a:b" int);
+INSERT INTO xmlview_implicit_t VALUES (1, 2);
+CREATE VIEW xmlview_implicit AS
+  SELECT xmlforest(xmlcol, "a:b") AS f,
+         xmlelement(name e, xmlattributes(xmlcol)) AS e
+  FROM xmlview_implicit_t;
+SELECT pg_get_viewdef('xmlview_implicit'::regclass, true) AS def \gset
+\echo :def
+CREATE VIEW xmlview_implicit_re AS :def
+SELECT * FROM xmlview_implicit;
+SELECT * FROM xmlview_implicit_re;
+DROP TABLE xmlview_implicit_t CASCADE;
+
 -- XML names with a code point above U+FFFF must survive a read-back
 DO $$
 DECLARE
