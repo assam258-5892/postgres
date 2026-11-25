@@ -2563,6 +2563,53 @@ SELECT CASE WHEN x &gt; 0 THEN x ELSE 1/0 END FROM tab;
    </para>
 
    <para>
+    A column can also become a constant while the query is planned, when
+    the planner puts the expression behind it in its place.  Each of the
+    following queries can fail with division by zero although it returns
+    no rows.
+   </para>
+
+   <para>
+    The output column of a subquery, <literal>WITH</literal> query or
+    <literal>VALUES</literal> list that is pulled up into the outer query is
+    replaced by its expression, here the constant <literal>0</literal>:
+<programlisting>
+SELECT 1/z FROM (SELECT 0 AS z) WHERE false;
+WITH t(z) AS (VALUES (0)) SELECT 1/z FROM t WHERE false;
+</programlisting>
+   </para>
+
+   <para>
+    A virtual generated column is replaced by its generation expression:
+<programlisting>
+CREATE TABLE tab (x int, g int GENERATED ALWAYS AS (0) VIRTUAL);
+SELECT 1/g FROM tab WHERE false;
+</programlisting>
+   </para>
+
+   <para>
+    Simplification can also drop a column and leave a constant.
+    <literal>COALESCE</literal> drops the arguments after one that is a
+    constant other than null, and <literal>IS NULL</literal> on a column
+    declared <literal>NOT NULL</literal> is reduced to
+    <literal>false</literal>:
+<programlisting>
+CREATE TABLE tab (x int NOT NULL);
+SELECT 1/COALESCE(0, x) FROM tab WHERE false;
+SELECT 1/(x IS NULL)::int FROM tab WHERE false;
+</programlisting>
+   </para>
+
+   <para>
+    A call to an SQL function can be replaced by the function's body, so a
+    function that does not use its argument leaves only the body:
+<programlisting>
+CREATE FUNCTION f(x int) RETURNS int LANGUAGE sql IMMUTABLE AS 'SELECT 1 / 0';
+SELECT f(x) FROM tab WHERE false;
+</programlisting>
+   </para>
+
+   <para>
     Another limitation of the same kind is that a <literal>CASE</literal> cannot
     prevent evaluation of an aggregate expression contained within it,
     because aggregate expressions are computed before other
@@ -2582,6 +2629,26 @@ SELECT CASE WHEN min(employees) > 0
     <function>min()</function>.  Instead, use a <literal>WHERE</literal>
     or <literal>FILTER</literal> clause to prevent problematic input rows from
     reaching an aggregate function in the first place.
+   </para>
+
+   <para>
+    Early evaluation of constant subexpressions also affects the argument of
+    a row pattern navigation function such as <function>PREV</function> (see
+    <xref linkend="functions-rpr-navigation-table"/>).  The argument is
+    evaluated only at the row the function navigates to, and not at all when
+    there is no such row, but as with the <literal>ELSE</literal> arm above,
+    a part of it that is constant, including one that becomes constant only
+    while the query is planned as described above, can be evaluated at that
+    point and raise an error even if no such row exists.  The following
+    query has a single row, which leaves <function>PREV</function> no row
+    to navigate to, but it fails with division by zero because
+    <structfield>z</structfield> is replaced by the constant
+    <literal>0</literal>:
+<programlisting>
+SELECT count(*) OVER w FROM (SELECT 0 AS z)
+  WINDOW w AS (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+               PATTERN (A) DEFINE A AS PREV(1/z) IS NULL);
+</programlisting>
    </para>
   </sect2>
  </sect1>

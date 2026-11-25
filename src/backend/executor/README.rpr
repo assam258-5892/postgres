@@ -328,6 +328,8 @@ because no column can appear there.  A Param is still allowed, and is the case
 RPR_NAV_OFFSET_NEEDS_EVAL exists for.  An omitted offset stays
 NULL on the node and the kind's default is supplied at execution: 1 for
 PREV/NEXT, 0 for FIRST/LAST, and 1 for a compound outer offset.
+The column-reference rule holds for the argument as written; planning may
+still reduce it to a constant (IV-3).
 
 Step (4) also changes the expression it walks.  A PREV or NEXT whose
 argument is exactly one FIRST or LAST call is merged in place into one
@@ -559,6 +561,18 @@ downstream.  Uplevel Vars become Params, and the result comes back as an
 implicit-AND list.  A TargetEntry holds one expression, so the loop turns
 the list straight back into one with make_ands_explicit(); a condition that
 folds to TRUE is left as a constant TRUE.
+
+A navigation argument is preprocessed like the rest of the condition.
+Subquery pull-up, join alias expansion (IV-2) and virtual generated column
+expansion can put a constant there, as can a bound parameter under a custom
+plan, and eval_const_expressions() can reduce the argument to one by
+simplifying it, as with COALESCE(0, v) or a not-null proof, or by inlining a
+SQL function; it then folds it.  That can raise an error, such as a division
+by zero, that execution would never reach because the navigation has no row
+to land on and skips its argument (VII-3).  This is the plan-time evaluation
+the documentation describes under "Expression Evaluation Rules"
+(syntax.sgml), with the ways a column becomes a constant during planning,
+and it is accepted as a limitation.
 
 The NFA evaluates a DEFINE at most once per row and caches the result
 (VII-3), re-evaluating only the match_start dependent variables of VII-5.
@@ -1426,7 +1440,9 @@ evaluating it against the wrong row.  That makes the SET step's resnull
 a contract rather than a by-product: it has to be written on every path
 -- true when the target row is out of range, a definitive false when the
 row exists -- because resnull may still carry a stale value from an
-earlier evaluation of the same expression.
+earlier evaluation of the same expression.  The skip happens at execution
+only; planning may already have folded a constant part of the argument and
+raised there (IV-3).
 
 Compound navigation (PREV(FIRST()), NEXT(FIRST()), PREV(LAST()),
 NEXT(LAST())) is flattened by the parser into a single RPRNavExpr with

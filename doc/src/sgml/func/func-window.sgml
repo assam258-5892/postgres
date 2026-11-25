@@ -420,6 +420,9 @@ IGNORE NULLS
     include at least one column reference; an argument made only of
     constants or parameters, such as <literal>PREV(1)</literal>, is
     rejected.
+    As with any expression, a part of the <parameter>value</parameter>
+    argument may be evaluated when the query is planned, even if there is no
+    target row; see <xref linkend="syntax-express-eval"/>.
    </para>
 
   <note>
