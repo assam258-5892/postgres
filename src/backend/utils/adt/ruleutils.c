@@ -12904,8 +12904,13 @@ get_xmltable(TableFunc *tf, deparse_context *context, bool showimplicit)
 
 			if (coldefexpr != NULL)
 			{
+				/*
+				 * The parser coerces the default to the column type in
+				 * assignment context, so don't show that coercion: as an
+				 * explicit cast it would truncate instead of failing.
+				 */
 				appendStringInfoString(buf, " DEFAULT (");
-				get_rule_expr((Node *) coldefexpr, context, showimplicit);
+				get_rule_expr((Node *) coldefexpr, context, false);
 				appendStringInfoChar(buf, ')');
 			}
 			if (colexpr != NULL)

@@ -1481,16 +1481,12 @@ CREATE VIEW xmltableview_default AS
 SELECT pg_get_viewdef('xmltableview_default'::regclass, true) AS def \gset
 \echo :def
  SELECT a
-   FROM XMLTABLE(('/r'::text) PASSING ('<r/>'::xml) COLUMNS a character varying(3) DEFAULT (lower('ABCDEF'::text)::character varying(3)) PATH ('a'::text));
+   FROM XMLTABLE(('/r'::text) PASSING ('<r/>'::xml) COLUMNS a character varying(3) DEFAULT (lower('ABCDEF'::text)) PATH ('a'::text));
 CREATE VIEW xmltableview_default_re AS :def
 SELECT * FROM xmltableview_default;
 ERROR:  value too long for type character varying(3)
 SELECT * FROM xmltableview_default_re;
-  a  
------
- abc
-(1 row)
-
+ERROR:  value too long for type character varying(3)
 DROP VIEW xmltableview_default, xmltableview_default_re;
 SELECT * FROM XMLTABLE(XMLNAMESPACES(DEFAULT 'http://x.y'),
                       '/rows/row'
