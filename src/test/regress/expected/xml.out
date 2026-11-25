@@ -911,7 +911,6 @@ BEGIN
   END IF;
 END
 $$;
-WARNING:  XML name changed on read-back: <_x1F600_ a_x1F600_="1"/> became <_x005F_x1F600_ a_x005F_x1F600_="1"/>
 -- Text XPath expressions evaluation
 SELECT xpath('/value', data) FROM xmltest;
         xpath         

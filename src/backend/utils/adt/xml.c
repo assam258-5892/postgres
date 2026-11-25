@@ -2497,12 +2497,17 @@ map_xml_name_to_sql_identifier(const char *name)
 
 	for (p = name; *p; p += pg_mblen_cstr(p))
 	{
-		if (*p == '_' && *(p + 1) == 'x'
-			&& isxdigit((unsigned char) *(p + 2))
-			&& isxdigit((unsigned char) *(p + 3))
-			&& isxdigit((unsigned char) *(p + 4))
-			&& isxdigit((unsigned char) *(p + 5))
-			&& *(p + 6) == '_')
+		int			ndigits = 0;
+
+		/*
+		 * map_sql_identifier_to_xml_name() writes _x%04X_, which has five or
+		 * six hex digits for a code point above U+FFFF.
+		 */
+		if (*p == '_' && *(p + 1) == 'x')
+			while (ndigits < 6 && isxdigit((unsigned char) *(p + 2 + ndigits)))
+				ndigits++;
+
+		if (ndigits >= 4 && *(p + 2 + ndigits) == '_')
 		{
 			char		cbuf[MAX_UNICODE_EQUIVALENT_STRING + 1];
 			unsigned int u;
@@ -2510,7 +2515,7 @@ map_xml_name_to_sql_identifier(const char *name)
 			sscanf(p + 2, "%X", &u);
 			pg_unicode_to_server(u, (unsigned char *) cbuf);
 			appendStringInfoString(&buf, cbuf);
-			p += 6;
+			p += 2 + ndigits;
 		}
 		else
 			appendBinaryStringInfo(&buf, p, pg_mblen_cstr(p));
