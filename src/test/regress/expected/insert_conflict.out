@@ -1243,7 +1243,7 @@ CREATE OR REPLACE FUNCTION public.conflict_opclass_f(x text)
  LANGUAGE sql
 BEGIN ATOMIC
  INSERT INTO conflict_opclass (a)
-   VALUES (conflict_opclass_f.x) ON CONFLICT(a) DO NOTHING;
+   VALUES (conflict_opclass_f.x) ON CONFLICT(a text_ops) DO NOTHING;
 END
 
 select conflict_opclass_f('q');
@@ -1252,10 +1252,7 @@ CONTEXT:  SQL function "conflict_opclass_f" statement 1
 drop function conflict_opclass_f(text);
 :def ;
 select conflict_opclass_f('q');
- conflict_opclass_f 
---------------------
- 
-(1 row)
-
+ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
+CONTEXT:  SQL function "conflict_opclass_f" statement 1
 drop function conflict_opclass_f(text);
 drop table conflict_opclass;

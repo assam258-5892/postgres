@@ -10783,14 +10783,12 @@ get_rule_expr(Node *node, deparse_context *context,
 					appendStringInfo(buf, " COLLATE %s",
 									 generate_collation_name(iexpr->infercollid));
 
-				/* Add the operator class name, if not default */
+				/*
+				 * Add the operator class name, even if it is the default:
+				 * without one, the element matches an index of any opclass.
+				 */
 				if (iexpr->inferopclass)
-				{
-					Oid			inferopclass = iexpr->inferopclass;
-					Oid			inferopcinputtype = get_opclass_input_type(iexpr->inferopclass);
-
-					get_opclass_name(inferopclass, inferopcinputtype, buf);
-				}
+					get_opclass_name(iexpr->inferopclass, InvalidOid, buf);
 			}
 			break;
 
