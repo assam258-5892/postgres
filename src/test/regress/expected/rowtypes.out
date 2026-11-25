@@ -1705,17 +1705,13 @@ create function rowtypes_vc_f(rowtypes_vc) returns text
 create view rowtypes_vc_v as select rowtypes_vc_f(row(x)) as r from rowtypes_vc_t;
 select pg_get_viewdef('rowtypes_vc_v'::regclass, true) as def \gset
 \echo :def
- SELECT rowtypes_vc_f(ROW(x::character varying(2))) AS r
+ SELECT rowtypes_vc_f(ROW(x)) AS r
    FROM rowtypes_vc_t;
 create view rowtypes_vc_v_re as :def
 select * from rowtypes_vc_v;
 ERROR:  value too long for type character varying(2)
 select * from rowtypes_vc_v_re;
- r  
-----
- ab
-(1 row)
-
+ERROR:  value too long for type character varying(2)
 drop table rowtypes_vc_t cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to view rowtypes_vc_v

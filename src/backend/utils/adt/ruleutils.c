@@ -10264,6 +10264,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				int			i;
 				char	   *sep;
 				const char *joinalias;
+				bool		field_showimplicit;
 
 				/* whole-row reference to a JOIN USING alias? */
 				joinalias = get_rowexpr_join_alias(rowexpr, context);
@@ -10285,6 +10286,16 @@ get_rule_expr(Node *node, deparse_context *context,
 				}
 
 				/*
+				 * A row coerced implicitly to a named type got its fields
+				 * coerced by the parser with the same strength, and reading
+				 * the row back in the same place coerces them again.  Don't
+				 * show those coercions: as explicit casts, length coercions
+				 * would truncate instead of failing.
+				 */
+				field_showimplicit = !(rowexpr->row_typeid != RECORDOID &&
+									   rowexpr->row_format == COERCE_IMPLICIT_CAST);
+
+				/*
 				 * SQL99 allows "ROW" to be omitted when there is more than
 				 * one column, but for simplicity we always print it.
 				 */
@@ -10300,7 +10311,7 @@ get_rule_expr(Node *node, deparse_context *context,
 					{
 						appendStringInfoString(buf, sep);
 						/* Whole-row Vars need special treatment here */
-						get_rule_expr_toplevel(e, context, true);
+						get_rule_expr_toplevel(e, context, field_showimplicit);
 						sep = ", ";
 					}
 					i++;
