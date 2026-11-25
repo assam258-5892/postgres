@@ -343,6 +343,15 @@ SELECT JSON_OBJECT('foo' : '1' FORMAT JSON, 'bar' : 'baz' RETURNING json);
 
 DROP VIEW json_object_view;
 
+-- ENCODING of a RETURNING clause in its default format
+CREATE VIEW json_returning_encoding_view AS
+SELECT JSON_OBJECT('foo' : 1 RETURNING bytea FORMAT JSON ENCODING UTF8) AS o,
+       JSON_QUERY('{"a":1}' FORMAT JSON, '$' RETURNING bytea FORMAT JSON ENCODING UTF8) AS q;
+
+\sv json_returning_encoding_view
+
+DROP VIEW json_returning_encoding_view;
+
 SELECT to_json(a) AS a, JSON_OBJECTAGG(k : v WITH UNIQUE KEYS) OVER (ORDER BY k)
 FROM (VALUES (1,1), (2,2)) a(k,v);
 
