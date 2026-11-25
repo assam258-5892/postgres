@@ -1273,15 +1273,22 @@ select pg_describe_object(refclassid, refobjid, 0) from pg_depend
   where objid = 'conflict_dep_f'::regproc
     and refclassid in ('pg_collation'::regclass, 'pg_opclass'::regclass)
   order by 1;
- pg_describe_object 
---------------------
-(0 rows)
+                 pg_describe_object                  
+-----------------------------------------------------
+ collation conflict_coll
+ operator class conflict_ops for access method btree
+(2 rows)
 
 drop index conflict_dep_a, conflict_dep_b;
 drop collation conflict_coll;
+ERROR:  cannot drop collation conflict_coll because other objects depend on it
+DETAIL:  function conflict_dep_f(text) depends on collation conflict_coll
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 drop operator class conflict_ops using btree;
+ERROR:  cannot drop operator class conflict_ops for access method btree because other objects depend on it
+DETAIL:  function conflict_dep_f(text) depends on operator class conflict_ops for access method btree
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 drop function conflict_dep_f(text);
 drop table conflict_dep;
 drop collation if exists conflict_coll;
-NOTICE:  collation "conflict_coll" does not exist, skipping
 drop operator family if exists conflict_ops using btree;

@@ -2303,6 +2303,18 @@ find_expr_references_walker(Node *node,
 							   context->addrs);
 		/* fall through to examine arguments */
 	}
+	else if (IsA(node, InferenceElem))
+	{
+		InferenceElem *ielem = (InferenceElem *) node;
+
+		if (OidIsValid(ielem->infercollid))
+			add_object_address(CollationRelationId, ielem->infercollid, 0,
+							   context->addrs);
+		if (OidIsValid(ielem->inferopclass))
+			add_object_address(OperatorClassRelationId, ielem->inferopclass, 0,
+							   context->addrs);
+		/* fall through to examine arguments */
+	}
 	else if (IsA(node, SortGroupClause))
 	{
 		SortGroupClause *sgc = (SortGroupClause *) node;
