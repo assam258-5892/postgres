@@ -734,3 +734,19 @@ insert into parted_conflict values(0, 'cero', 1)
 
 drop table parted_conflict;
 drop function parted_conflict_update_func();
+
+-- a default opclass named in an inference element must be printed
+create table conflict_opclass (a text);
+create unique index on conflict_opclass (a text_pattern_ops);
+create function conflict_opclass_f(x text) returns void language sql
+begin atomic
+  insert into conflict_opclass values (x) on conflict (a text_ops) do nothing;
+end;
+select pg_get_functiondef('conflict_opclass_f'::regproc) as def \gset
+\echo :def
+select conflict_opclass_f('q');
+drop function conflict_opclass_f(text);
+:def ;
+select conflict_opclass_f('q');
+drop function conflict_opclass_f(text);
+drop table conflict_opclass;
