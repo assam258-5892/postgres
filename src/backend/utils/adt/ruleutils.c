@@ -10522,7 +10522,30 @@ get_rule_expr(Node *node, deparse_context *context,
 
 						if (needcomma)
 							appendStringInfoString(buf, ", ");
-						get_rule_expr(e, context, true);
+
+						/*
+						 * A name taken from a column is escaped more than one
+						 * given with AS, and AS cannot spell the former.  So
+						 * omit AS if the column we print yields the same
+						 * name.
+						 */
+						if (IsA(e, Var))
+						{
+							char	   *attname;
+
+							attname = get_variable((Var *) e, 0, false, context);
+							if (attname != NULL &&
+								strcmp(map_sql_identifier_to_xml_name(attname,
+																	  true,
+																	  false),
+									   argname) == 0)
+							{
+								needcomma = true;
+								continue;
+							}
+						}
+						else
+							get_rule_expr(e, context, true);
 						appendStringInfo(buf, " AS %s",
 										 quote_identifier(map_xml_name_to_sql_identifier(argname)));
 						needcomma = true;

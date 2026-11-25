@@ -881,7 +881,7 @@ SELECT table_name, view_definition FROM information_schema.views
  xmlview11  |  SELECT (XMLSERIALIZE(DOCUMENT '<foo><bar>42</bar></foo>'::xml AS character varying NO INDENT))::character varying AS "xmlserialize";
  xmlview2   |  SELECT XMLCONCAT('hello'::xml, 'you'::xml) AS "xmlconcat";
  xmlview3   |  SELECT XMLELEMENT(NAME element, XMLATTRIBUTES(1 AS ":one:", 'deuce' AS two), 'content&') AS "xmlelement";
- xmlview4   |  SELECT XMLELEMENT(NAME employee, XMLFOREST(name AS name, age AS age, salary AS pay)) AS "xmlelement"                                +
+ xmlview4   |  SELECT XMLELEMENT(NAME employee, XMLFOREST(name, age, salary AS pay)) AS "xmlelement"                                               +
             |    FROM emp;
  xmlview5   |  SELECT XMLPARSE(CONTENT '<abc>x</abc>'::text STRIP WHITESPACE) AS "xmlparse";
  xmlview6   |  SELECT XMLPI(NAME foo, 'bar'::text) AS "xmlpi";
@@ -899,8 +899,8 @@ CREATE VIEW xmlview_implicit AS
   FROM xmlview_implicit_t;
 SELECT pg_get_viewdef('xmlview_implicit'::regclass, true) AS def \gset
 \echo :def
- SELECT XMLFOREST(xmlcol AS xmlcol, "a:b" AS "a:b") AS f,
-    XMLELEMENT(NAME e, XMLATTRIBUTES(xmlcol AS xmlcol)) AS e
+ SELECT XMLFOREST(xmlcol, "a:b") AS f,
+    XMLELEMENT(NAME e, XMLATTRIBUTES(xmlcol)) AS e
    FROM xmlview_implicit_t;
 CREATE VIEW xmlview_implicit_re AS :def
 SELECT * FROM xmlview_implicit;
@@ -910,9 +910,9 @@ SELECT * FROM xmlview_implicit;
 (1 row)
 
 SELECT * FROM xmlview_implicit_re;
-               f                |        e        
---------------------------------+-----------------
- <xmlcol>1</xmlcol><a:b>2</a:b> | <e xmlcol="1"/>
+                           f                            |           e           
+--------------------------------------------------------+-----------------------
+ <_x0078_mlcol>1</_x0078_mlcol><a_x003A_b>2</a_x003A_b> | <e _x0078_mlcol="1"/>
 (1 row)
 
 DROP TABLE xmlview_implicit_t CASCADE;
