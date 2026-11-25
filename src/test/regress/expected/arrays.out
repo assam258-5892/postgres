@@ -3077,29 +3077,26 @@ create view arr_vector_v as
   select array[1, 2]::int2vector as a, array[1]::oidvector as o from arr_vector;
 select pg_get_viewdef('arr_vector_v'::regclass, true) as def \gset
 \echo :def
- SELECT ARRAY[1::smallint, 2::smallint] AS a,
-    ARRAY[1::oid] AS o
+ SELECT ARRAY[1::smallint, 2::smallint]::int2vector AS a,
+    ARRAY[1::oid]::oidvector AS o
    FROM arr_vector;
 create view arr_vector_v_re as :def
 select attname, atttypid::regtype from pg_attribute
   where attrelid = 'arr_vector_v_re'::regclass and attnum > 0 order by attnum;
  attname |  atttypid  
 ---------+------------
- a       | smallint[]
- o       | oid[]
+ a       | int2vector
+ o       | oidvector
 (2 rows)
 
 create table arr_vector_d (v int2vector default array[1, 2]::int2vector);
 select pg_get_expr(adbin, adrelid) as def from pg_attrdef
   where adrelid = 'arr_vector_d'::regclass \gset
 \echo :def
-ARRAY[(1)::smallint, (2)::smallint]
+ARRAY[(1)::smallint, (2)::smallint]::int2vector
 create table arr_vector_d2 (v int2vector default :def);
-ERROR:  column "v" is of type int2vector but default expression is of type smallint[]
-HINT:  You will need to rewrite or cast the expression.
 drop table arr_vector, arr_vector_d cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to view arr_vector_v
 drop cascades to view arr_vector_v_re
 drop table if exists arr_vector_d2;
-NOTICE:  table "arr_vector_d2" does not exist, skipping

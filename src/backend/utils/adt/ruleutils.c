@@ -10236,9 +10236,14 @@ get_rule_expr(Node *node, deparse_context *context,
 				/*
 				 * If the array isn't empty, we assume its elements are
 				 * coerced to the desired type.  If it's empty, though, we
-				 * need an explicit coercion to the array type.
+				 * need an explicit coercion to the array type, and likewise
+				 * if the array type is not the one the elements imply, as for
+				 * int2vector and oidvector.
 				 */
-				if (arrayexpr->elements == NIL)
+				if (arrayexpr->elements == NIL ||
+					(!arrayexpr->multidims &&
+					 get_array_type(arrayexpr->element_typeid) !=
+					 arrayexpr->array_typeid))
 					appendStringInfo(buf, "::%s",
 									 format_type_with_typemod(arrayexpr->array_typeid, -1));
 			}
