@@ -3085,6 +3085,30 @@ select pg_typeof(cleast_agg(variadic array[4.5,f1])) from int4_tbl;
  numeric
 (1 row)
 
+-- DISTINCT with variadic arguments must read back
+create view aggvariadicview as
+  select least_agg(distinct q1, q2) as l from int8_tbl;
+select pg_get_viewdef('aggvariadicview'::regclass, true) as def \gset
+\echo :def
+ SELECT least_agg(DISTINCT VARIADIC ARRAY[q1, q2]) AS l
+   FROM int8_tbl;
+create view aggvariadicview_re as :def
+ERROR:  syntax error at or near "VARIADIC"
+LINE 1: ... aggvariadicview_re as  SELECT least_agg(DISTINCT VARIADIC A...
+                                                             ^
+select * from aggvariadicview;
+         l         
+-------------------
+ -4567890123456789
+(1 row)
+
+select * from aggvariadicview_re;
+ERROR:  relation "aggvariadicview_re" does not exist
+LINE 1: select * from aggvariadicview_re;
+                      ^
+drop view aggvariadicview;
+drop view if exists aggvariadicview_re;
+NOTICE:  view "aggvariadicview_re" does not exist, skipping
 --
 -- Test SupportRequestSimplifyAggref code
 --

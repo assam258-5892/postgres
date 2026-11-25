@@ -1219,6 +1219,17 @@ select cleast_agg(4.5,f1) from int4_tbl;
 select cleast_agg(variadic array[4.5,f1]) from int4_tbl;
 select pg_typeof(cleast_agg(variadic array[4.5,f1])) from int4_tbl;
 
+-- DISTINCT with variadic arguments must read back
+create view aggvariadicview as
+  select least_agg(distinct q1, q2) as l from int8_tbl;
+select pg_get_viewdef('aggvariadicview'::regclass, true) as def \gset
+\echo :def
+create view aggvariadicview_re as :def
+select * from aggvariadicview;
+select * from aggvariadicview_re;
+drop view aggvariadicview;
+drop view if exists aggvariadicview_re;
+
 --
 -- Test SupportRequestSimplifyAggref code
 --
