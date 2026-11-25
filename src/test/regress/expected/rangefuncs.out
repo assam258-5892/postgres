@@ -2520,7 +2520,7 @@ select pg_get_viewdef('rangefuncs_unnest_v'::regclass, true) as def \gset
 \echo :def
  SELECT u.u
    FROM rangefuncs_unnest_t t,
-    LATERAL unnest(t.a, t.b) u(u);
+    LATERAL rangefuncs_unnest.unnest(t.a, t.b) u(u);
 create view rangefuncs_unnest_v_re as :def
 select * from rangefuncs_unnest_v;
  u  
@@ -2532,11 +2532,13 @@ select * from rangefuncs_unnest_v;
 (4 rows)
 
 select * from rangefuncs_unnest_v_re;
- u 
----
- 1
- 2
-(2 rows)
+ u  
+----
+ 11
+ 12
+ 21
+ 22
+(4 rows)
 
 reset search_path;
 drop schema rangefuncs_unnest cascade;

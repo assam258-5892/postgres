@@ -122,6 +122,7 @@ typedef struct
 	bool		varprefix;		/* true to print prefixes on Vars */
 	bool		colNamesVisible;	/* do we care about output column names? */
 	bool		inGroupBy;		/* deparsing GROUP BY clause? */
+	bool		inFromFunc;		/* deparsing the call of a FROM function? */
 	bool		varInOrderBy;	/* deparsing simple Var in ORDER BY? */
 	int			orderByResno;	/* resno of the sort key being printed, if it
 								 * is an output column, else 0; used only
@@ -481,6 +482,7 @@ static void get_rule_list_toplevel(List *lst, deparse_context *context,
 								   bool showimplicit);
 static void get_rule_expr_funccall(Node *node, deparse_context *context,
 								   bool showimplicit);
+static void get_from_func_expr(Node *node, deparse_context *context);
 static bool looks_like_function(Node *node);
 static void get_oper_expr(OpExpr *expr, deparse_context *context);
 static void get_func_expr(FuncExpr *expr, deparse_context *context,
@@ -550,7 +552,7 @@ static char *generate_qualified_relation_name(Oid relid);
 static char *generate_function_name(Oid funcid, int nargs,
 									List *argnames, Oid *argtypes,
 									bool has_variadic, bool *use_variadic_p,
-									bool inGroupBy);
+									bool inGroupBy, bool inFromFunc);
 static char *generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 static void add_cast_to(StringInfo buf, Oid typid);
 static char *generate_qualified_type_name(Oid typid);
@@ -1136,6 +1138,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 		context.indentLevel = PRETTYINDENT_STD;
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
+		context.inFromFunc = false;
 		context.varInOrderBy = false;
 		context.orderByResno = 0;
 		context.appendparents = NULL;
@@ -1148,7 +1151,7 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 	appendStringInfo(&buf, "EXECUTE FUNCTION %s(",
 					 generate_function_name(trigrec->tgfoid, 0,
 											NIL, NULL,
-											false, NULL, false));
+											false, NULL, false, false));
 
 	if (trigrec->tgnargs > 0)
 	{
@@ -3064,7 +3067,7 @@ pg_get_functiondef(PG_FUNCTION_ARGS)
 		appendStringInfo(&buf, " SUPPORT %s",
 						 generate_function_name(proc->prosupport, 1,
 												NIL, argtypes,
-												false, NULL, false));
+												false, NULL, false, false));
 	}
 
 	if (oldlen != buf.len)
@@ -3727,6 +3730,7 @@ deparse_expression_pretty(Node *expr, List *dpcontext,
 	context.indentLevel = startIndent;
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
+	context.inFromFunc = false;
 	context.varInOrderBy = false;
 	context.orderByResno = 0;
 	context.appendparents = NULL;
@@ -5658,6 +5662,7 @@ make_ruledef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc,
 		context.indentLevel = PRETTYINDENT_STD;
 		context.colNamesVisible = true;
 		context.inGroupBy = false;
+		context.inFromFunc = false;
 		context.varInOrderBy = false;
 		context.orderByResno = 0;
 		context.appendparents = NULL;
@@ -5851,6 +5856,7 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	context.indentLevel = startIndent;
 	context.colNamesVisible = colNamesVisible;
 	context.inGroupBy = false;
+	context.inFromFunc = false;
 	context.varInOrderBy = false;
 	context.orderByResno = 0;
 	context.appendparents = NULL;
@@ -7122,6 +7128,7 @@ get_window_frame_options_for_explain(int frameOptions,
 	context.indentLevel = 0;
 	context.colNamesVisible = true;
 	context.inGroupBy = false;
+	context.inFromFunc = false;
 	context.varInOrderBy = false;
 	context.orderByResno = 0;
 	context.appendparents = NULL;
@@ -11209,6 +11216,18 @@ get_rule_expr_funccall(Node *node, deparse_context *context,
 }
 
 /*
+ * get_from_func_expr - Parse back the call of a function RTE in FROM
+ */
+static void
+get_from_func_expr(Node *node, deparse_context *context)
+{
+	if (IsA(node, FuncExpr))
+		context->inFromFunc = true;
+	get_rule_expr_funccall(node, context, true);
+	context->inFromFunc = false;
+}
+
+/*
  * Helper function to identify node types that satisfy func_expr_windowless.
  * If in doubt, "false" is always a safe answer.
  */
@@ -11337,7 +11356,11 @@ get_func_expr(FuncExpr *expr, deparse_context *context,
 	int			nargs;
 	List	   *argnames;
 	bool		use_variadic;
+	bool		inFromFunc = context->inFromFunc;
 	ListCell   *l;
+
+	/* The flag applies to this call only, not to calls in its arguments */
+	context->inFromFunc = false;
 
 	/*
 	 * If the function call came from an implicit coercion, then just show the
@@ -11407,7 +11430,8 @@ get_func_expr(FuncExpr *expr, deparse_context *context,
 											argnames, argtypes,
 											expr->funcvariadic,
 											&use_variadic,
-											context->inGroupBy));
+											context->inGroupBy,
+											inFromFunc));
 	nargs = 0;
 	foreach(l, expr->args)
 	{
@@ -11477,7 +11501,7 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 		funcname = generate_function_name(aggref->aggfnoid, nargs, NIL,
 										  argtypes, aggref->aggvariadic,
 										  &use_variadic,
-										  context->inGroupBy);
+										  context->inGroupBy, false);
 
 	/* Print the aggregate name, schema-qualified if needed */
 	appendStringInfo(buf, "%s(%s", funcname,
@@ -11621,7 +11645,7 @@ get_windowfunc_expr_helper(WindowFunc *wfunc, deparse_context *context,
 	if (!funcname)
 		funcname = generate_function_name(wfunc->winfnoid, nargs, argnames,
 										  argtypes, false, NULL,
-										  context->inGroupBy);
+										  context->inGroupBy, false);
 
 	appendStringInfo(buf, "%s(", funcname);
 
@@ -13365,7 +13389,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				if (list_length(rte->functions) == 1 &&
 					(rtfunc1->funccolnames == NIL || !rte->funcordinality))
 				{
-					get_rule_expr_funccall(rtfunc1->funcexpr, context, true);
+					get_from_func_expr(rtfunc1->funcexpr, context);
 					/* we'll print the coldeflist below, if it has one */
 				}
 				else
@@ -13428,7 +13452,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 
 							if (funcno > 0)
 								appendStringInfoString(buf, ", ");
-							get_rule_expr_funccall(rtfunc->funcexpr, context, true);
+							get_from_func_expr(rtfunc->funcexpr, context);
 							if (rtfunc->funccolnames != NIL)
 							{
 								/* Reconstruct the column definition list */
@@ -13786,7 +13810,7 @@ get_tablesample_def(TableSampleClause *tablesample, deparse_context *context)
 	appendStringInfo(buf, " TABLESAMPLE %s (",
 					 generate_function_name(tablesample->tsmhandler, 1,
 											NIL, argtypes,
-											false, NULL, false));
+											false, NULL, false, false));
 
 	nargs = 0;
 	foreach(l, tablesample->args)
@@ -14214,14 +14238,15 @@ generate_qualified_relation_name(Oid relid)
  * the output.  For non-FuncExpr cases, has_variadic should be false and
  * use_variadic_p can be NULL.
  *
- * inGroupBy must be true if we're deparsing a GROUP BY clause.
+ * inGroupBy must be true if we're deparsing a GROUP BY clause, and
+ * inFromFunc if we're deparsing the call of a function in FROM.
  *
  * The result includes all necessary quoting and schema-prefixing.
  */
 static char *
 generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 					   bool has_variadic, bool *use_variadic_p,
-					   bool inGroupBy)
+					   bool inGroupBy, bool inFromFunc)
 {
 	char	   *result;
 	HeapTuple	proctup;
@@ -14254,6 +14279,13 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 		if (strcmp(proname, "cube") == 0 || strcmp(proname, "rollup") == 0)
 			force_qualify = true;
 	}
+
+	/*
+	 * In FROM, the parser turns an unqualified call of unnest() with more
+	 * than one argument into calls of the built-in unnest() on each one.
+	 */
+	if (inFromFunc && nargs > 1 && strcmp(proname, "unnest") == 0)
+		force_qualify = true;
 
 	/*
 	 * Determine whether VARIADIC should be printed.  We must do this first
